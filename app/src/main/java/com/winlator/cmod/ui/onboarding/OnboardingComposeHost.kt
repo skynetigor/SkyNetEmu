@@ -37,26 +37,16 @@ data class OnboardingComponent @JvmOverloads constructor(
     val inUse: Boolean = false,
     val bundled: Boolean = false,
     /** "stable" or "prerelease" from the registry; null shows no badge. */
-    val channel: String? = null,
-    /** An extra line under the status, e.g. download size and free space. */
-    val detail: String? = null,
-    /** The item cannot be downloaded right now; its detail line is shown as an error. */
-    val blocked: Boolean = false,
-    /** A running install of this item can be cancelled. */
-    val cancellable: Boolean = false
+    val channel: String? = null
 )
 
 interface OnboardingCallbacks {
     fun onInstall(componentId: String)
     fun onRemove(componentId: String)
-    /** Cancels the install of a component that is [OnboardingComponent.cancellable]. */
-    fun onCancel(componentId: String)
     fun onInstallBundledRuntime()
     fun onRemoveBundledRuntime()
     fun onBrowseLocal()
     fun onBrowseDriver()
-    /** Pick a zip with a Linux (glibc) Vulkan driver for Linux containers. */
-    fun onBrowseLinuxDriver()
     fun onRuntimeSelected(runtimeIdentifier: String)
     /** The user chose to skip installing Wine/Proton and creating the first container. */
     fun onSkipSetup()

@@ -33,13 +33,6 @@ import com.winlator.cmod.core.OpenGLDriverDefaults;
 import com.winlator.cmod.core.ProtonPackageManager;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
-import com.winlator.cmod.linux.LinuxDriverManager;
-import com.winlator.cmod.linux.LinuxEmulator;
-import com.winlator.cmod.linux.LinuxRootfs;
-import com.winlator.cmod.linux.LinuxRuntime;
-import com.winlator.cmod.linux.LinuxRuntimeCatalog;
-import com.winlator.cmod.linux.LinuxRuntimeInstallTask;
-import com.winlator.cmod.linux.LinuxRuntimeInstaller;
 import com.winlator.cmod.fexcore.FEXCorePreset;
 import com.winlator.cmod.ui.onboarding.OnboardingCallbacks;
 import com.winlator.cmod.ui.onboarding.OnboardingComponent;
@@ -82,27 +75,16 @@ public class OnboardingActivity extends AppCompatActivity {
             ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER) != null
                     ? ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER).title
                     : ProtonPackageManager.DEFAULT_IDENTIFIER;
-    private static final String LINUX_RUNTIME_PREFIX = "linux-runtime:";
     private static final int REQUEST_STORAGE = 820;
     private static final int REQUEST_NOTIFICATIONS = 821;
     private static final int REQUEST_LOCAL_COMPONENT = 822;
     private static final int REQUEST_ALL_FILES = 823;
     private static final int REQUEST_LOCAL_DRIVER = 824;
-    private static final int REQUEST_LOCAL_LINUX_DRIVER = 825;
-    private static final String LINUX_DRIVER_PREFIX = "linux-driver:";
-    private static final String LINUX_EMULATOR_PREFIX = "linux-emulator:";
-    private static final String LINUX_ROOTFS_PREFIX = "linux-rootfs:";
-    /** A driver of the registry that is not installed yet (an installed one is LINUX_DRIVER_PREFIX + its folder id). */
-    private static final String LINUX_DRIVER_DOWNLOAD_PREFIX = "linux-driver-download:";
 
     private final OkHttpClient http = new OkHttpClient();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ArrayList<ComponentItem> catalog = new ArrayList<>();
     private final ArrayList<RemoteDriverCatalog.Entry> remoteDrivers = new ArrayList<>();
-    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRuntimes = new ArrayList<>();
-    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxEmulators = new ArrayList<>();
-    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRootfs = new ArrayList<>();
-    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxDrivers = new ArrayList<>();
 
     private SharedPreferences preferences;
     private ContentsManager contentsManager;
@@ -115,7 +97,7 @@ public class OnboardingActivity extends AppCompatActivity {
     private boolean finishing;
     /** Set when the user skipped the Wine/Proton install and first container; finishing then creates neither. */
     private boolean skipSetup;
-    /** How the first container is to be made when it is not by the Windows pages: "linux", "game" or "import". */
+    /** How the first container is made when it is not the Windows setup: "game", "import" or null (see the start screen). */
     private String pendingStart;
     private String selectedInitialWine;
     private String pendingInstallType;
@@ -154,18 +136,6 @@ public class OnboardingActivity extends AppCompatActivity {
                         ComponentItem item = findComponent(componentId);
                         if (item != null) installComponent(item);
                         else if (componentId.startsWith("remote-driver:")) installRemoteDriver(componentId);
-                        else if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) installLinuxRuntime(componentId);
-                        else if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) installLinuxEmulator(componentId);
-                        else if (componentId.startsWith(LINUX_ROOTFS_PREFIX)) installLinuxRootfs(componentId);
-                        else if (componentId.startsWith(LINUX_DRIVER_DOWNLOAD_PREFIX)) installLinuxDriver(componentId);
-                    }
-
-                    @Override
-                    public void onCancel(@NonNull String componentId) {
-                        if (componentId.startsWith(LINUX_RUNTIME_PREFIX) || componentId.startsWith(LINUX_EMULATOR_PREFIX)
-                                || componentId.startsWith(LINUX_ROOTFS_PREFIX)) {
-                            LinuxRuntimeInstallTask.cancel();
-                        }
                     }
 
                     @Override
@@ -197,14 +167,6 @@ public class OnboardingActivity extends AppCompatActivity {
                         intent.addCategory(Intent.CATEGORY_OPENABLE);
                         intent.setType("*/*");
                         startActivityForResult(intent, REQUEST_LOCAL_DRIVER);
-                    }
-
-                    @Override
-                    public void onBrowseLinuxDriver() {
-                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                        intent.addCategory(Intent.CATEGORY_OPENABLE);
-                        intent.setType("*/*");
-                        startActivityForResult(intent, REQUEST_LOCAL_LINUX_DRIVER);
                     }
 
                     @Override
@@ -254,21 +216,7 @@ public class OnboardingActivity extends AppCompatActivity {
         syncComposeCatalog();
         loadCatalog();
         loadRemoteDrivers();
-        loadLinuxRuntimes();
-        loadLinuxEmulators();
         if (!coreReady) startCoreInstallation();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        LinuxRuntimeInstallTask.setListener(linuxInstallListener);
-    }
-
-    @Override
-    protected void onPause() {
-        LinuxRuntimeInstallTask.setListener(null);
-        super.onPause();
     }
 
     @Override
@@ -533,114 +481,6 @@ public class OnboardingActivity extends AppCompatActivity {
                 ));
             }
         }
-        Set<String> catalogRuntimeIds = new HashSet<>();
-        synchronized (linuxRuntimes) {
-            for (LinuxRuntimeCatalog.Entry runtime : linuxRuntimes) {
-                catalogRuntimeIds.add(runtime.id);
-                boolean installed = LinuxRuntime.isInstalled(this, runtime.id);
-                String detail = null;
-                boolean blocked = false;
-                if (!installed) {
-                    long needed = LinuxRuntimeInstaller.requiredBytes(runtime);
-                    long free = getFilesDir().getUsableSpace();
-                    blocked = runtime.size > 0 && free < needed;
-                    detail = formatSize(runtime.size) + " download \u00b7 needs ~" + formatSize(needed)
-                            + " free \u00b7 " + formatSize(free) + " free"
-                            + (LinuxRuntimeInstaller.hasPartial(this, runtime) ? " \u00b7 partly downloaded, will resume" : "");
-                }
-                ui.add(new OnboardingComponent(
-                        LINUX_RUNTIME_PREFIX + runtime.id, "Linux Runtime", runtime.name, installed, false, installed,
-                        null, LinuxRuntime.containerUsing(this, runtime.id) != null, false, runtime.channel,
-                        detail, blocked, true
-                ));
-            }
-        }
-        for (LinuxRuntime.Installed runtime : LinuxRuntime.listInstalled(this)) {
-            if (catalogRuntimeIds.contains(runtime.id)) continue;
-            ui.add(new OnboardingComponent(
-                    LINUX_RUNTIME_PREFIX + runtime.id, "Linux Runtime", runtime.name, true, false, true,
-                    null, LinuxRuntime.containerUsing(this, runtime.id) != null, false, null,
-                    null, false, true
-            ));
-        }
-        Set<String> catalogEmulatorIds = new HashSet<>();
-        synchronized (linuxEmulators) {
-            for (LinuxRuntimeCatalog.Entry emulator : linuxEmulators) {
-                catalogEmulatorIds.add(emulator.id);
-                boolean installed = LinuxEmulator.isInstalled(this, emulator.id);
-                String detail = null;
-                boolean blocked = false;
-                if (!installed) {
-                    long needed = LinuxRuntimeInstaller.requiredBytes(emulator);
-                    long free = getFilesDir().getUsableSpace();
-                    blocked = emulator.size > 0 && free < needed;
-                    detail = formatSize(emulator.size) + " download \u00b7 needs ~" + formatSize(needed)
-                            + " free \u00b7 " + formatSize(free) + " free"
-                            + (LinuxRuntimeInstaller.hasPartial(this, emulator) ? " \u00b7 partly downloaded, will resume" : "");
-                }
-                ui.add(new OnboardingComponent(
-                        LINUX_EMULATOR_PREFIX + emulator.id, "Linux Emulator", emulator.name, installed, false, installed,
-                        null, LinuxEmulator.containerUsing(this, emulator.id) != null, false, emulator.channel,
-                        detail, blocked, true
-                ));
-            }
-        }
-        for (LinuxEmulator.Installed emulator : LinuxEmulator.list(this)) {
-            if (catalogEmulatorIds.contains(emulator.id)) continue;
-            ui.add(new OnboardingComponent(
-                    LINUX_EMULATOR_PREFIX + emulator.id, "Linux Emulator", emulator.name, true, false, true,
-                    null, LinuxEmulator.containerUsing(this, emulator.id) != null, false, null,
-                    null, false, true
-            ));
-        }
-        Set<String> catalogRootfsIds = new HashSet<>();
-        synchronized (linuxRootfs) {
-            for (LinuxRuntimeCatalog.Entry rootfs : linuxRootfs) {
-                catalogRootfsIds.add(rootfs.id);
-                boolean installed = LinuxRootfs.isInstalled(this, rootfs.id);
-                String detail = null;
-                boolean blocked = false;
-                if (!installed) {
-                    long needed = LinuxRuntimeInstaller.requiredBytes(rootfs);
-                    long free = getFilesDir().getUsableSpace();
-                    blocked = rootfs.size > 0 && free < needed;
-                    detail = formatSize(rootfs.size) + " download \u00b7 needs ~" + formatSize(needed)
-                            + " free \u00b7 " + formatSize(free) + " free"
-                            + (LinuxRuntimeInstaller.hasPartial(this, rootfs) ? " \u00b7 partly downloaded, will resume" : "");
-                }
-                ui.add(new OnboardingComponent(
-                        LINUX_ROOTFS_PREFIX + rootfs.id, "Linux Root Filesystem", rootfs.name, installed, false, installed,
-                        null, LinuxRootfs.containerUsing(this, rootfs.id) != null, false, rootfs.channel,
-                        detail, blocked, true
-                ));
-            }
-        }
-        for (LinuxRootfs.Installed rootfs : LinuxRootfs.list(this)) {
-            if (catalogRootfsIds.contains(rootfs.id)) continue;
-            ui.add(new OnboardingComponent(
-                    LINUX_ROOTFS_PREFIX + rootfs.id, "Linux Root Filesystem", rootfs.name, true, false, true,
-                    null, LinuxRootfs.containerUsing(this, rootfs.id) != null, false, null,
-                    null, false, true
-            ));
-        }
-        Set<String> installedDriverNames = new HashSet<>();
-        for (LinuxDriverManager.Installed driver : LinuxDriverManager.list(this)) {
-            installedDriverNames.add(driver.name);
-            ui.add(new OnboardingComponent(
-                    LINUX_DRIVER_PREFIX + driver.id, "Linux Driver", driver.label(), true, false, true,
-                    null, LinuxDriverManager.containerUsing(this, driver.id) != null, false
-            ));
-        }
-        synchronized (linuxDrivers) {
-            for (LinuxRuntimeCatalog.Entry driver : linuxDrivers) {
-                if (installedDriverNames.contains(driver.name)) continue;
-                ui.add(new OnboardingComponent(
-                        LINUX_DRIVER_DOWNLOAD_PREFIX + driver.id, "Linux Driver", driver.name, false, false, false,
-                        null, false, false, driver.channel,
-                        formatSizeSmall(driver.size) + " download", false, false
-                ));
-            }
-        }
         composeController.setComponents(ui);
         refreshBundledRuntimeState();
     }
@@ -814,348 +654,7 @@ public class OnboardingActivity extends AppCompatActivity {
         return null;
     }
 
-    private String formatSize(long bytes) {
-        if (bytes >= (1L << 30)) return String.format(Locale.US, "%.1f GB", bytes / (double)(1L << 30));
-        return (bytes >> 20) + " MB";
-    }
-
-    /** The component id of a Linux package: emulators and runtimes share the one install task. */
-    private String linuxComponentId(String packageId) {
-        synchronized (linuxEmulators) {
-            for (LinuxRuntimeCatalog.Entry emulator : linuxEmulators) {
-                if (emulator.id.equals(packageId)) return LINUX_EMULATOR_PREFIX + packageId;
-            }
-        }
-        synchronized (linuxRootfs) {
-            for (LinuxRuntimeCatalog.Entry rootfs : linuxRootfs) {
-                if (rootfs.id.equals(packageId)) return LINUX_ROOTFS_PREFIX + packageId;
-            }
-        }
-        return LINUX_RUNTIME_PREFIX + packageId;
-    }
-
-    private final LinuxRuntimeInstallTask.Listener linuxInstallListener = new LinuxRuntimeInstallTask.Listener() {
-        @Override
-        public void onProgress(String id, LinuxRuntimeInstaller.Phase phase, int percent) {
-            if (composeController == null) return;
-            installBusy = true;
-            composeController.setInstallBusy(linuxComponentId(id), true);
-            switch (phase) {
-                case DOWNLOAD:
-                    composeController.updateInstallProgress("Downloading", percent * 80 / 100);
-                    break;
-                case VERIFY:
-                    composeController.updateInstallProgress("Verifying", 80 + percent * 5 / 100);
-                    break;
-                default:
-                    composeController.updateInstallProgress("Unpacking", 85 + percent * 15 / 100);
-            }
-        }
-
-        @Override
-        public void onFinished(String id, String error) {
-            if (composeController == null) return;
-            installBusy = false;
-            composeController.setInstallBusy(null, false);
-            syncComposeCatalog();
-            if (error != null && !LinuxRuntimeInstaller.CANCELLED.equals(error)) {
-                Toast.makeText(OnboardingActivity.this, error, Toast.LENGTH_LONG).show();
-            }
-        }
-    };
-
-    private void loadLinuxRuntimes() {
-        io.execute(() -> {
-            List<LinuxRuntimeCatalog.Entry> loaded = LinuxRuntimeCatalog.fetch();
-            if (loaded == null) return;
-            synchronized (linuxRuntimes) {
-                linuxRuntimes.clear();
-                linuxRuntimes.addAll(loaded);
-            }
-            runOnUiThread(this::syncComposeCatalog);
-        });
-    }
-
-    private void installLinuxRuntime(String componentId) {
-        if (installBusy) return;
-        LinuxRuntimeCatalog.Entry found = null;
-        synchronized (linuxRuntimes) {
-            for (LinuxRuntimeCatalog.Entry runtime : linuxRuntimes) {
-                if ((LINUX_RUNTIME_PREFIX + runtime.id).equals(componentId)) found = runtime;
-            }
-        }
-        if (found == null) return;
-        if (LinuxRuntimeInstallTask.start(this, found)) {
-            installBusy = true;
-            composeController.setInstallBusy(componentId, true);
-            composeController.updateInstallProgress("Starting", 0);
-        }
-    }
-
-    private void requestRemoveLinuxRuntime(String componentId) {
-        String id = componentId.substring(LINUX_RUNTIME_PREFIX.length());
-        String using = LinuxRuntime.containerUsing(this, id);
-        if (using != null) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Runtime is in use")
-                    .setMessage("This Linux runtime cannot be deleted because it is used by " + using + ".")
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Delete Linux runtime?")
-                .setMessage("The installed runtime files will be removed. You can download it again later.")
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (d, w) -> {
-                    if (installBusy) return;
-                    installBusy = true;
-                    composeController.setInstallBusy(componentId, true);
-                    io.execute(() -> {
-                        LinuxRuntime.remove(this, id);
-                        runOnUiThread(() -> {
-                            installBusy = false;
-                            composeController.setInstallBusy(null, false);
-                            syncComposeCatalog();
-                        });
-                    });
-                })
-                .show();
-    }
-
-    private void loadLinuxEmulators() {
-        io.execute(() -> {
-            List<LinuxRuntimeCatalog.Entry> drivers = LinuxRuntimeCatalog.fetchDrivers();
-            if (drivers != null) {
-                synchronized (linuxDrivers) {
-                    linuxDrivers.clear();
-                    linuxDrivers.addAll(drivers);
-                }
-            }
-            List<LinuxRuntimeCatalog.Entry> loaded = LinuxRuntimeCatalog.fetchEmulators();
-            if (loaded != null) {
-                synchronized (linuxEmulators) {
-                    linuxEmulators.clear();
-                    linuxEmulators.addAll(loaded);
-                }
-            }
-            List<LinuxRuntimeCatalog.Entry> rootfsLoaded = LinuxRuntimeCatalog.fetchRootfs();
-            if (rootfsLoaded != null) {
-                synchronized (linuxRootfs) {
-                    linuxRootfs.clear();
-                    linuxRootfs.addAll(rootfsLoaded);
-                }
-            }
-            android.util.Log.d("OnboardingActivity", "Linux catalog: " + (drivers == null ? "no" : drivers.size()) + " drivers, "
-                    + (loaded == null ? "no" : loaded.size()) + " emulators");
-            if (drivers != null || loaded != null || rootfsLoaded != null) runOnUiThread(this::syncComposeCatalog);
-        });
-    }
-
-    private static String formatSizeSmall(long bytes) {
-        if (bytes >= (1L << 20)) return String.format(Locale.US, "%.1f MB", bytes / (double)(1L << 20));
-        return Math.max(1, bytes >> 10) + " KB";
-    }
-
-    /** Downloads a driver zip of the registry, checks its SHA-256 and installs it like a driver imported from a file. */
-    private void installLinuxDriver(String componentId) {
-        if (installBusy) return;
-        LinuxRuntimeCatalog.Entry found = null;
-        synchronized (linuxDrivers) {
-            for (LinuxRuntimeCatalog.Entry driver : linuxDrivers) {
-                if ((LINUX_DRIVER_DOWNLOAD_PREFIX + driver.id).equals(componentId)) found = driver;
-            }
-        }
-        if (found == null) return;
-        final LinuxRuntimeCatalog.Entry entry = found;
-        installBusy = true;
-        composeController.setInstallBusy(componentId, true);
-        composeController.updateInstallProgress("Preparing " + entry.name, 0);
-        io.execute(() -> {
-            File archive = new File(getCacheDir(), "linux-driver-" + System.nanoTime() + ".zip");
-            String error = null;
-            try {
-                if (!download(entry.url, archive, entry.name)) {
-                    error = "Download failed";
-                }
-                else if (!entry.sha256.equalsIgnoreCase(sha256Of(archive))) {
-                    error = "Checksum mismatch";
-                }
-                else {
-                    postInstallProgress("Installing " + entry.name, -1);
-                    error = LinuxDriverManager.install(this, Uri.fromFile(archive), entry.id + ".zip").error;
-                }
-            }
-            catch (Exception e) {
-                error = "Unable to install " + entry.name;
-            }
-            finally {
-                archive.delete();
-            }
-            final String message = error;
-            runOnUiThread(() -> {
-                installBusy = false;
-                composeController.setInstallBusy(null, false);
-                syncComposeCatalog();
-                if (message != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-            });
-        });
-    }
-
-    private static String sha256Of(File file) throws Exception {
-        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-        try (InputStream in = new java.io.FileInputStream(file)) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);
-        }
-        StringBuilder hex = new StringBuilder();
-        for (byte b : digest.digest()) hex.append(String.format("%02x", b));
-        return hex.toString();
-    }
-
-    private void installLinuxEmulator(String componentId) {
-        if (installBusy) return;
-        LinuxRuntimeCatalog.Entry found = null;
-        synchronized (linuxEmulators) {
-            for (LinuxRuntimeCatalog.Entry emulator : linuxEmulators) {
-                if ((LINUX_EMULATOR_PREFIX + emulator.id).equals(componentId)) found = emulator;
-            }
-        }
-        if (found == null) return;
-        if (LinuxRuntimeInstallTask.start(this, found)) {
-            installBusy = true;
-            composeController.setInstallBusy(componentId, true);
-            composeController.updateInstallProgress("Starting", 0);
-        }
-    }
-
-    private void installLinuxRootfs(String componentId) {
-        if (installBusy) return;
-        LinuxRuntimeCatalog.Entry found = null;
-        synchronized (linuxRootfs) {
-            for (LinuxRuntimeCatalog.Entry rootfs : linuxRootfs) {
-                if ((LINUX_ROOTFS_PREFIX + rootfs.id).equals(componentId)) found = rootfs;
-            }
-        }
-        if (found == null) return;
-        if (LinuxRuntimeInstallTask.start(this, found)) {
-            installBusy = true;
-            composeController.setInstallBusy(componentId, true);
-            composeController.updateInstallProgress("Starting", 0);
-        }
-    }
-
-    private void requestRemoveLinuxRootfs(String componentId) {
-        String id = componentId.substring(LINUX_ROOTFS_PREFIX.length());
-        String using = LinuxRootfs.containerUsing(this, id);
-        if (using != null) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Root filesystem is in use")
-                    .setMessage("This root filesystem cannot be deleted because it is used by " + using + ".")
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Delete root filesystem?")
-                .setMessage("The installed files will be removed. You can download it again later.")
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (d, w) -> {
-                    if (installBusy) return;
-                    installBusy = true;
-                    composeController.setInstallBusy(componentId, true);
-                    io.execute(() -> {
-                        LinuxRootfs.remove(this, id);
-                        runOnUiThread(() -> {
-                            installBusy = false;
-                            composeController.setInstallBusy(null, false);
-                            syncComposeCatalog();
-                        });
-                    });
-                })
-                .show();
-    }
-
-    private void requestRemoveLinuxEmulator(String componentId) {
-        String id = componentId.substring(LINUX_EMULATOR_PREFIX.length());
-        String using = LinuxEmulator.containerUsing(this, id);
-        if (using != null) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Emulator is in use")
-                    .setMessage("This emulator cannot be deleted because it is used by " + using + ".")
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Delete emulator?")
-                .setMessage("The installed files will be removed. You can download it again later.")
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (d, w) -> {
-                    if (installBusy) return;
-                    installBusy = true;
-                    composeController.setInstallBusy(componentId, true);
-                    io.execute(() -> {
-                        LinuxEmulator.remove(this, id);
-                        runOnUiThread(() -> {
-                            installBusy = false;
-                            composeController.setInstallBusy(null, false);
-                            syncComposeCatalog();
-                        });
-                    });
-                })
-                .show();
-    }
-
-    private void requestRemoveLinuxDriver(String componentId) {
-        String id = componentId.substring(LINUX_DRIVER_PREFIX.length());
-        String using = LinuxDriverManager.containerUsing(this, id);
-        if (using != null) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Driver is in use")
-                    .setMessage("This Linux driver cannot be deleted because it is used by " + using + ".")
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Delete Linux driver?")
-                .setMessage("The driver files will be removed.")
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (d, w) -> {
-                    if (installBusy) return;
-                    installBusy = true;
-                    composeController.setInstallBusy(componentId, true);
-                    io.execute(() -> {
-                        LinuxDriverManager.remove(this, id);
-                        runOnUiThread(() -> {
-                            installBusy = false;
-                            composeController.setInstallBusy(null, false);
-                            syncComposeCatalog();
-                        });
-                    });
-                })
-                .show();
-    }
-
     private void requestRemoveComponent(String componentId) {
-        if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) {
-            requestRemoveLinuxEmulator(componentId);
-            return;
-        }
-        if (componentId.startsWith(LINUX_ROOTFS_PREFIX)) {
-            requestRemoveLinuxRootfs(componentId);
-            return;
-        }
-        if (componentId.startsWith(LINUX_DRIVER_PREFIX)) {
-            requestRemoveLinuxDriver(componentId);
-            return;
-        }
-        if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) {
-            requestRemoveLinuxRuntime(componentId);
-            return;
-        }
         if (componentId.startsWith("adrenotools:")) {
             new AlertDialog.Builder(this)
                     .setTitle("Delete driver?")
@@ -1345,22 +844,6 @@ public class OnboardingActivity extends AppCompatActivity {
                     if (installed == null || installed.isEmpty()) {
                         Toast.makeText(this, "Unable to install the driver.", Toast.LENGTH_LONG).show();
                     }
-                });
-            });
-        } else if (requestCode == REQUEST_LOCAL_LINUX_DRIVER && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
-            if (installBusy) return;
-            installBusy = true;
-            composeController.setInstallBusy("linux-driver-local", true);
-            Uri uri = data.getData();
-            String displayName = localDisplayName(uri);
-            composeController.updateInstallProgress("Installing " + displayName, -1);
-            io.execute(() -> {
-                LinuxDriverManager.Result result = LinuxDriverManager.install(this, uri, displayName);
-                runOnUiThread(() -> {
-                    installBusy = false;
-                    composeController.setInstallBusy(null, false);
-                    syncComposeCatalog();
-                    if (result.error != null) Toast.makeText(this, result.error, Toast.LENGTH_LONG).show();
                 });
             });
         } else if (requestCode == REQUEST_ALL_FILES) {

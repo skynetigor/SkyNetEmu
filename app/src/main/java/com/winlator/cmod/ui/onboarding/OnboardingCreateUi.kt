@@ -29,7 +29,6 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SportsEsports
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,7 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /** What the first container is made from; the start screen offers one big button for each. */
-internal enum class ContainerStart { Windows, Linux, Game, Import }
+internal enum class ContainerStart { Windows, Game, Import }
 
 private class StartOption(
     val start: ContainerStart,
@@ -65,12 +64,6 @@ private val startOptions = listOf(
         "A Windows environment: Wine or Proton with DXVK and VKD3D, and Box64 or FEX to run x86 code on the phone.",
         "Most PC games and .exe programs. The best-supported choice, so start here if unsure."
     ) { MaterialTheme.colorScheme.primary },
-    StartOption(
-        ContainerStart.Linux, Icons.Outlined.Terminal,
-        "Linux system",
-        "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver and x86 games through Box64 or FEX.",
-        "Games that have a Linux build, such as BeamNG.drive. Steam has its own place in Settings."
-    ) { MaterialTheme.colorScheme.tertiary },
     StartOption(
         ContainerStart.Game, Icons.Outlined.SportsEsports,
         "Set up for a game",

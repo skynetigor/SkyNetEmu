@@ -502,7 +502,7 @@ public class FileManagerFragment extends Fragment {
     }
 
     private void handleDriveCSelection() {
-        ArrayList<Container> containers = containerManager.getWineContainers();
+        ArrayList<Container> containers = containerManager.getContainers();
         if (containers == null || containers.isEmpty()) {
             new AlertDialog.Builder(getContext())
                     .setTitle("No Containers")
@@ -609,7 +609,7 @@ public class FileManagerFragment extends Fragment {
     }
 
     private void performContainerAction(File file, ContainerAction action) {
-        ArrayList<Container> containers = containerManager.getWineContainers();
+        ArrayList<Container> containers = containerManager.getContainers();
         if (containers == null || containers.isEmpty()) {
             Toast.makeText(getContext(), "Create a container first!", Toast.LENGTH_SHORT).show();
             return;
