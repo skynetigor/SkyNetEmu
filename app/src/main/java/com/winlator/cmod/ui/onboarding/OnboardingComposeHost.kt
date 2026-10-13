@@ -1,0 +1,366 @@
+package com.winlator.cmod.ui.onboarding
+
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.winlator.cmod.box64.Box64Preset
+import com.winlator.cmod.container.Container
+import com.winlator.cmod.container.ContainerManager
+import com.winlator.cmod.contents.ContentsManager
+import com.winlator.cmod.core.DefaultVersion
+import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.core.WineInfo
+import com.winlator.cmod.fexcore.FEXCorePreset
+import com.winlator.cmod.ui.applyAppFullscreen
+import com.winlator.cmod.ui.settings.cleanContainerEnvironment
+import com.winlator.cmod.ui.theme.WinZTheme
+import org.json.JSONObject
+
+@Immutable
+data class OnboardingComponent @JvmOverloads constructor(
+    val id: String,
+    val type: String,
+    val name: String,
+    val installed: Boolean,
+    val recommended: Boolean,
+    val removable: Boolean,
+    val runtimeIdentifier: String? = null,
+    val inUse: Boolean = false,
+    val bundled: Boolean = false,
+    /** "stable" or "prerelease" from the registry; null shows no badge. */
+    val channel: String? = null,
+    /** An extra line under the status, e.g. download size and free space. */
+    val detail: String? = null,
+    /** The item cannot be downloaded right now; its detail line is shown as an error. */
+    val blocked: Boolean = false,
+    /** A running install of this item can be cancelled. */
+    val cancellable: Boolean = false
+)
+
+interface OnboardingCallbacks {
+    fun onInstall(componentId: String)
+    fun onRemove(componentId: String)
+    /** Cancels the install of a component that is [OnboardingComponent.cancellable]. */
+    fun onCancel(componentId: String)
+    fun onInstallBundledRuntime()
+    fun onRemoveBundledRuntime()
+    fun onBrowseLocal()
+    fun onBrowseDriver()
+    /** Pick a zip with a Linux (glibc) Vulkan driver for Linux containers. */
+    fun onBrowseLinuxDriver()
+    fun onRuntimeSelected(runtimeIdentifier: String)
+    /** The user chose to skip installing Wine/Proton and creating the first container. */
+    fun onSkipSetup()
+    /** A first container made another way than the Windows setup of the next pages: opened in the app once the permissions are granted. */
+    fun onChooseStart(start: String)
+    /** The gear on the start screen: leave the setup and open the app's settings. */
+    fun onOpenSettings()
+    fun onRequestPermissions()
+    fun onRetryCore()
+    fun onCloseComponents()
+}
+
+class OnboardingComposeController internal constructor(
+    private val coreReady: MutableState<Boolean>,
+    private val coreProgress: MutableState<Int>,
+    private val bundledWineInstalled: MutableState<Boolean>,
+    private val bundledWineInUse: MutableState<Boolean>,
+    private val components: MutableState<List<OnboardingComponent>>,
+    private val installingId: MutableState<String?>,
+    private val installingLabel: MutableState<String?>,
+    private val installingProgress: MutableState<Int>,
+    private val initialContainerPreparing: MutableState<Boolean>,
+    private val initialContainerReady: MutableState<Boolean>
+) {
+    fun updateCore(ready: Boolean, progress: Int) {
+        coreReady.value = ready
+        coreProgress.value = progress.coerceIn(0, 100)
+    }
+
+    fun updateBundledRuntime(installed: Boolean, inUse: Boolean) {
+        bundledWineInstalled.value = installed
+        bundledWineInUse.value = inUse
+    }
+
+    fun setComponents(value: List<OnboardingComponent>) {
+        components.value = value.toList()
+    }
+
+    fun setInstallBusy(componentId: String?, busy: Boolean) {
+        installingId.value = if (busy) componentId else null
+        if (busy) {
+            installingLabel.value = null
+            installingProgress.value = -1
+        } else {
+            installingLabel.value = null
+            installingProgress.value = -1
+        }
+    }
+
+    fun updateInstallProgress(label: String?, progress: Int) {
+        installingLabel.value = label
+        installingProgress.value = progress.coerceIn(-1, 100)
+    }
+
+    fun updateInitialContainer(preparing: Boolean, ready: Boolean) {
+        initialContainerPreparing.value = preparing
+        initialContainerReady.value = ready
+    }
+}
+
+object OnboardingComposeHost {
+    @JvmStatic
+    fun attach(
+        activity: ComponentActivity,
+        initialCoreReady: Boolean,
+        initialCoreProgress: Int,
+        initialBundledWineInstalled: Boolean,
+        initialBundledWineInUse: Boolean,
+        componentManagerMode: Boolean,
+        callbacks: OnboardingCallbacks
+    ): OnboardingComposeController {
+        val ready = mutableStateOf(initialCoreReady)
+        val progress = mutableStateOf(initialCoreProgress)
+        val bundledInstalled = mutableStateOf(initialBundledWineInstalled)
+        val bundledInUse = mutableStateOf(initialBundledWineInUse)
+        val components = mutableStateOf<List<OnboardingComponent>>(emptyList())
+        val installing = mutableStateOf<String?>(null)
+        val installLabel = mutableStateOf<String?>(null)
+        val installProgress = mutableStateOf(-1)
+        val containerPreparing = mutableStateOf(false)
+        val containerReady = mutableStateOf(false)
+        val controller = OnboardingComposeController(
+            ready,
+            progress,
+            bundledInstalled,
+            bundledInUse,
+            components,
+            installing,
+            installLabel,
+            installProgress,
+            containerPreparing,
+            containerReady
+        )
+
+        applyAppFullscreen(activity)
+        activity.setContent {
+            WinZTheme {
+                OnboardingFlow(
+                    activity,
+                    ready,
+                    progress,
+                    bundledInstalled,
+                    bundledInUse,
+                    components,
+                    installing,
+                    installLabel,
+                    installProgress,
+                    containerPreparing,
+                    containerReady,
+                    componentManagerMode,
+                    callbacks
+                )
+            }
+        }
+        return controller
+    }
+}
+
+private enum class OnboardingPage { Welcome, Theme, Create, Components, Runtime, Access }
+
+private fun prepareInitialContainer(
+    activity: ComponentActivity,
+    runtimeIdentifier: String,
+    preparing: MutableState<Boolean>,
+    ready: MutableState<Boolean>
+) {
+    if (preparing.value || ready.value || runtimeIdentifier.isBlank()) return
+
+    val manager = ContainerManager(activity)
+    if (manager.containers.isNotEmpty()) {
+        ready.value = true
+        return
+    }
+
+    val contents = ContentsManager(activity).apply { syncContents() }
+    val wineInfo = WineInfo.fromIdentifier(activity, contents, runtimeIdentifier)
+    if (wineInfo.path.isNullOrBlank()) {
+        Toast.makeText(activity, "The selected Wine/Proton layer is no longer installed.", Toast.LENGTH_LONG).show()
+        return
+    }
+
+    preparing.value = true
+    ready.value = false
+    try {
+        val defaultDriver = if (GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, activity)) {
+            DefaultVersion.WRAPPER_ADRENO
+        } else {
+            DefaultVersion.WRAPPER
+        }
+        val graphicsConfig = Container.DEFAULT_GRAPHICSDRIVERCONFIG.replace(
+            ";version=;",
+            ";version=$defaultDriver;"
+        )
+        val data = JSONObject().apply {
+            put("name", "Container-${manager.nextContainerId}")
+            put("screenSize", Container.DEFAULT_SCREEN_SIZE)
+            put("envVars", cleanContainerEnvironment(Container.DEFAULT_ENV_VARS))
+            put("graphicsDriver", Container.DEFAULT_GRAPHICS_DRIVER)
+            put("graphicsDriverConfig", graphicsConfig)
+            put("rendererNative", false)
+            put("rendererPresentMode", "fifo")
+            put("dxwrapper", Container.DEFAULT_DXWRAPPER)
+            put("dxwrapperConfig", Container.DEFAULT_DXWRAPPERCONFIG)
+            put("audioDriver", Container.DEFAULT_AUDIO_DRIVER)
+            put("emulator", if (wineInfo.isArm64EC) "FEXCore" else "Box64")
+            put("wincomponents", Container.DEFAULT_WINCOMPONENTS)
+            put("drives", Container.DEFAULT_DRIVES)
+            put("box64Version", if (wineInfo.isArm64EC) DefaultVersion.WOWBOX64 else DefaultVersion.BOX64)
+            put("box64Preset", Box64Preset.COMPATIBILITY)
+            put("fexcoreVersion", DefaultVersion.FEXCORE)
+            put("fexcorePreset", FEXCorePreset.INTERMEDIATE)
+            put("wineVersion", runtimeIdentifier)
+        }
+
+        manager.createContainerAsync(data, contents) { created ->
+            preparing.value = false
+            if (created == null) {
+                ready.value = false
+                Toast.makeText(activity, "Unable to create the first container.", Toast.LENGTH_LONG).show()
+            } else {
+                ready.value = true
+            }
+        }
+    } catch (_: Exception) {
+        preparing.value = false
+        ready.value = false
+        Toast.makeText(activity, "Unable to prepare the first container.", Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+private fun OnboardingFlow(
+    activity: ComponentActivity,
+    ready: State<Boolean>,
+    progress: State<Int>,
+    bundledInstalled: State<Boolean>,
+    bundledInUse: State<Boolean>,
+    components: State<List<OnboardingComponent>>,
+    installing: State<String?>,
+    installingLabel: State<String?>,
+    installingProgress: State<Int>,
+    containerPreparing: MutableState<Boolean>,
+    containerReady: MutableState<Boolean>,
+    managerMode: Boolean,
+    cb: OnboardingCallbacks
+) {
+    var page by rememberSaveable(managerMode) {
+        mutableStateOf(if (managerMode) OnboardingPage.Components else OnboardingPage.Theme)
+    }
+
+    // Set when the first container is not made by the Windows pages: the permissions page then goes back to the start screen.
+    var startedElsewhere by rememberSaveable { mutableStateOf(false) }
+
+    val hasInstalledRuntime = bundledInstalled.value || components.value.any {
+        it.installed && (it.type == "Wine" || it.type == "Proton") && !it.runtimeIdentifier.isNullOrBlank()
+    }
+
+    LaunchedEffect(containerReady.value, page) {
+        if (!managerMode && page == OnboardingPage.Runtime && containerReady.value) {
+            page = OnboardingPage.Access
+        }
+    }
+
+    when (page) {
+        OnboardingPage.Welcome -> ClassicWinlatorWelcome(
+            ready,
+            progress,
+            start = { page = OnboardingPage.Theme },
+            skip = { page = OnboardingPage.Runtime },
+            retry = { cb.onRetryCore() }
+        )
+
+        OnboardingPage.Theme -> OnboardingThemeScreen(
+            onContinue = { page = OnboardingPage.Create }
+        )
+
+        OnboardingPage.Create -> OnboardingCreateScreen(
+            onChoose = { start ->
+                if (start == ContainerStart.Windows) {
+                    startedElsewhere = false
+                    cb.onChooseStart("")
+                    page = OnboardingPage.Components
+                } else {
+                    startedElsewhere = true
+                    cb.onSkipSetup()
+                    cb.onChooseStart(start.name.lowercase())
+                    page = OnboardingPage.Access
+                }
+            },
+            onSettings = { cb.onOpenSettings() },
+            onSkip = {
+                startedElsewhere = true
+                cb.onSkipSetup()
+                cb.onChooseStart("")
+                page = OnboardingPage.Access
+            }
+        )
+
+        OnboardingPage.Components -> OnboardingComponentsScreen(
+            ready = ready,
+            progress = progress,
+            bundledInstalled = bundledInstalled,
+            bundledInUse = bundledInUse,
+            all = components.value,
+            installing = installing.value,
+            installingLabel = installingLabel.value,
+            installingProgress = installingProgress.value,
+            managerMode = managerMode,
+            onBack = {
+                if (managerMode) cb.onCloseComponents()
+                else page = OnboardingPage.Create
+            },
+            onContinue = {
+                if (managerMode) cb.onCloseComponents()
+                else if (ready.value && hasInstalledRuntime) page = OnboardingPage.Runtime
+            },
+            cb = cb,
+            // No Wine/Proton installed and no container yet: both can be done later from Settings.
+            onSkip = {
+                cb.onSkipSetup()
+                page = OnboardingPage.Access
+            }
+        )
+
+        OnboardingPage.Runtime -> OnboardingRuntimeSelectionScreen(
+            components = components.value,
+            bundledInstalled = bundledInstalled.value,
+            preparing = containerPreparing.value,
+            onBack = { page = OnboardingPage.Components },
+            onContinue = { runtime ->
+                if (ready.value && hasInstalledRuntime && !containerPreparing.value) {
+                    cb.onRuntimeSelected(runtime)
+                    prepareInitialContainer(activity, runtime, containerPreparing, containerReady)
+                }
+            },
+            onSkip = {
+                cb.onSkipSetup()
+                page = OnboardingPage.Access
+            }
+        )
+
+        OnboardingPage.Access -> OnboardingAccessScreen(
+            back = { page = if (startedElsewhere) OnboardingPage.Create else OnboardingPage.Runtime },
+            next = { cb.onRequestPermissions() }
+        )
+    }
+}
