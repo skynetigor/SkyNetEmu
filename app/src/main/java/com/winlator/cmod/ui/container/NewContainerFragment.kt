@@ -27,6 +27,7 @@ class NewContainerFragment : Fragment() {
                         (activity as? ContainersSettingsActivity)?.startContainer(
                             when (start) {
                                 ContainerStart.Windows -> "windows"
+                                ContainerStart.Linux -> ""
                                 ContainerStart.Game -> "game"
                                 ContainerStart.Import -> "import"
                             }

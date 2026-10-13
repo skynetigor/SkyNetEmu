@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -46,7 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /** What the first container is made from; the start screen offers one big button for each. */
-internal enum class ContainerStart { Windows, Game, Import }
+internal enum class ContainerStart { Windows, Linux, Game, Import }
 
 private class StartOption(
     val start: ContainerStart,
@@ -54,6 +56,9 @@ private class StartOption(
     val title: String,
     val description: String,
     val bestWhen: String,
+    /** An option that is not available yet is shown dimmed with [badge] instead of the arrow, and does nothing when tapped. */
+    val enabled: Boolean = true,
+    val badge: String? = null,
     val accent: @Composable () -> Color
 )
 
@@ -64,6 +69,13 @@ private val startOptions = listOf(
         "A Windows environment: Wine or Proton with DXVK and VKD3D, and Box64 or FEX to run x86 code on the phone.",
         "Most PC games and .exe programs. The best-supported choice, so start here if unsure."
     ) { MaterialTheme.colorScheme.primary },
+    StartOption(
+        ContainerStart.Linux, Icons.Outlined.Terminal,
+        "Linux system",
+        "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver and x86 games through Box64 or FEX.",
+        "Games that have a Linux build, such as BeamNG.drive.",
+        enabled = false, badge = "Coming soon"
+    ) { MaterialTheme.colorScheme.tertiary },
     StartOption(
         ContainerStart.Game, Icons.Outlined.SportsEsports,
         "Set up for a game",
@@ -162,7 +174,7 @@ private fun StartCard(option: StartOption, modifier: Modifier, onClick: () -> Un
     val accent = option.accent()
     val shape = RoundedCornerShape(28.dp)
     Surface(
-        modifier = modifier.clip(shape).clickable(onClick = onClick),
+        modifier = modifier.clip(shape).alpha(if (option.enabled) 1f else 0.55f).clickable(enabled = option.enabled, onClick = onClick),
         shape = shape,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, accent.copy(alpha = 0.35f))
@@ -190,7 +202,19 @@ private fun StartCard(option: StartOption, modifier: Modifier, onClick: () -> Un
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        Icon(Icons.Outlined.ArrowForward, null, tint = accent)
+                        if (option.badge != null) {
+                            Surface(shape = RoundedCornerShape(10.dp), color = accent.copy(alpha = 0.22f)) {
+                                Text(
+                                    option.badge,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = accent
+                                )
+                            }
+                        } else {
+                            Icon(Icons.Outlined.ArrowForward, null, tint = accent)
+                        }
                     }
                     Spacer(Modifier.height(14.dp))
                     Text(
