@@ -202,18 +202,21 @@ private fun StartCard(option: StartOption, modifier: Modifier, onClick: () -> Un
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        if (option.badge != null) {
-                            Surface(shape = RoundedCornerShape(10.dp), color = accent.copy(alpha = 0.22f)) {
-                                Text(
-                                    option.badge,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = accent
-                                )
-                            }
-                        } else {
-                            Icon(Icons.Outlined.ArrowForward, null, tint = accent)
+                        if (option.badge == null) Icon(Icons.Outlined.ArrowForward, null, tint = accent)
+                    }
+                    if (option.badge != null) {
+                        Surface(
+                            modifier = Modifier.padding(top = 10.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = accent.copy(alpha = 0.22f)
+                        ) {
+                            Text(
+                                option.badge,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = accent
+                            )
                         }
                     }
                     Spacer(Modifier.height(14.dp))
