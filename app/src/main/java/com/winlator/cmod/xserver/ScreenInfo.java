@@ -1,9 +1,8 @@
 package com.winlator.cmod.xserver;
 
 public class ScreenInfo {
-    // The size can change while a program runs (RandR): a game picks a resolution.
-    public volatile short width;
-    public volatile short height;
+    public final short width;
+    public final short height;
 
     public ScreenInfo(String value) {
         String[] parts = value.split("x");
@@ -12,11 +11,6 @@ public class ScreenInfo {
     }
 
     public ScreenInfo(int width, int height) {
-        this.width = (short)width;
-        this.height = (short)height;
-    }
-
-    public void set(int width, int height) {
         this.width = (short)width;
         this.height = (short)height;
     }

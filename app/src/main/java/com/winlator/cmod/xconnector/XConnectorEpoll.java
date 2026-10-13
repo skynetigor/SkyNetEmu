@@ -1,6 +1,5 @@
 package com.winlator.cmod.xconnector;
 
-import android.util.Log;
 import android.util.SparseArray;
 
 import androidx.annotation.Keep;
@@ -113,19 +112,11 @@ public class XConnectorEpoll implements Runnable {
                     while (running && requestHandler.handleRequest(client)) activePosition = inputStream.getActivePosition();
                     inputStream.setActivePosition(activePosition);
                 }
-                else {
-                    Log.d("XConnector", "Client fd=" + fd + " closed its end of the connection");
-                    killConnection(client);
-                }
+                else killConnection(client);
             }
             else requestHandler.handleRequest(client);
         }
         catch (IOException e) {
-            Log.w("XConnector", "Killing client fd=" + fd + " after IO error", e);
-            killConnection(client);
-        }
-        catch (RuntimeException e) {
-            Log.e("XConnector", "Killing client fd=" + fd + " after unhandled error in request handler", e);
             killConnection(client);
         }
     }

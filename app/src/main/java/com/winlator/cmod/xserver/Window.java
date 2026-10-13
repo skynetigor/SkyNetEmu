@@ -190,15 +190,6 @@ public class Window extends XResource {
         return attributes.isMapped() && windowGroup == id && width > 1 && height > 1;
     }
 
-    /**
-     * A mapped window directly under the root: what a native X11 program shows as its main window.
-     * Wine marks its main window with a WM_HINTS group instead ({@link #isApplicationWindow()}).
-     */
-    public boolean isMappedTopLevel() {
-        return attributes.isMapped() && parent != null && parent.parent == null && isInputOutput()
-                && width > 1 && height > 1;
-    }
-
     public boolean isInputOutput() {
         return content != null;
     }
@@ -269,22 +260,7 @@ public class Window extends XResource {
         return false;
     }
 
-    public int eventListenerCount(int eventId) {
-        int count = 0;
-        for (EventListener eventListener : eventListeners) {
-            if (eventListener.isInterestedIn(eventId)) count++;
-        }
-        return count;
-    }
-
     public void sendEvent(int eventId, Event event) {
-        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
-            StringBuilder to = new StringBuilder();
-            for (EventListener eventListener : eventListeners) {
-                to.append(eventListener.client.resourceIDBase).append(eventListener.isInterestedIn(eventId) ? "+" : "-").append(' ');
-            }
-            android.util.Log.d("XTrace", "window " + id + " event id " + eventId + " listeners: " + to);
-        }
         for (EventListener eventListener : eventListeners) {
             if (eventListener.isInterestedIn(eventId)) {
                 eventListener.sendEvent(event);

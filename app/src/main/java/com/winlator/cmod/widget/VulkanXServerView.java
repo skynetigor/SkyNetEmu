@@ -117,8 +117,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
-    @FastNative private native void nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
-        int w, int h, int stride, int offset);
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long id,
         long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
@@ -126,7 +124,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         boolean hasScissor, int scX, int scY, int scW, int scH);
     @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
-    private native void nativeSetScreenSize(long handle, int width, int height);
     @FastNative private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
     @FastNative private native void nativeRemoveWindow(long handle, long id);
@@ -234,16 +231,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             }
             initComplete = true;
         });
-    }
-
-    @Override
-    public void onScreenResized() {
-        final int w = xServer.screenInfo.width, h = xServer.screenInfo.height;
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeSetScreenSize(nativeHandle, w, h);
-            viewTransformation.update(surfaceWidth, surfaceHeight, w, h);
-            updateTransform();
-        }
     }
 
     public void onSurfaceChanged(int width, int height) {
@@ -496,11 +483,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             if (nativeHandle == 0 || pixmap == null) return;
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
-                if (pixmap.dmaBufFd >= 0) {
-                    nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
-                        pixmap.dmaBufFd, pixmap.width, pixmap.height, pixmap.dmaBufStride, pixmap.dmaBufOffset);
-                }
-                else if (pixmap.backingAHB != 0) {
+                if (pixmap.backingAHB != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
                         pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
                 }
