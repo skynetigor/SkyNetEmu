@@ -1,44 +1,46 @@
 # Arch Linux ARM packages that make the XFCE desktop on top of the Linux runtime (bannerlator-r9, itself Arch Linux ARM).
+# One package per line: name and the exact version built (the mirror serves only the current version, so a package it has moved
+# past fails the build until this list is updated on purpose: ALLOW_NEWER=1 builds with what the mirror has and prints the changes).
 # The runtime already has GTK3, glib, dbus, the X client libraries, Mesa and fonts: these are only what it lacks.
 # Found by resolving the dependencies of xfce4-session xfwm4 xfce4-panel xfdesktop xfconf xfce4-settings thunar xfce4-terminal,
 # dropping what the runtime has, and checking the programs' NEEDED libraries (see build.sh).
-libxfce4util
-xfconf
-libxfce4ui
-libxfce4windowing
-libwnck3
-startup-notification
-libgtop
-exo
-garcon
-libdbusmenu-glib
-libdbusmenu-gtk3
-xfce4-panel
-xfce4-session
-xfwm4
-xfdesktop
-xfce4-settings
-thunar
-xfce4-terminal
-vte3
-vte-common
-libutempter
-libnotify
-polkit-gnome
-polkit
-libxres
-libxklavier
-libxkbfile
-xorg-xrdb
-xorg-xmodmap
-xorg-xauth
-xorg-iceauth
-libyaml
-libexif
-gtk-layer-shell
-libdisplay-info
-libxpresent
-libxt
-libxmu
-xorg-xkbcomp
-xcb-util
+libxfce4util 4.20.1-1
+xfconf 4.20.0-2
+libxfce4ui 4.20.2-1
+libxfce4windowing 4.20.7-1
+libwnck3 43.3-1
+startup-notification 0.12-9
+libgtop 2.41.3-2
+exo 4.20.0-2
+garcon 4.20.0-2
+libdbusmenu-glib 18.10.20180917-2
+libdbusmenu-gtk3 18.10.20180917-2
+xfce4-panel 4.20.8-1
+xfce4-session 4.20.4-1
+xfwm4 4.20.0-2
+xfdesktop 4.20.2-1
+xfce4-settings 4.20.5-1
+thunar 4.20.10-1
+xfce4-terminal 1.2.0-1
+vte3 0.84.1-1
+vte-common 0.84.1-1
+libutempter 1.2.3-1
+libnotify 0.8.8-1
+polkit-gnome 0.105-12
+polkit 127-3
+libxres 1.2.3-1
+libxklavier 5.4-7
+libxkbfile 1.2.0-1
+xorg-xrdb 1.2.3-1
+xorg-xmodmap 1.0.12-1
+xorg-xauth 1.1.5-1
+xorg-iceauth 1.0.11-1
+libyaml 0.2.5-3
+libexif 0.6.26-1
+gtk-layer-shell 0.10.1-1
+libdisplay-info 0.3.0-1
+libxpresent 1.0.2-1
+libxt 1.3.1-1
+libxmu 1.3.1-1
+xorg-xkbcomp 1.5.0-1
+xcb-util 0.4.1-2

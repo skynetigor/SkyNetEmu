@@ -20,9 +20,15 @@ for repo in core extra; do
   mkdir -p "$work/db/$repo"; bsdtar -xf "$work/db/$repo.db" -C "$work/db/$repo"
 done
 
-python3 -I - "$work" "$here/packages.txt" > "$work/files.txt" <<'PY'
+python3 -I - "$work" "$here/packages.txt" "${ALLOW_NEWER:-0}" > "$work/files.txt" <<'PY'
 import os, sys
-work, names = sys.argv[1], [l.strip() for l in open(sys.argv[2]) if l.strip() and not l.startswith('#')]
+work, listing, allow_newer = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
+wanted = []
+for l in open(listing):
+    l = l.strip()
+    if l and not l.startswith('#'):
+        parts = l.split()
+        wanted.append((parts[0], parts[1] if len(parts) > 1 else None))
 found = {}
 for repo in ('core', 'extra'):
     root = os.path.join(work, 'db', repo)
@@ -35,9 +41,16 @@ for repo in ('core', 'extra'):
             elif line and cur: m[cur].append(line)
         if '%NAME%' not in m: continue
         found.setdefault(m['%NAME%'][0], (repo, m['%FILENAME%'][0], m['%VERSION%'][0]))
-for n in names:
+problems = []
+for n, pinned in wanted:
     if n not in found: sys.exit('not in the repositories: ' + n)
+    if pinned and found[n][2] != pinned:
+        problems.append('%s: pinned %s, the mirror has %s' % (n, pinned, found[n][2]))
     print(*found[n])
+if problems:
+    sys.stderr.write('\n'.join(problems) + '\n')
+    if not allow_newer:
+        sys.exit('The mirror has moved past the pinned versions. Update packages.txt, or build with ALLOW_NEWER=1.')
 PY
 
 while read -r repo file version; do
@@ -45,6 +58,14 @@ while read -r repo file version; do
   bsdtar -xf "$work/pkgs/$file" -C "$work/stage"
 done < "$work/files.txt"
 rm -f "$work"/stage/.PKGINFO "$work"/stage/.MTREE "$work"/stage/.BUILDINFO "$work"/stage/.INSTALL
+# What the bundle was made from, for whoever wonders where a file came from.
+mkdir -p "$work/stage/usr/share/skynet"
+python3 -I - "$work/files.txt" > "$work/stage/usr/share/skynet/xfce-bundle.txt" <<'PY'
+import re, sys
+for l in open(sys.argv[1]):
+    repo, fn, ver = l.split()
+    print(re.sub(r'-' + re.escape(ver) + r'-(aarch64|any)\.pkg\.tar\.\w+$', '', fn), ver)
+PY
 # Documentation, translations and man pages are not needed on a phone.
 rm -rf "$work"/stage/usr/share/{man,doc,info,locale,licenses,gtk-doc}
 
