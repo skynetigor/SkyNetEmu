@@ -543,6 +543,30 @@ public class XClientRequestHandler implements RequestHandler {
                 case 32: // UngrabKeyboard: no keyboard grabs are kept, so nothing to release
                     client.skipRequest();
                     break;
+                // A window manager grabs buttons and keys on windows (click to focus, shortcuts) and asks for the pointer and the
+                // keyboard to be released or replayed. None of them is kept yet: they are taken and not acted on, quietly, so a
+                // window manager (xfwm4 asks for thousands of key grabs as it starts) neither fails nor floods the log.
+                case 6: // ChangeSaveSet: a window manager's clients are not given back to the root when it ends yet
+                case 61: // ClearArea
+                case 28: // GrabButton
+                case 29: // UngrabButton
+                case 30: // ChangeActivePointerGrab
+                case 33: // GrabKey
+                case 34: // UngrabKey
+                case 35: // AllowEvents
+                case 102: // ChangeKeyboardControl
+                    client.skipRequest();
+                    break;
+                case 31: // GrabKeyboard: always granted
+                    client.skipRequest();
+                    try (XStreamLock lock = outputStream.lock()) {
+                        outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+                        outputStream.writeByte((byte) 0); // Success
+                        outputStream.writeShort(client.getSequenceNumber());
+                        outputStream.writeInt(0);
+                        outputStream.writePad(24);
+                    }
+                    break;
                 case 103: // GetKeyboardControl
                     try (XStreamLock lock = outputStream.lock()) {
                         outputStream.writeByte(RESPONSE_CODE_SUCCESS);

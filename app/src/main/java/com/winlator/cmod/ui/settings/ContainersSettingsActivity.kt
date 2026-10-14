@@ -84,6 +84,7 @@ import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.PreloaderDialog
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.linux.LinuxRuntime
+import com.winlator.cmod.linux.LinuxDesktop
 import com.winlator.cmod.steam.SteamContainer
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
@@ -241,9 +242,15 @@ class ContainersSettingsActivity : AppCompatActivity() {
     }
 
     private fun runContainer(id: Int) {
-        if (ContainerManager(this).getContainerById(id)?.isLinux == true) {
-            // A Linux container starts one of its programs, so ▶ opens the program list.
-            openFragment(LinuxProgramsFragment.forContainer(id))
+        val target = ContainerManager(this).getContainerById(id)
+        if (target?.isLinux == true) {
+            // With the desktop installed and switched on, ▶ opens it; otherwise a Linux container starts one of its programs, so ▶ opens the program list.
+            val runtime = LinuxRuntime.resolve(this, target)
+            if (LinuxDesktop.enabled(target) && LinuxDesktop.isInstalled(this, runtime)) {
+                startActivity(Intent(this, XServerDisplayActivity::class.java).putExtra("container_id", id))
+            } else {
+                openFragment(LinuxProgramsFragment.forContainer(id))
+            }
             return
         }
         if (!XrActivity.isEnabled(this)) {

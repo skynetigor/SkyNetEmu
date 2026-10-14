@@ -1,0 +1,44 @@
+# Arch Linux ARM packages that make the XFCE desktop on top of the Linux runtime (bannerlator-r9, itself Arch Linux ARM).
+# The runtime already has GTK3, glib, dbus, the X client libraries, Mesa and fonts: these are only what it lacks.
+# Found by resolving the dependencies of xfce4-session xfwm4 xfce4-panel xfdesktop xfconf xfce4-settings thunar xfce4-terminal,
+# dropping what the runtime has, and checking the programs' NEEDED libraries (see build.sh).
+libxfce4util
+xfconf
+libxfce4ui
+libxfce4windowing
+libwnck3
+startup-notification
+libgtop
+exo
+garcon
+libdbusmenu-glib
+libdbusmenu-gtk3
+xfce4-panel
+xfce4-session
+xfwm4
+xfdesktop
+xfce4-settings
+thunar
+xfce4-terminal
+vte3
+vte-common
+libutempter
+libnotify
+polkit-gnome
+polkit
+libxres
+libxklavier
+libxkbfile
+xorg-xrdb
+xorg-xmodmap
+xorg-xauth
+xorg-iceauth
+libyaml
+libexif
+gtk-layer-shell
+libdisplay-info
+libxpresent
+libxt
+libxmu
+xorg-xkbcomp
+xcb-util

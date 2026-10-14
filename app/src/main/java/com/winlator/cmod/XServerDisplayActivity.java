@@ -189,6 +189,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private WineInfo wineInfo;
     /** True when the container is a Linux container: the session runs under proot instead of Wine. */
     private boolean linuxSession;
+    /** A Linux container started without a shortcut: its XFCE desktop (see {@link com.winlator.cmod.linux.LinuxDesktop}). */
+    private boolean desktopSession;
     /** What the game's registry profile says about the Linux shortcut being run; null when there is none. */
     private GameProfiles.Effective gameProfile;
     private LinuxRuntime.Installed linuxRuntime;
@@ -456,16 +458,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
         linuxSession = container.isLinux();
         if (linuxSession) {
             linuxRuntime = LinuxRuntime.resolve(this, container);
-            if (shortcutPath == null || shortcutPath.isEmpty()) {
-                Toast.makeText(this, "Choose a program to start in this container.", Toast.LENGTH_LONG).show();
-                finish();
-                return;
-            }
             if (linuxRuntime == null) {
                 Toast.makeText(this, "This container's Linux runtime is not installed. Download it in Components.",
                         Toast.LENGTH_LONG).show();
                 finish();
                 return;
+            }
+            if (shortcutPath == null || shortcutPath.isEmpty()) {
+                // No program asked for: the container's desktop, when it is switched on and installed.
+                if (!com.winlator.cmod.linux.LinuxDesktop.enabled(container)) {
+                    Toast.makeText(this, "Choose a program to start in this container.", Toast.LENGTH_LONG).show();
+                    finish();
+                    return;
+                }
+                if (!com.winlator.cmod.linux.LinuxDesktop.isInstalled(this, linuxRuntime)) {
+                    // Offered once, then the screen starts again with the desktop in place.
+                    com.winlator.cmod.linux.LinuxDesktop.offerInstall(this, this::recreate, this::finish);
+                    return;
+                }
+                desktopSession = true;
             }
         }
 
@@ -635,6 +646,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             randr.setModesEnabled(!new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/no-randr-modes").exists());
         }
         xServer.setWinHandler(winHandler);
+        xServer.desktopSession = desktopSession;
+        xServer.windowManager.desktopSession = desktopSession;
         if (linuxSession) {
             // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3 only takes the
             // Wine wrapper's AHardwareBuffer sockets. Without them clients send images over the socket. Present stays:
@@ -725,7 +738,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // has just opened. A toolkit waits to be told: SDL keeps no keyboard focus and drops every key,
                 // and only a program that asks for the focus itself (BeamNG does) ever gets one. So the server
                 // gives it, the way a window manager would.
-                if (linuxSession && window.isMappedTopLevel()) {
+                if (linuxSession && !desktopSession && window.isMappedTopLevel()) {
                     xServer.windowManager.setFocus(window, WindowManager.FocusRevertTo.POINTER_ROOT);
                 }
             }
@@ -826,6 +839,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     /** The window that means the program has started: Wine's marked main window, or a native program's top-level window. */
     private boolean isSessionApplicationWindow(Window window) {
+        // A desktop has no one program: the first window that draws shows it is up (what is a top-level window is the window manager's frames).
+        if (desktopSession) return window.attributes.isMapped() && window.isInputOutput() && window.getWidth() > 1 && window.getHeight() > 1;
         return linuxSession ? window.isMappedTopLevel() : window.isApplicationWindow();
     }
 
@@ -1480,6 +1495,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XClientRequestHandler.trace = new File(container.getLinuxHomeDir(), ".xtrace").exists();
         // A file named .xstats turns on a summary every few seconds of what the X server is asked to do and how long it takes (tag XStats).
         XClientRequestHandler.stats = new File(container.getLinuxHomeDir(), ".xstats").exists();
+        // A file named .xdump logs the stack of every thread 15 seconds in (logcat tag XDump): for finding what a hung X client waits on.
+        if (new File(container.getLinuxHomeDir(), ".xdump").exists()) {
+            Thread dumper = new Thread(() -> {
+                try { Thread.sleep(15000); } catch (InterruptedException e) { return; }
+                for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+                    StringBuilder text = new StringBuilder("== " + entry.getKey().getName() + " " + entry.getKey().getState());
+                    for (StackTraceElement frame : entry.getValue()) text.append("\n    ").append(frame);
+                    Log.w("XDump", text.toString());
+                }
+            }, "xdump");
+            dumper.setDaemon(true);
+            dumper.start();
+        }
 
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(
@@ -1494,7 +1522,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = LinuxSession.programCommand(this, container, shortcut);
+        String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command()
+                : LinuxSession.programCommand(this, container, shortcut);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.

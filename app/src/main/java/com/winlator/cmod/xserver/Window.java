@@ -262,6 +262,14 @@ public class Window extends XResource {
         return false;
     }
 
+    /** Whether a client other than {@code client} listens for the event (only that one's redirect counts against a request). */
+    public boolean hasEventListenerForOthers(int eventId, XClient client) {
+        for (EventListener eventListener : eventListeners) {
+            if (eventListener.client != client && eventListener.isInterestedIn(eventId)) return true;
+        }
+        return false;
+    }
+
     public boolean hasEventListenerFor(Bitmask mask) {
         for (EventListener eventListener : eventListeners) {
             if (eventListener.isInterestedIn(mask)) return true;

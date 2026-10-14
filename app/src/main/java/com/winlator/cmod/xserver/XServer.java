@@ -28,6 +28,8 @@ public class XServer {
     public static final String VENDOR_NAME = "Elbrus Technologies, LLC";
     public static final Charset LATIN1_CHARSET = Charset.forName("latin1");
     public final SparseArray<Extension> extensions = new SparseArray<>();
+    /** A Linux container's desktop (a window manager and a panel run): the server stops acting as if no window manager ran. */
+    public volatile boolean desktopSession;
     /** The core fonts clients have opened, by the id they gave them. */
     public final SparseArray<XFont> fonts = new SparseArray<>();
     public final ScreenInfo screenInfo;
