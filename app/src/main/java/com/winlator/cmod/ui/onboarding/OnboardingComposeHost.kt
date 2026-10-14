@@ -179,7 +179,7 @@ private fun OnboardingFlow(
         )
 
         OnboardingPage.Theme -> OnboardingThemeScreen(
-            onContinue = { page = OnboardingPage.Components }
+            onContinue = { page = OnboardingPage.Privacy }
         )
 
         OnboardingPage.Components -> OnboardingComponentsScreen(
@@ -210,7 +210,7 @@ private fun OnboardingFlow(
                 com.winlator.cmod.telemetry.Telemetry.setEnabled(activity, share)
                 page = OnboardingPage.Access
             },
-            back = { page = OnboardingPage.Components }
+            back = { page = OnboardingPage.Theme }
         )
 
         OnboardingPage.Access -> OnboardingAccessScreen(
