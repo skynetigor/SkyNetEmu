@@ -39,7 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 
-// The layout the app's Settings uses: groups of settings, listed
+// The layout the editors of a Linux container and of a Linux shortcut, and the app's Settings, share: groups of settings, listed
 // beside the page of the chosen one when the room allows it, and stacked as sections that open and close when it does not.
 
 /** The width, as given to [GroupedSettings] (not the screen's), from which the groups are listed beside the page. */

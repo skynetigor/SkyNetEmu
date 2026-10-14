@@ -115,7 +115,12 @@ data class SettingsModel(
     val customApiKeyEnabled: Boolean,
     val customApiKey: String,
     val contentsUrl: String,
-    val wineDebugOptions: List<String>
+    val wineDebugOptions: List<String>,
+    /** One line about Steam ("Ready · 3 games", "Components to download"), and whether its container exists. */
+    val steamSummary: String,
+    val steamReady: Boolean,
+    /** Where the game profiles of the registry came from, for the "Game profiles" group. */
+    val gameProfilesSummary: String
 )
 
 @Stable
@@ -134,6 +139,9 @@ interface SettingsCallbacks {
     fun onWineDebugChannelsChanged(value: String)
     fun onReinstallImageFs()
     fun onPresetAction(kind: String, id: String, action: String)
+    fun onOpenSteam()
+    fun onRefreshGameProfiles()
+    fun onClearRegistryCache()
 }
 
 object SettingsComposeHost {
@@ -181,10 +189,15 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
         EditorCategory("appearance", "Appearance", "Theme and colours", false) {
             WinlatorThemePreferenceCard()
         },
-        EditorCategory("environments", "Environments", "Containers and components", false) {
+        EditorCategory("environments", "Environments", "Containers, Steam and components", !model.steamReady) {
             NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
                 context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
             }
+            NavigationRow(
+                Icons.Outlined.Memory, "Steam",
+                if (model.steamReady) model.steamSummary else "Not set up yet: ${model.steamSummary}",
+                callbacks::onOpenSteam
+            )
             NavigationRow(Icons.Outlined.Apps, "Components", "Wine, Proton, DXVK, VKD3D and runtimes", callbacks::onOpenComponents)
         },
         EditorCategory(
@@ -275,6 +288,24 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                 ToggleRow(stringResource(R.string.enable_winlator_logs), model.winlatorLogs) { callbacks.onBooleanChanged("enable_winlator_logs", it) }
                 GroupDivider()
                 ToggleRow(stringResource(R.string.enable_box64_logs), model.box64Logs) { callbacks.onBooleanChanged("enable_box64_logs", it) }
+            }
+        },
+        EditorCategory("profiles", "Game profiles", model.gameProfilesSummary, false) {
+            GroupCard {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(model.gameProfilesSummary, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "A game profile from the registry says how to start a game and what works for each version of it: the program, the " +
+                            "arguments (such as -nosteam) and the resolution. Shortcuts follow it until you change them. The files are kept " +
+                            "for offline use; a copy comes with the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = callbacks::onRefreshGameProfiles) { Text("Refresh") }
+                        TextButton(onClick = callbacks::onClearRegistryCache) { Text("Clear the saved copies") }
+                    }
+                }
             }
         },
         EditorCategory("experimental", stringResource(R.string.experimental), "Clipboard, browser, refresh rate and more", false) {
