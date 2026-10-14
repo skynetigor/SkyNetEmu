@@ -55,6 +55,8 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
     private float magnifierZoom = 1.0f;
     private boolean cursorVisible = true;
     private int fpsWindowId = -1;
+    /** The game's render window, for the telemetry recorder; set whether or not a HUD exists. */
+    private volatile int sessionWindowId = -1;
     private WinlatorHUD hudRef;
     private FrameRating classicHudRef;
     private boolean pipMode;
@@ -196,6 +198,7 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
     }
 
     private void reportFrame(int windowId) {
+        if (windowId == sessionWindowId) com.winlator.cmod.telemetry.GameSessionRecorder.onFrame();
         if (windowId != fpsWindowId) return;
         if (hudRef != null) hudRef.onFrame();
         if (classicHudRef != null) classicHudRef.update();
@@ -224,6 +227,11 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
     @Override
     public void forceCleanup() {
         onDestroy();
+    }
+
+    @Override
+    public void setSessionWindowId(int windowId) {
+        sessionWindowId = windowId;
     }
 
     @Override

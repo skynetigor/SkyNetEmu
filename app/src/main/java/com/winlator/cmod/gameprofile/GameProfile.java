@@ -38,7 +38,7 @@ public final class GameProfile {
      */
     public static final Set<String> ALLOWED_EXTRAS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "graphicsFilterMode", "graphicsSharpness", "graphicsPostFXMode", "graphicsColorMode",
-            "fullscreenStretched", "simTouchScreen", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal")));
+            "fullscreenStretched", "simTouchScreen", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal", "fileCache", "hudMode")));
 
     /** Whether a game is started without Steam by default, and the argument that makes it so ("-nosteam"). */
     public static final class NoSteam {
@@ -139,8 +139,15 @@ public final class GameProfile {
         /** Null when the version is only chosen by hand (or as the default). */
         public final Match match;
         public final Settings settings;
+        /** The ids of the container configs (containers/index.json) that work for this version. */
+        public final List<String> containers;
+        /** The config a new shortcut gets when the device has no entry in {@link #preferredBySoc}; null when {@link #containers} is empty. */
+        public final String preferredContainer;
+        /** Processor family (socs.json) to the config that suits it best. */
+        public final Map<String, String> preferredBySoc;
 
-        Version(String id, String label, String status, String notes, String testedOn, boolean isDefault, Match match, Settings settings) {
+        Version(String id, String label, String status, String notes, String testedOn, boolean isDefault, Match match, Settings settings,
+                List<String> containers, String preferredContainer, Map<String, String> preferredBySoc) {
             this.id = id;
             this.label = label;
             this.status = status;
@@ -149,6 +156,9 @@ public final class GameProfile {
             this.isDefault = isDefault;
             this.match = match;
             this.settings = settings;
+            this.containers = Collections.unmodifiableList(containers);
+            this.preferredContainer = preferredContainer;
+            this.preferredBySoc = Collections.unmodifiableMap(preferredBySoc);
         }
     }
 
@@ -157,14 +167,18 @@ public final class GameProfile {
     /** The Steam app id, or "" for a game that is not on Steam. */
     public final String steamAppId;
     public final String steamInstallDir;
+    /** The game's exes on Windows, relative to the game's folder ("Bin64/BeamNG.drive.x64.exe"); how a picked exe is recognised. */
+    public final List<String> windowsExecutables;
     public final Settings defaults;
     public final List<Version> versions;
 
-    private GameProfile(String id, String name, String steamAppId, String steamInstallDir, Settings defaults, List<Version> versions) {
+    private GameProfile(String id, String name, String steamAppId, String steamInstallDir, List<String> windowsExecutables,
+                        Settings defaults, List<Version> versions) {
         this.id = id;
         this.name = name;
         this.steamAppId = steamAppId;
         this.steamInstallDir = steamInstallDir;
+        this.windowsExecutables = Collections.unmodifiableList(windowsExecutables);
         this.defaults = defaults;
         this.versions = Collections.unmodifiableList(versions);
     }
@@ -210,6 +224,10 @@ public final class GameProfile {
             long steamId = steam == null ? 0 : steam.optLong("appId", 0);
             String appId = steamId == 0 ? "" : String.valueOf(steamId);
             String installDir = steam == null ? "" : steam.optString("installDir", "");
+            List<String> executables = new ArrayList<>();
+            JSONObject windows = root.optJSONObject("windows");
+            JSONArray exes = windows == null ? null : windows.optJSONArray("executables");
+            for (int i = 0; exes != null && i < exes.length(); i++) if (relative(exes.optString(i))) executables.add(exes.optString(i));
             Settings defaults = settings(root.optJSONObject("defaults"));
             List<Version> versions = new ArrayList<>();
             Set<String> seen = new HashSet<>();
@@ -219,7 +237,7 @@ public final class GameProfile {
                 if (version == null || !seen.add(version.id)) continue;
                 versions.add(version);
             }
-            return new GameProfile(id, root.optString("name", id), appId, installDir, defaults, versions);
+            return new GameProfile(id, root.optString("name", id), appId, installDir, executables, defaults, versions);
         }
         catch (JSONException e) {
             Log.w(TAG, "Not a game profile", e);
@@ -234,7 +252,29 @@ public final class GameProfile {
         String status = object.optString("status", STATUS_UNTESTED);
         if (!status.equals(STATUS_WORKS) && !status.equals(STATUS_BROKEN)) status = STATUS_UNTESTED;
         return new Version(id, object.optString("label", id), status, object.optString("notes", ""), object.optString("testedOn", ""),
-                object.optBoolean("default", false), match(object.optJSONObject("match")), settings(object));
+                object.optBoolean("default", false), match(object.optJSONObject("match")), settings(object),
+                ids(object.optJSONArray("containers")), configId(object.optString("preferredContainer", "")), preferred(object.optJSONObject("preferredBySoc")));
+    }
+
+    private static String configId(String id) {
+        return id.matches("[A-Za-z0-9][A-Za-z0-9._-]*") ? id : null;
+    }
+
+    private static List<String> ids(JSONArray array) {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; array != null && i < array.length(); i++) if (configId(array.optString(i)) != null) ids.add(array.optString(i));
+        return ids;
+    }
+
+    private static Map<String, String> preferred(JSONObject object) {
+        Map<String, String> map = new LinkedHashMap<>();
+        if (object == null) return map;
+        Iterator<String> keys = object.keys();
+        while (keys.hasNext()) {
+            String soc = keys.next();
+            if (configId(soc) != null && configId(object.optString(soc)) != null) map.put(soc, object.optString(soc));
+        }
+        return map;
     }
 
     private static Match match(JSONObject object) {

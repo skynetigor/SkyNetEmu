@@ -163,6 +163,7 @@ private class ContainerEditorStateV2(
         WineThemeManager.getUserWallpaperFile(context).takeIf { it.isFile }?.lastModified() ?: 0L
     )
     var mouseWarp by mutableStateOf(editing?.getExtra("mouseWarpOverride", "disable") ?: "disable")
+    var fileCache by mutableStateOf((editing?.getExtra("fileCache", "") ?: "") == "1")
     var drives by mutableStateOf(editing?.drives ?: Container.DEFAULT_DRIVES)
 
     var renderer by mutableStateOf(
@@ -316,7 +317,7 @@ private class ContainerEditorStateV2(
         displayXPerformanceMode, displayXPresentAtRefreshRate, displayXBackPressure,
         displayXPrecisePresentation, graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, boxPreset, exclusive, xinput, dinput,
-        syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
+        syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, fileCache, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
     ).joinToString("|")
 }
@@ -486,6 +487,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setLC_ALL(state.locale)
         container.putExtra("hudMode", state.hudMode.toString())
         container.putExtra("mouseWarpOverride", state.mouseWarp)
+        container.putExtra("fileCache", if (state.fileCache) "1" else "0")
         container.putExtra("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
         container.putExtra("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0")
         container.saveData()
@@ -548,6 +550,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 put("extraData", JSONObject()
                     .put("hudMode", state.hudMode.toString())
                     .put("mouseWarpOverride", state.mouseWarp)
+                    .put("fileCache", if (state.fileCache) "1" else "0")
                     .put("useDisplayX", if (state.renderer == "DisplayX") "1" else "0")
                     .put("surfaceFormat", state.surfaceFormat)
                     .put("trueDisplayX", if (state.trueDisplayX) "1" else "0")
@@ -1091,6 +1094,15 @@ private fun ContainerCategoryV2(
                     SettingChoice(label, selected, entries) { s.components[key] = entries.indexOf(it).coerceAtLeast(0) }
                     if (index != containerComponentRowsV2.lastIndex) SettingsDivider()
                 }
+            }
+            SettingsCard {
+                SettingToggle(
+                    "File system cache (experimental)",
+                    s.fileCache,
+                    description = "Speeds up games kept on shared storage by answering repeated file-system questions from memory. " +
+                        "It may show stale data if the game's files are changed outside the game. Applies at the next start. " +
+                        "A shortcut can override it."
+                ) { s.fileCache = it }
             }
         }
     }

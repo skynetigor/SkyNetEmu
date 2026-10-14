@@ -39,6 +39,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerManager;
+import com.winlator.cmod.container.ShortcutWriter;
 import com.winlator.cmod.core.ExeIconExtractor;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.StringUtils;
@@ -90,6 +91,19 @@ public class FileManagerFragment extends Fragment {
 
     private interface ContainerAction {
         void onContainerSelected(Container container);
+    }
+
+    /** A file manager for choosing the exe of a new game: "Add this game" hands the path to {@link MainActivity#onGamePicked}. */
+    public static FileManagerFragment forNewGame() {
+        FileManagerFragment fragment = new FileManagerFragment();
+        Bundle args = new Bundle();
+        args.putBoolean("pick_game", true);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    private boolean pickingGame() {
+        return getArguments() != null && getArguments().getBoolean("pick_game", false);
     }
 
     /** A file manager whose "run" and "add shortcut" actions go to the given Wine container without asking. */
@@ -635,79 +649,6 @@ public class FileManagerFragment extends Fragment {
         }
     }
 
-    private File getRemovableStorageRoot(File file) {
-        if (file == null) return null;
-        String path = normalizeFilePath(file.getAbsolutePath());
-        if (!path.startsWith("/storage/")) return null;
-
-        String rest = path.substring("/storage/".length());
-        int slash = rest.indexOf('/');
-        String volume = slash >= 0 ? rest.substring(0, slash) : rest;
-        if (volume.isEmpty() || volume.equals("emulated") || volume.equals("self")) return null;
-
-        File root = new File("/storage/" + volume);
-        return root.exists() && root.isDirectory() ? root : null;
-    }
-
-    private void setDriveMapping(Container container, String letter, String path) {
-        StringBuilder rebuilt = new StringBuilder();
-        for (String[] drive : container.drivesIterator()) {
-            if (drive == null || drive.length < 2 || drive[0] == null || drive[1] == null) continue;
-            String existingLetter = drive[0].replace(":", "").trim().toUpperCase(Locale.ENGLISH);
-            if (existingLetter.equals(letter)) continue;
-            rebuilt.append(existingLetter).append(':').append(drive[1]);
-        }
-        rebuilt.append(letter).append(':').append(path);
-        container.setDrives(rebuilt.toString());
-        container.saveData();
-    }
-
-    private boolean ensureExternalStorageMapped(Container container, File file) {
-        File volumeRoot = getRemovableStorageRoot(file);
-        if (volumeRoot == null) return true;
-
-        String filePath = normalizeFilePath(file.getAbsolutePath());
-        String volumePath = normalizeFilePath(volumeRoot.getAbsolutePath());
-        String volumeName = volumeRoot.getName();
-        boolean[] used = new boolean[26];
-
-        for (String[] drive : container.drivesIterator()) {
-            if (drive == null || drive.length < 2 || drive[0] == null || drive[1] == null) continue;
-            String letter = drive[0].replace(":", "").trim().toUpperCase(Locale.ENGLISH);
-            if (letter.length() == 1) {
-                int index = letter.charAt(0) - 'A';
-                if (index >= 0 && index < used.length) used[index] = true;
-            }
-
-            String mappedPath = normalizeFilePath(drive[1]);
-            if (!mappedPath.isEmpty() && (filePath.equals(mappedPath) || filePath.startsWith(mappedPath + File.separator))) {
-                WineUtils.createDosdevicesSymlinks(container);
-                return true;
-            }
-
-            String legacyRoot = normalizeFilePath("/mnt/media_rw/" + volumeName);
-            if (mappedPath.equals(legacyRoot) || mappedPath.startsWith(legacyRoot + File.separator)) {
-                setDriveMapping(container, letter, volumePath);
-                WineUtils.createDosdevicesSymlinks(container);
-                return true;
-            }
-        }
-
-        char driveLetter = 0;
-        for (char candidate = 'E'; candidate <= 'Y'; candidate++) {
-            int index = candidate - 'A';
-            if (!used[index]) {
-                driveLetter = candidate;
-                break;
-            }
-        }
-        if (driveLetter == 0) return false;
-
-        setDriveMapping(container, String.valueOf(driveLetter), volumePath);
-        WineUtils.createDosdevicesSymlinks(container);
-        return true;
-    }
-
     private String getContainerWineHome(Container container) {
         File imagefs = new File(requireContext().getFilesDir(), "imagefs");
         String imagefsPath = normalizeFilePath(imagefs.getAbsolutePath());
@@ -808,7 +749,7 @@ public class FileManagerFragment extends Fragment {
 
     private void runFileDirectly(File file, Container container) {
         try {
-            if (!ensureExternalStorageMapped(container, file)) {
+            if (!ShortcutWriter.ensureExternalStorageMapped(container, file)) {
                 Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
                 return;
             }
@@ -837,12 +778,12 @@ public class FileManagerFragment extends Fragment {
 
     private void createShortcutDirectly(File file, Container container) {
         try {
-            if (!ensureExternalStorageMapped(container, file)) {
+            if (!ShortcutWriter.ensureExternalStorageMapped(container, file)) {
                 Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
                 return;
             }
 
-            String displayName = getSmartDisplayName(file);
+            String displayName = ShortcutWriter.smartName(file);
             File shortcutsDir = container.getDesktopDir();
             if (!shortcutsDir.exists()) shortcutsDir.mkdirs();
             if (new File(shortcutsDir, displayName + ".desktop").exists()) {
@@ -888,45 +829,10 @@ public class FileManagerFragment extends Fragment {
     }
 
     private void writeShortcut(File file, Container container, String displayName) {
-        try {
-            String unixPath = file.getAbsolutePath();
-            String winePrefix = getContainerWineHome(container) + "/.wine";
-            File shortcutsDir = container.getDesktopDir();
-            File desktopFile = new File(shortcutsDir, displayName + ".desktop");
-
-            try (PrintWriter writer = new PrintWriter(new FileWriter(desktopFile))) {
-                writer.println("[Desktop Entry]");
-                writer.println("Name=" + displayName);
-                writer.println("Exec=env WINEPREFIX=\"" + winePrefix + "\" wine \"" + unixPath + "\"");
-                writer.println("Type=Application");
-                writer.println("Icon=" + displayName);
-                writer.println("container_id:" + container.id);
-            }
+        if (ShortcutWriter.write(requireContext(), file, container, displayName, null, null) != null) {
             Toast.makeText(getContext(), "Game added to Library!", Toast.LENGTH_SHORT).show();
-
-            File iconDir64 = container.getIconsDir(64);
-            if (!iconDir64.exists()) iconDir64.mkdirs();
-            File iconDest = new File(iconDir64, displayName + ".png");
-            boolean iconExtracted = ExeIconExtractor.extractIcon(file, iconDest);
-
-            File iconsDir = new File(Environment.getExternalStorageDirectory(), "Winlator/icons");
-            if (!iconsDir.exists()) iconsDir.mkdirs();
-            if (iconExtracted) {
-                File userIcon = new File(iconsDir, displayName + ".png");
-                if (!userIcon.exists()) {
-                    try {
-                        FileUtils.copy(iconDest, userIcon);
-                    } catch (Exception ignored) {}
-                }
-            }
-
-            File coversDir = new File(Environment.getExternalStorageDirectory(), "Winlator/covers");
-            if (!coversDir.exists()) coversDir.mkdirs();
-            File autoCover = new File(coversDir, displayName + ".png");
-            if (autoCover.exists()) autoCover.delete();
-        } catch (Exception e) {
-            e.printStackTrace();
         }
+        else Toast.makeText(getContext(), "Could not add the game", Toast.LENGTH_LONG).show();
     }
 
     private void copyToClipboard(File file, boolean isCut) {
@@ -1158,12 +1064,18 @@ public class FileManagerFragment extends Fragment {
     private void showFileOptions(File file, View anchor) {
         PopupMenu popup = new PopupMenu(getContext(), anchor);
         if (isExecutable(file)) {
-            popup.getMenu().add("Run / Open").setOnMenuItemClickListener(item -> {
-                performContainerAction(file, container -> runFileDirectly(file, container));
-                return true;
-            });
+            if (!pickingGame()) {
+                popup.getMenu().add("Run / Open").setOnMenuItemClickListener(item -> {
+                    performContainerAction(file, container -> runFileDirectly(file, container));
+                    return true;
+                });
+            }
             popup.getMenu().add("Add this game").setOnMenuItemClickListener(item -> {
-                performContainerAction(file, container -> createShortcutDirectly(file, container));
+                if (pickingGame() && requireActivity() instanceof MainActivity) {
+                    ((MainActivity) requireActivity()).onGamePicked(file);
+                } else {
+                    performContainerAction(file, container -> createShortcutDirectly(file, container));
+                }
                 return true;
             });
         }
@@ -1192,53 +1104,6 @@ public class FileManagerFragment extends Fragment {
             return true;
         });
         popup.show();
-    }
-
-    private String getSmartDisplayName(File file) {
-        String filename = cleanGameName(file.getName());
-        String lowerName = filename.toLowerCase(Locale.ENGLISH);
-        List<String> genericNames = Arrays.asList(
-                "game", "launcher", "setup", "installer", "start", "run",
-                "speed", "update", "patch", "loader", "client", "app", "main", "boot", "play",
-                "application", "shipping", "x64", "x86", "win64", "win32", "binaries"
-        );
-        boolean isModOrGeneric = false;
-        if (lowerName.contains("mod") || lowerName.contains("fix") || lowerName.contains("crack") || lowerName.contains("patch")) {
-            isModOrGeneric = true;
-        }
-        if (!isModOrGeneric && filename.length() < 4) isModOrGeneric = true;
-        if (!isModOrGeneric) {
-            for (String gen : genericNames) {
-                if (lowerName.equals(gen) || lowerName.startsWith(gen + " ")) {
-                    isModOrGeneric = true;
-                    break;
-                }
-            }
-        }
-        if (isModOrGeneric) {
-            File parent = file.getParentFile();
-            if (parent != null) {
-                String parentName = cleanGameName(parent.getName());
-                List<String> genericFolders = Arrays.asList("bin", "bin32", "bin64", "system", "release", "retail", "win64");
-                if (genericFolders.contains(parentName.toLowerCase(Locale.ENGLISH))) {
-                    File grandParent = parent.getParentFile();
-                    if (grandParent != null) return cleanGameName(grandParent.getName());
-                }
-                return parentName;
-            }
-        }
-        return filename;
-    }
-
-    private String cleanGameName(String filename) {
-        String name = filename;
-        int pos = name.lastIndexOf('.');
-        if (pos > 0) name = name.substring(0, pos);
-        name = name.replace("_", " ").replace(".", " ").replace("-", " ");
-        name = name.replaceAll("(?i)\\b(v\\d+|repack|setup|installer|portable|goty|edition)\\b", "");
-        name = name.replaceAll("[^a-zA-Z0-9 ]", "");
-        name = name.replaceAll("\\s+", " ").trim();
-        return name;
     }
 
     private File getFileIconCacheFile(File file) {

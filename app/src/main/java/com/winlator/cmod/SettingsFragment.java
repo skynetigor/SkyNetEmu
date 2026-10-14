@@ -477,7 +477,8 @@ public class SettingsFragment extends Fragment {
                 wineDebugOptions,
                 steamSummary(context),
                 steamReady(context),
-                gameProfilesSummary(context)
+                gameProfilesSummary(context),
+                preferences.getBoolean(com.winlator.cmod.telemetry.Telemetry.PREF_ENABLED, false)
         );
     }
 
@@ -671,6 +672,17 @@ public class SettingsFragment extends Fragment {
                 if (normalized.isEmpty()) normalized = DEFAULT_WINE_DEBUG_CHANNELS;
                 preferences.edit().putString("wine_debug_channels", normalized).apply();
                 refreshCompose();
+            }
+
+            @Override
+            public void onTelemetryChanged(boolean on) {
+                com.winlator.cmod.telemetry.Telemetry.setEnabled(requireContext(), on);
+                refreshCompose();
+            }
+
+            @Override
+            public void onShowTelemetryData() {
+                com.winlator.cmod.telemetry.TelemetryScreen.show(requireActivity());
             }
 
             @Override

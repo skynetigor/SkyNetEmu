@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "description": "SkyNetEmu telemetry events, schema version 1. The ingest service validates against this file and docs/telemetry/gen_template.py generates the Elasticsearch index template from it. A field that is not listed for an event's dataset is dropped. Numbers outside min/max are clamped. Strings are cut at max.",
+  "datasets": {
+    "skynet.session": {
+      "actions": ["app_started"],
+      "fields": []
+    },
+    "skynet.funnel": {
+      "actions": ["add_game_started", "exe_picked", "game_recognised", "game_unrecognised", "config_chosen", "container_created", "shortcut_created", "game_launched"],
+      "fields": ["skynet.game.id", "skynet.game.version", "skynet.config.id"]
+    },
+    "skynet.game_session": {
+      "actions": ["session_ended"],
+      "fields": [
+        "skynet.game.id", "skynet.game.version", "skynet.config.id", "skynet.wine", "skynet.emulator", "skynet.driver",
+        "skynet.file_cache", "skynet.storage", "skynet.time_to_window_ms", "skynet.time_to_renderer_ms", "event.duration",
+        "skynet.fps.avg", "skynet.fps.p1_low", "skynet.frametime.p99_ms", "skynet.cpu.avg_pct", "skynet.gpu.avg_pct",
+        "skynet.temp.cpu_max_c", "skynet.temp.battery_max_c", "skynet.thermal.max_status", "skynet.memory.peak_used_bytes",
+        "skynet.battery.drain_pct", "skynet.exit.code", "skynet.exit.kind"
+      ]
+    },
+    "skynet.error": {
+      "actions": ["container_create", "import_warning", "download", "add_game", "launch", "app_crash", "anr", "native_crash", "low_memory_kill", "killed_by_signal", "excessive_resource_kill"],
+      "fields": ["error.type", "error.message", "error.stack_trace", "skynet.error.stage", "skynet.error.occurred_at", "skynet.exit.code", "skynet.exit.rss_kb"]
+    }
+  },
+  "common": {
+    "required": ["@timestamp", "event.id", "event.dataset", "event.action", "user.id", "session.id", "skynet.telemetry.schema"],
+    "fields": [
+      "@timestamp", "event.id", "event.dataset", "event.action", "event.outcome", "user.id", "session.id",
+      "service.name", "service.version", "skynet.build.type", "host.os.name", "host.os.version", "skynet.android.sdk",
+      "device.manufacturer", "device.model.identifier", "skynet.soc.family", "skynet.soc.model", "skynet.gpu.renderer",
+      "skynet.memory.total_bytes", "skynet.telemetry.schema"
+    ]
+  },
+  "added_by_service": ["event.ingested", "skynet.ingest.version", "skynet.client_timestamp", "skynet.timestamp_fixed"],
+  "fields": {
+    "@timestamp": {"type": "date"},
+    "event.id": {"type": "keyword", "uuid": true},
+    "event.dataset": {"type": "keyword", "enum": ["skynet.session", "skynet.funnel", "skynet.game_session", "skynet.error"]},
+    "event.action": {"type": "keyword", "max": 64},
+    "event.outcome": {"type": "keyword", "enum": ["success", "failure"]},
+    "event.duration": {"type": "long", "min": 0, "max": 86400000000000},
+    "event.ingested": {"type": "date"},
+    "user.id": {"type": "keyword", "uuid": true},
+    "session.id": {"type": "keyword", "uuid": true},
+    "service.name": {"type": "keyword", "enum": ["skynetemu"]},
+    "service.version": {"type": "keyword", "max": 32},
+    "host.os.name": {"type": "keyword", "max": 32},
+    "host.os.version": {"type": "keyword", "max": 32},
+    "device.manufacturer": {"type": "keyword", "max": 64},
+    "device.model.identifier": {"type": "keyword", "max": 64},
+    "error.type": {"type": "keyword", "max": 128},
+    "error.message": {"type": "text", "max": 300, "free_text": true},
+    "error.stack_trace": {"type": "wildcard", "max": 8192, "free_text": true},
+    "skynet.build.type": {"type": "keyword", "enum": ["debug", "release"]},
+    "skynet.android.sdk": {"type": "integer", "min": 1, "max": 99},
+    "skynet.soc.family": {"type": "keyword", "max": 64},
+    "skynet.soc.model": {"type": "keyword", "max": 64},
+    "skynet.gpu.renderer": {"type": "keyword", "max": 128},
+    "skynet.memory.total_bytes": {"type": "long", "min": 0, "max": 1099511627776},
+    "skynet.telemetry.schema": {"type": "integer", "min": 1, "max": 1000},
+    "skynet.ingest.version": {"type": "keyword", "max": 32},
+    "skynet.client_timestamp": {"type": "date"},
+    "skynet.timestamp_fixed": {"type": "boolean"},
+    "skynet.game.id": {"type": "keyword", "max": 100},
+    "skynet.game.version": {"type": "keyword", "max": 64},
+    "skynet.config.id": {"type": "keyword", "max": 100},
+    "skynet.wine": {"type": "keyword", "max": 128},
+    "skynet.emulator": {"type": "keyword", "max": 64},
+    "skynet.driver": {"type": "keyword", "max": 128},
+    "skynet.file_cache": {"type": "boolean"},
+    "skynet.storage": {"type": "keyword", "enum": ["internal", "shared"]},
+    "skynet.time_to_window_ms": {"type": "long", "min": 0, "max": 3600000},
+    "skynet.time_to_renderer_ms": {"type": "long", "min": 0, "max": 3600000},
+    "skynet.fps.avg": {"type": "float", "min": 0, "max": 1000},
+    "skynet.fps.p1_low": {"type": "float", "min": 0, "max": 1000},
+    "skynet.frametime.p99_ms": {"type": "float", "min": 0, "max": 10000},
+    "skynet.cpu.avg_pct": {"type": "float", "min": 0, "max": 100},
+    "skynet.gpu.avg_pct": {"type": "float", "min": 0, "max": 100},
+    "skynet.temp.cpu_max_c": {"type": "float", "min": -20, "max": 150},
+    "skynet.temp.battery_max_c": {"type": "float", "min": -20, "max": 150},
+    "skynet.thermal.max_status": {"type": "integer", "min": 0, "max": 6},
+    "skynet.memory.peak_used_bytes": {"type": "long", "min": 0, "max": 1099511627776},
+    "skynet.battery.drain_pct": {"type": "float", "min": -100, "max": 100},
+    "skynet.exit.code": {"type": "integer", "min": -1000000, "max": 1000000},
+    "skynet.exit.kind": {"type": "keyword", "enum": ["user", "wine_exit", "crash", "killed"]},
+    "skynet.exit.rss_kb": {"type": "long", "min": 0, "max": 1073741824},
+    "skynet.error.stage": {"type": "keyword", "enum": ["container_create", "import_warning", "download", "add_game", "launch", "app_crash", "anr", "native_crash", "low_memory_kill", "killed_by_signal", "excessive_resource_kill"]},
+    "skynet.error.occurred_at": {"type": "date", "epoch_millis": true}
+  }
+}

@@ -130,6 +130,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             return;
         }
 
+        // Installs set up before telemetry existed are asked once, after the screen is up.
+        getWindow().getDecorView().post(() -> com.winlator.cmod.telemetry.TelemetryScreen.askOnce(this));
+
         notificationService = new Intent(this, NotificationService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED))
             createNotificationChannel();
@@ -499,6 +502,38 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
                 .addToBackStack(null)
                 .replace(R.id.FLFragmentContainer, target)
+                .commit();
+    }
+
+    /** "Add game": the user picks the exe first; the container is made for the game afterwards. */
+    public void addGame() {
+        com.winlator.cmod.telemetry.Telemetry.event("skynet.funnel", "add_game_started");
+        getSupportFragmentManager().beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame())
+                .commit();
+    }
+
+    /** The file manager of {@link #addGame} found the exe: the file manager is left and the screen for choosing how to run it opens. */
+    public void onGamePicked(java.io.File exe) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, com.winlator.cmod.ui.addgame.AddGameFragment.Companion.newInstance(exe.getAbsolutePath()))
+                .commit();
+    }
+
+    /** The shortcut is written: the add-game screen is left and the game's own screen opens. */
+    public void gameAdded(String shortcutPath) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, new GameDetailFragment(shortcutPath))
                 .commit();
     }
 

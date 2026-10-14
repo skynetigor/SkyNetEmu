@@ -128,6 +128,11 @@ android {
         versionCode 24
         versionName "2.0.0"
 
+        // Where telemetry goes (default: the SkyNetEmu service; gradle property telemetryEndpoint overrides it) and the public key that
+        // goes with it (gradle property telemetryKey; empty sends no key). The registry's telemetry.json can name another endpoint.
+        buildConfigField 'String', 'TELEMETRY_ENDPOINT', "\"${project.findProperty('telemetryEndpoint') ?: 'https://skynetemu-telemetry.skynetapp.dev/v1/events'}\""
+        buildConfigField 'String', 'TELEMETRY_KEY', "\"${project.findProperty('telemetryKey') ?: ''}\""
+
         // External native build from Winlator
         externalNativeBuild {
             cmake {
