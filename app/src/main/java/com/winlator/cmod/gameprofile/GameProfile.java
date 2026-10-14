@@ -40,6 +40,9 @@ public final class GameProfile {
             "graphicsFilterMode", "graphicsSharpness", "graphicsPostFXMode", "graphicsColorMode",
             "fullscreenStretched", "simTouchScreen", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal", "fileCache", "hudMode")));
 
+    /** What a game runs on: Wine (a Windows exe) or a Linux container (a native program). */
+    public enum Platform { WINDOWS, LINUX }
+
     /** Whether a game is started without Steam by default, and the argument that makes it so ("-nosteam"). */
     public static final class NoSteam {
         public final boolean enabled;
@@ -139,6 +142,9 @@ public final class GameProfile {
         /** Null when the version is only chosen by hand (or as the default). */
         public final Match match;
         public final Settings settings;
+        /** What this version changes on one platform only ("windows" / "linux" object of the version); empty when nothing. */
+        public final Settings windowsSettings;
+        public final Settings linuxSettings;
         /** The ids of the container configs (containers/index.json) that work for this version. */
         public final List<String> containers;
         /** The config a new shortcut gets when the device has no entry in {@link #preferredBySoc}; null when {@link #containers} is empty. */
@@ -147,6 +153,7 @@ public final class GameProfile {
         public final Map<String, String> preferredBySoc;
 
         Version(String id, String label, String status, String notes, String testedOn, boolean isDefault, Match match, Settings settings,
+                Settings windowsSettings, Settings linuxSettings,
                 List<String> containers, String preferredContainer, Map<String, String> preferredBySoc) {
             this.id = id;
             this.label = label;
@@ -156,6 +163,8 @@ public final class GameProfile {
             this.isDefault = isDefault;
             this.match = match;
             this.settings = settings;
+            this.windowsSettings = windowsSettings;
+            this.linuxSettings = linuxSettings;
             this.containers = Collections.unmodifiableList(containers);
             this.preferredContainer = preferredContainer;
             this.preferredBySoc = Collections.unmodifiableMap(preferredBySoc);
@@ -169,17 +178,26 @@ public final class GameProfile {
     public final String steamInstallDir;
     /** The game's exes on Windows, relative to the game's folder ("Bin64/BeamNG.drive.x64.exe"); how a picked exe is recognised. */
     public final List<String> windowsExecutables;
+    /** The game's programs on Linux, relative to the game's folder ("BinLinux/BeamNG.drive.x64"); how a picked Linux program is recognised. */
+    public final List<String> linuxExecutables;
     public final Settings defaults;
+    /** What the game changes on one platform only (the "defaults" of its "windows" / "linux" object). */
+    public final Settings windowsDefaults;
+    public final Settings linuxDefaults;
     public final List<Version> versions;
 
     private GameProfile(String id, String name, String steamAppId, String steamInstallDir, List<String> windowsExecutables,
-                        Settings defaults, List<Version> versions) {
+                        List<String> linuxExecutables, Settings defaults, Settings windowsDefaults, Settings linuxDefaults,
+                        List<Version> versions) {
         this.id = id;
         this.name = name;
         this.steamAppId = steamAppId;
         this.steamInstallDir = steamInstallDir;
         this.windowsExecutables = Collections.unmodifiableList(windowsExecutables);
+        this.linuxExecutables = Collections.unmodifiableList(linuxExecutables);
         this.defaults = defaults;
+        this.windowsDefaults = windowsDefaults;
+        this.linuxDefaults = linuxDefaults;
         this.versions = Collections.unmodifiableList(versions);
     }
 
@@ -194,11 +212,32 @@ public final class GameProfile {
         return null;
     }
 
-    /** The game's defaults with the version's settings laid over them (the version may be null). */
+    /** The programs that identify the game on a platform. */
+    public List<String> executables(Platform platform) {
+        return platform == Platform.LINUX ? linuxExecutables : windowsExecutables;
+    }
+
+    /** Whether the game has anything for the platform (programs to recognise it by, or a container config of that kind is up to the catalog). */
+    public boolean supports(Platform platform) {
+        return !executables(platform).isEmpty();
+    }
+
+    /** The game's defaults with the version's settings laid over them, for Wine (the version may be null). */
     public Settings effective(Version version) {
+        return effective(version, Platform.WINDOWS);
+    }
+
+    /** The shared defaults, then the platform's, then the version's, then the version's own for the platform. */
+    public Settings effective(Version version, Platform platform) {
         Settings merged = defaults.copy();
+        overlay(merged, platform == Platform.LINUX ? linuxDefaults : windowsDefaults);
         if (version == null) return merged;
-        Settings over = version.settings;
+        overlay(merged, version.settings);
+        overlay(merged, platform == Platform.LINUX ? version.linuxSettings : version.windowsSettings);
+        return merged;
+    }
+
+    private static void overlay(Settings merged, Settings over) {
         if (over.executable != null) merged.executable = over.executable;
         if (over.noSteam != null) merged.noSteam = over.noSteam;
         if (over.args != null) merged.args = new ArrayList<>(over.args);
@@ -211,7 +250,6 @@ public final class GameProfile {
             if (entry.getValue() == null) merged.extras.remove(entry.getKey());
             else merged.extras.put(entry.getKey(), entry.getValue());
         }
-        return merged;
     }
 
     /** Reads a game file; null when it is not one (the reason is logged). Entries that cannot be read are dropped, not fatal. */
@@ -228,7 +266,15 @@ public final class GameProfile {
             JSONObject windows = root.optJSONObject("windows");
             JSONArray exes = windows == null ? null : windows.optJSONArray("executables");
             for (int i = 0; exes != null && i < exes.length(); i++) if (relative(exes.optString(i))) executables.add(exes.optString(i));
+            List<String> linuxExecutables = new ArrayList<>();
+            JSONObject linux = root.optJSONObject("linux");
+            JSONArray linuxExes = linux == null ? null : linux.optJSONArray("executables");
+            for (int i = 0; linuxExes != null && i < linuxExes.length(); i++) if (relative(linuxExes.optString(i))) linuxExecutables.add(linuxExes.optString(i));
             Settings defaults = settings(root.optJSONObject("defaults"));
+            Settings windowsDefaults = settings(windows == null ? null : windows.optJSONObject("defaults"));
+            Settings linuxDefaults = settings(linux == null ? null : linux.optJSONObject("defaults"));
+            // A game that lists no Wine programs but names one executable in its defaults is a Linux game (older files).
+            if (linuxExecutables.isEmpty() && executables.isEmpty() && linux == null && defaults.executable != null) linuxExecutables.add(defaults.executable);
             List<Version> versions = new ArrayList<>();
             Set<String> seen = new HashSet<>();
             JSONArray array = root.optJSONArray("versions");
@@ -237,7 +283,7 @@ public final class GameProfile {
                 if (version == null || !seen.add(version.id)) continue;
                 versions.add(version);
             }
-            return new GameProfile(id, root.optString("name", id), appId, installDir, executables, defaults, versions);
+            return new GameProfile(id, root.optString("name", id), appId, installDir, executables, linuxExecutables, defaults, windowsDefaults, linuxDefaults, versions);
         }
         catch (JSONException e) {
             Log.w(TAG, "Not a game profile", e);
@@ -253,6 +299,7 @@ public final class GameProfile {
         if (!status.equals(STATUS_WORKS) && !status.equals(STATUS_BROKEN)) status = STATUS_UNTESTED;
         return new Version(id, object.optString("label", id), status, object.optString("notes", ""), object.optString("testedOn", ""),
                 object.optBoolean("default", false), match(object.optJSONObject("match")), settings(object),
+                settings(object.optJSONObject("windows")), settings(object.optJSONObject("linux")),
                 ids(object.optJSONArray("containers")), configId(object.optString("preferredContainer", "")), preferred(object.optJSONObject("preferredBySoc")));
     }
 

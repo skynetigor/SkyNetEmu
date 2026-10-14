@@ -63,11 +63,12 @@ public final class EnvironmentProvider {
 
         JSONObject data = envelope.container;
         String wine = wineOverride != null ? wineOverride : data.optString("wineVersion", WineInfo.MAIN_WINE_VERSION.identifier());
-        Container existing = find(manager, config.id, wine);
+        boolean linux = Container.TYPE_LINUX.equals(data.optString("type"));
+        Container existing = linux ? findLinux(manager, config.id) : find(manager, config.id, wine);
         if (existing != null) return new Result(existing, false, warnings);
 
         try {
-            if (wineOverride != null) {
+            if (wineOverride != null && !linux) {
                 data.put("wineVersion", wineOverride);
                 data.put("name", config.name + " · " + wineOverride);
             }
@@ -83,10 +84,20 @@ public final class EnvironmentProvider {
             return new Result(null, false, warnings);
         }
 
-        ContainerImporter.Result result = ContainerImporter.run(context, manager, contents, envelope, progress);
+        // A Linux config names a runtime, a driver and an emulator: what is not installed here is downloaded first.
+        ContainerImporter.LinuxPlan plan = linux ? ContainerImporter.planLinux(context, data) : null;
+        ContainerImporter.Result result = ContainerImporter.run(context, manager, contents, envelope, progress, plan);
         warnings.addAll(result.warnings);
         for (String warning : result.warnings) ErrorReporter.report("import_warning", "ImportWarning", warning);
         return new Result(result.container, result.container != null, warnings);
+    }
+
+    /** The Linux container made from the config, or null. */
+    public static Container findLinux(ContainerManager manager, String configId) {
+        for (Container container : manager.getContainers()) {
+            if (container.isLinux() && configId.equals(container.getExtra(EXTRA_CONFIG_ID))) return container;
+        }
+        return null;
     }
 
     /** The container made from the config with this Wine, or null. */

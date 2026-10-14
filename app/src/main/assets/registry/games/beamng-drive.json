@@ -11,6 +11,11 @@
    "Bin64/BeamNG.drive.x64.exe"
   ]
  },
+ "linux": {
+  "executables": [
+   "BinLinux/BeamNG.drive.x64"
+  ]
+ },
  "defaults": {
   "args": [],
   "extras": {

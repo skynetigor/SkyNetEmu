@@ -21,8 +21,10 @@ public final class GameMatcher {
         /** How the version was recognised, or "default". */
         public final String how;
         public final File folder;
+        public final GameProfile.Platform platform;
 
-        Result(GameProfile game, GameProfile.Version version, String how, File folder) {
+        Result(GameProfile game, GameProfile.Version version, String how, File folder, GameProfile.Platform platform) {
+            this.platform = platform;
             this.game = game;
             this.version = version;
             this.how = how;
@@ -34,16 +36,21 @@ public final class GameMatcher {
 
     /** @return null when no game of the registry has this exe */
     public static Result match(Context context, String exePath, boolean allowNetwork) {
+        return match(context, exePath, GameProfile.Platform.WINDOWS, allowNetwork);
+    }
+
+    /** @return null when no game of the registry has this program on the platform */
+    public static Result match(Context context, String exePath, GameProfile.Platform platform, boolean allowNetwork) {
         if (exePath == null) return null;
         String path = exePath.replace('\\', '/');
         String lower = path.toLowerCase(Locale.ROOT);
         for (GameProfileCatalog.IndexEntry entry : GameProfileCatalog.index(context, allowNetwork)) {
             GameProfile game = GameProfileCatalog.game(context, entry.id, allowNetwork);
             if (game == null) continue;
-            File folder = folderOf(game.windowsExecutables, path, lower);
+            File folder = folderOf(game.executables(platform), path, lower);
             if (folder == null) continue;
             GameVersionMatcher.Match version = GameVersionMatcher.detect(game, folder, -1);
-            return new Result(game, version == null ? null : version.version, version == null ? "" : version.how, folder);
+            return new Result(game, version == null ? null : version.version, version == null ? "" : version.how, folder, platform);
         }
         return null;
     }

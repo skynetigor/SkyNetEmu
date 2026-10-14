@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -60,8 +61,13 @@ import com.winlator.cmod.contents.ContainerConfigCatalog
 import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.contents.RegistryCache
 import com.winlator.cmod.core.DeviceInfo
+import com.winlator.cmod.core.ExecutableKind
 import com.winlator.cmod.gameprofile.ConfigChooser
 import com.winlator.cmod.gameprofile.GameMatcher
+import com.winlator.cmod.gameprofile.GameProfile
+import com.winlator.cmod.gameprofile.GameProfiles
+import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxProgramInstaller
 import com.winlator.cmod.telemetry.ErrorReporter
 import com.winlator.cmod.telemetry.Telemetry
 import com.winlator.cmod.ui.onboarding.TileCard
@@ -104,12 +110,16 @@ class AddGameFragment : Fragment() {
     private sealed class Pick {
         class Registry(val config: ContainerConfigCatalog.Config) : Pick()
         class Standard(val arm64ec: Boolean) : Pick()
+        class StandardLinux : Pick()
         class Existing(val container: Container) : Pick()
         class Imported(val envelope: ContainerProfile.Envelope) : Pick()
     }
 
     private var phase by mutableStateOf<Phase>(Phase.Loading)
     private lateinit var exe: File
+    /** What the picked file runs on: decides the container kind, the registry programs it is matched with and the configs offered. */
+    private var kind = ExecutableKind.WINDOWS
+    private val platform get() = if (kind.isLinux) GameProfile.Platform.LINUX else GameProfile.Platform.WINDOWS
     private var match: GameMatcher.Result? = null
     private var configs: Map<String, ContainerConfigCatalog.Config> = emptyMap()
 
@@ -117,6 +127,7 @@ class AddGameFragment : Fragment() {
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         exe = File(requireArguments().getString("exe").orEmpty())
+        kind = ExecutableKind.of(exe).takeIf { it != ExecutableKind.NONE } ?: ExecutableKind.WINDOWS
         if (phase is Phase.Loading) load()
         return ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -141,10 +152,11 @@ class AddGameFragment : Fragment() {
         Thread {
             RegistryCache.get(context, "socs.json", RegistryCache.TTL_INDEX, true)
             Telemetry.event("skynet.funnel", "exe_picked")
-            val found = GameMatcher.match(context, exe.absolutePath, true)
+            val found = GameMatcher.match(context, exe.absolutePath, platform, true)
             Telemetry.event("skynet.funnel", if (found == null) "game_unrecognised" else "game_recognised",
                 "skynet.game.id", found?.game?.id, "skynet.game.version", found?.version?.id)
-            val all = ContainerConfigCatalog.all(context, true)
+            // Only the configs made for the file's platform: a Windows exe never gets a Linux container, nor the other way round.
+            val all = ContainerConfigCatalog.all(context, true).filterValues { it.platform == platform }
             val soc = DeviceInfo.soc(context)
             val manager = ContainerManager(context)
             val model = buildModel(found, all, soc, manager)
@@ -176,12 +188,21 @@ class AddGameFragment : Fragment() {
         val tiles = mutableListOf<Tile>()
         val version = found?.version
         if (found != null) {
-            val choice = ConfigChooser.choose(version, soc.family, all)
+            val choice = ConfigChooser.choose(version, soc.family, all, platform)
             val listed = (version?.containers ?: found.game.versions.flatMap { it.containers }).distinct().mapNotNull { all[it] }
             if (choice != null) recommended = configTile(all.getValue(choice.configId), 0, true)
             listed.filter { it.id != choice?.configId }.forEach { tiles.add(configTile(it, 1, false)) }
         }
-        for (arm64ec in listOf(false, true)) {
+        if (kind.isLinux) {
+            val box64 = StandardLinuxContainer.usesBox64(kind)
+            tiles.add(Tile(
+                Icons.Outlined.Terminal,
+                if (box64) "Standard Linux, x86_64" else "Standard Linux, ARM64",
+                if (box64) "The app's default Linux settings: the Linux runtime and Turnip driver, the program run through Box64."
+                else "The app's default Linux settings: the Linux runtime and Turnip driver, the ARM64 program run as it is.",
+                if (found == null) "A good start for a program the list does not know." else "Not tuned for this game.", 2
+            ) { choose(Pick.StandardLinux()) })
+        } else for (arm64ec in listOf(false, true)) {
             if (StandardContainer.runtimeFor(context, arm64ec) == null) continue
             tiles.add(Tile(
                 Icons.Outlined.DesktopWindows,
@@ -196,9 +217,10 @@ class AddGameFragment : Fragment() {
             tiles.add(Tile(Icons.Outlined.SportsEsports, "Settings of another game",
                 "Takes the settings made for another game from the list, for a game that is similar.", "Pick one from the list.", 2) { pickOther(others) })
         }
-        if (manager.containers.isNotEmpty()) {
+        val mine = manager.containers.filter { it.isLinux == kind.isLinux }
+        if (mine.isNotEmpty()) {
             tiles.add(Tile(Icons.Outlined.Folder, "An environment you already have",
-                "Puts the game into one of your containers and leaves it as it is.", "Pick one from your list.", 2) { pickExisting(manager.containers) })
+                "Puts the game into one of your ${if (kind.isLinux) "Linux" else "Windows"} containers and leaves it as it is.", "Pick one from your list.", 2) { pickExisting(mine) })
         }
         tiles.add(Tile(Icons.Outlined.Download, "Import a .wcfg file",
             "Makes an environment from a profile exported on another device or shared by someone.", "You have a profile file.", 2) {
@@ -206,10 +228,10 @@ class AddGameFragment : Fragment() {
         })
 
         val subtitle = when {
-            found == null -> "The list has nothing for this game. Choose how to run it."
+            found == null -> "The list has nothing for this ${if (kind.isLinux) "Linux program" else "game"}. Choose how to run it."
             version == null -> "${found.game.name}. The version was not recognised."
             else -> "${found.game.name} ${version.label} · ${soc.label()}"
-        }
+        } + if (kind.isLinux && found != null) " · Linux" else ""
         return Model(found?.game?.name ?: ShortcutWriter.smartName(exe), subtitle, recommended, tiles)
     }
 
@@ -238,10 +260,77 @@ class AddGameFragment : Fragment() {
             return
         }
         try {
-            choose(Pick.Imported(ContainerProfile.parse(text)))
+            val envelope = ContainerProfile.parse(text)
+            if (envelope.container.optString("type") == Container.TYPE_LINUX != kind.isLinux) {
+                Toast.makeText(requireContext(),
+                    if (kind.isLinux) "This profile is for a Windows environment, the program is a Linux one." else "This profile is for a Linux environment, the game is a Windows one.",
+                    Toast.LENGTH_LONG).show()
+                return
+            }
+            choose(Pick.Imported(envelope))
         } catch (e: Exception) {
             Toast.makeText(requireContext(), "Invalid container profile: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    // -- the Linux shortcut ---------------------------------------------------------------------------------------------
+
+    /**
+     * The shortcut of a Linux program in [container]: the program stays where it is when the container can run it there,
+     * otherwise the user says what to copy in. Sets [phase] when it fails or is cancelled; null then.
+     */
+    private fun addLinuxProgram(context: android.content.Context, container: Container, name: String, game: GameMatcher.Result?,
+                                extras: MutableMap<String, String?>): File? {
+        if (container.isLinux && LinuxEmulator.choice(container) == LinuxEmulator.NONE && kind != ExecutableKind.LINUX_ARM64) {
+            phase = Phase.Failed("This container has no x86 emulator, so it cannot run this x86-64 program. Choose a container with Box64 or FEX.")
+            return null
+        }
+        var guest = exe.absolutePath
+        if (LinuxProgramInstaller.needsCopy(container, exe)) {
+            val mode = askCopyMode() ?: run {
+                phase = Phase.Failed("Nothing was added.")
+                return null
+            }
+            phase = Phase.Working("Copying into the container…")
+            guest = LinuxProgramInstaller.copy(container, exe, mode) ?: run {
+                phase = Phase.Failed("Copying failed. Is there room on the device?")
+                return null
+            }
+        }
+        game?.let {
+            // The game's folder as the container sees it, when the program lies where the registry says it does.
+            val root = it.game.linuxExecutables.firstOrNull { rel -> guest.endsWith("/$rel") }?.let { rel -> guest.removeSuffix("/$rel") }
+            extras[GameProfiles.EXTRA_ROOT] = root.orEmpty()
+        }
+        return LinuxProgramInstaller.addShortcut(container, name, guest, extras)
+    }
+
+    /** Asks (on the screen, from the worker thread) what of the program's folder goes into the container; null when cancelled. */
+    private fun askCopyMode(): LinuxProgramInstaller.CopyMode? {
+        val host = activity ?: return null
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var answer: LinuxProgramInstaller.CopyMode? = null
+        val game = LinuxProgramInstaller.gameFolder(exe)
+        val modes = if (game != null) listOf(LinuxProgramInstaller.CopyMode.PROGRAM_ONLY, LinuxProgramInstaller.CopyMode.WHOLE_GAME, LinuxProgramInstaller.CopyMode.FOLDER)
+        else listOf(LinuxProgramInstaller.CopyMode.FOLDER)
+        val labels = modes.map {
+            when (it) {
+                LinuxProgramInstaller.CopyMode.PROGRAM_ONLY -> "Program only, the game's data stays on storage"
+                LinuxProgramInstaller.CopyMode.WHOLE_GAME -> "The whole game folder \"${game?.name}\""
+                else -> "The folder \"${exe.parentFile?.name}\" only"
+            }
+        }.toTypedArray()
+        host.runOnUiThread {
+            AlertDialog.Builder(host)
+                .setTitle("Copy into the container?")
+                .setMessage("Programs cannot run from shared storage here, so they are copied into the Linux container. What goes in?")
+                .setItems(labels) { _, which -> answer = modes[which]; latch.countDown() }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> latch.countDown() }
+                .setOnCancelListener { latch.countDown() }
+                .show()
+        }
+        latch.await()
+        return answer
     }
 
     // -- making the container and the shortcut ---------------------------------------------------------------------------
@@ -254,6 +343,7 @@ class AddGameFragment : Fragment() {
             "skynet.config.id", when (pick) {
                 is Pick.Registry -> pick.config.id
                 is Pick.Standard -> if (pick.arm64ec) StandardContainer.CONFIG_ARM64EC else StandardContainer.CONFIG_X64
+                is Pick.StandardLinux -> StandardLinuxContainer.configId(kind)
                 is Pick.Existing -> "existing"
                 is Pick.Imported -> "imported"
             })
@@ -275,6 +365,10 @@ class AddGameFragment : Fragment() {
                     StandardContainer.ensure(context, manager, contents, pick.arm64ec)
                         .also { if (it == null) warnings.add("No installed Wine or Proton of this kind. Install one in Settings.") }
                 }
+                is Pick.StandardLinux -> {
+                    phase = Phase.Working("Making the environment…")
+                    StandardLinuxContainer.ensure(context, manager, contents, kind, progress, warnings)
+                }
                 is Pick.Existing -> pick.container
                 is Pick.Imported -> {
                     val result = ContainerImporter.run(context, manager, contents, pick.envelope, progress)
@@ -290,24 +384,30 @@ class AddGameFragment : Fragment() {
             }
             Telemetry.event("skynet.funnel", "container_created", "skynet.game.id", game?.game?.id)
             phase = Phase.Working("Adding the game…")
-            if (!ShortcutWriter.ensureExternalStorageMapped(container, exe)) {
-                ErrorReporter.report("add_game", "NoDriveLetter", "No free drive letter")
-                phase = Phase.Failed("No free drive letter for the SD card the game is on.")
-                return@Thread
-            }
-            val settings = game?.game?.effective(game.version)
+            val settings = game?.game?.effective(game.version, platform)
             val extras = LinkedHashMap<String, String?>()
             if (settings != null) extras.putAll(settings.extras)
             if (game != null) {
-                extras["gameProfile"] = game.game.id
-                game.version?.let { extras["gameProfileVersion"] = it.id }
+                extras[GameProfiles.EXTRA_PROFILE] = game.game.id
+                game.version?.let { extras[GameProfiles.EXTRA_VERSION] = it.id }
             }
             (pick as? Pick.Registry)?.let { extras["containerConfig"] = it.config.id }
             val name = ShortcutWriter.freeName(container, game?.game?.name ?: ShortcutWriter.smartName(exe))
-            val desktop = ShortcutWriter.write(context, exe, container, name, extras, settings?.args)
+            val desktop: File? = if (container.isLinux) {
+                addLinuxProgram(context, container, name, game, extras)
+            } else {
+                if (!ShortcutWriter.ensureExternalStorageMapped(container, exe)) {
+                    ErrorReporter.report("add_game", "NoDriveLetter", "No free drive letter")
+                    phase = Phase.Failed("No free drive letter for the SD card the game is on.")
+                    return@Thread
+                }
+                ShortcutWriter.write(context, exe, container, name, extras, settings?.args)
+            }
             if (desktop == null) {
-                ErrorReporter.report("add_game", "ShortcutWrite", "The shortcut could not be written")
-                phase = Phase.Failed("The shortcut could not be written.")
+                if (phase !is Phase.Failed) {
+                    ErrorReporter.report("add_game", "ShortcutWrite", "The shortcut could not be written")
+                    phase = Phase.Failed("The shortcut could not be written.")
+                }
                 return@Thread
             }
             Telemetry.event("skynet.funnel", "shortcut_created",

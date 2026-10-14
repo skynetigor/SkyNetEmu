@@ -1056,21 +1056,41 @@ public class FileManagerFragment extends Fragment {
         builder.show();
     }
 
+    private final java.util.HashMap<String, com.winlator.cmod.core.ExecutableKind> kinds = new java.util.HashMap<>();
+
+    /** What the file runs on, read once per file and modification time (the list sorts and binds it many times). */
+    private com.winlator.cmod.core.ExecutableKind kindOf(File f) {
+        String key = f.getPath() + "|" + f.lastModified();
+        com.winlator.cmod.core.ExecutableKind kind = kinds.get(key);
+        if (kind == null) {
+            kind = com.winlator.cmod.core.ExecutableKind.of(f);
+            kinds.put(key, kind);
+        }
+        return kind;
+    }
+
+    /** A Windows program, or a Linux one that a Linux container can run (a 32-bit x86 one is listed too, to be refused when picked). */
     private boolean isExecutable(File f) {
-        String name = f.getName().toLowerCase(Locale.ENGLISH);
-        return name.endsWith(".exe") || name.endsWith(".msi") || name.endsWith(".bat");
+        com.winlator.cmod.core.ExecutableKind kind = kindOf(f);
+        // Linux programs are only for "Add game"; the file manager of a Wine container knows Windows programs only.
+        return kind == com.winlator.cmod.core.ExecutableKind.WINDOWS || (kind != com.winlator.cmod.core.ExecutableKind.NONE && pickingGame());
     }
 
     private void showFileOptions(File file, View anchor) {
         PopupMenu popup = new PopupMenu(getContext(), anchor);
         if (isExecutable(file)) {
-            if (!pickingGame()) {
+            boolean windows = kindOf(file) == com.winlator.cmod.core.ExecutableKind.WINDOWS;
+            if (!pickingGame() && windows) {
                 popup.getMenu().add("Run / Open").setOnMenuItemClickListener(item -> {
                     performContainerAction(file, container -> runFileDirectly(file, container));
                     return true;
                 });
             }
             popup.getMenu().add("Add this game").setOnMenuItemClickListener(item -> {
+                if (kindOf(file) == com.winlator.cmod.core.ExecutableKind.LINUX_X86) {
+                    Toast.makeText(getContext(), "32-bit x86 Linux programs cannot run in a Linux container.", Toast.LENGTH_LONG).show();
+                    return true;
+                }
                 if (pickingGame() && requireActivity() instanceof MainActivity) {
                     ((MainActivity) requireActivity()).onGamePicked(file);
                 } else {
@@ -1134,7 +1154,8 @@ public class FileManagerFragment extends Fragment {
             }
         }
 
-        iconView.setImageResource(R.drawable.icon_wine);
+        boolean linux = kindOf(file) != com.winlator.cmod.core.ExecutableKind.WINDOWS;
+        iconView.setImageResource(linux ? R.drawable.winz_ic_terminal : R.drawable.icon_wine);
         iconView.setImageTintList(ColorStateList.valueOf(WinlatorLegacyTheme.onSurfaceVariant(requireContext())));
         if (!file.getName().toLowerCase(Locale.ENGLISH).endsWith(".exe")) return;
 

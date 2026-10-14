@@ -25,7 +25,17 @@ public final class ConfigChooser {
 
     /** @return null when the version lists no config */
     public static Choice choose(GameProfile.Version version, String socFamily, Map<String, ContainerConfigCatalog.Config> configs) {
+        return choose(version, socFamily, configs, GameProfile.Platform.WINDOWS);
+    }
+
+    /** As above, over the configs made for the platform only. */
+    public static Choice choose(GameProfile.Version version, String socFamily, Map<String, ContainerConfigCatalog.Config> all,
+                                GameProfile.Platform platform) {
         if (version == null || version.containers.isEmpty()) return null;
+        Map<String, ContainerConfigCatalog.Config> configs = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, ContainerConfigCatalog.Config> entry : all.entrySet()) {
+            if (entry.getValue().platform == platform) configs.put(entry.getKey(), entry.getValue());
+        }
         String bySoc = socFamily == null ? null : version.preferredBySoc.get(socFamily);
         if (bySoc != null && configs.containsKey(bySoc)) return new Choice(bySoc, true);
         String preferred = version.preferredContainer != null && configs.containsKey(version.preferredContainer)

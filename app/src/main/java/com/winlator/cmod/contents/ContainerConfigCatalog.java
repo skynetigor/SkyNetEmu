@@ -3,6 +3,8 @@ package com.winlator.cmod.contents;
 import android.content.Context;
 import android.util.Log;
 
+import com.winlator.cmod.gameprofile.GameProfile;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -35,8 +37,12 @@ public final class ContainerConfigCatalog {
         public final String channel;
         public final List<String> tags;
         public final List<String> testedOn;
+        /** What the config is for: a Wine prefix (the default) or a Linux container ("platform": "linux"). */
+        public final GameProfile.Platform platform;
 
-        Config(String id, String name, String file, String description, List<String> socs, String channel, List<String> tags, List<String> testedOn) {
+        Config(String id, String name, String file, String description, List<String> socs, String channel, List<String> tags, List<String> testedOn,
+               GameProfile.Platform platform) {
+            this.platform = platform;
             this.id = id;
             this.name = name;
             this.file = file;
@@ -70,7 +76,8 @@ public final class ContainerConfigCatalog {
                 if (!id.matches("[A-Za-z0-9][A-Za-z0-9._-]*") || !file.matches("containers/[A-Za-z0-9][A-Za-z0-9._-]*\\.wcfg")) continue;
                 String channel = "prerelease".equals(c.optString("channel")) ? "prerelease" : "stable";
                 configs.put(id, new Config(id, c.optString("name", id), file, c.optString("description", ""), strings(c.optJSONArray("socs")),
-                        channel, strings(c.optJSONArray("tags")), strings(c.optJSONArray("testedOn"))));
+                        channel, strings(c.optJSONArray("tags")), strings(c.optJSONArray("testedOn")),
+                        "linux".equals(c.optString("platform")) ? GameProfile.Platform.LINUX : GameProfile.Platform.WINDOWS));
             }
         }
         catch (org.json.JSONException e) {
