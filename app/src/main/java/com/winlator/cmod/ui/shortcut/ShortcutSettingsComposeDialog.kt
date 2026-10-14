@@ -15,6 +15,11 @@ import com.winlator.cmod.ui.theme.WinZTheme
 object ShortcutSettingsComposeDialog {
     @JvmStatic
     fun show(fragment: Fragment, shortcut: Shortcut) {
+        if (shortcut.hasFixedSettings()) {
+            android.widget.Toast.makeText(fragment.requireContext(),
+                "This shortcut belongs to the container and cannot be changed.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         val dialog = ComponentDialog(fragment.requireContext())
         dialog.show()
         dialog.window?.apply {
@@ -33,7 +38,13 @@ object ShortcutSettingsComposeDialog {
             decorView.systemUiVisibility = immersiveUiFlagsV2()
         }
         dialog.setContentView(ComposeView(fragment.requireContext()).apply {
-            setContent { WinZTheme { ShortcutEditorV2(fragment, shortcut, dialog::dismiss) } }
+            // A Linux program has no Wine settings to edit: its own page, with the launch options.
+            setContent {
+                WinZTheme {
+                    if (shortcut.container.isLinux) LinuxShortcutEditor(shortcut, dialog::dismiss)
+                    else ShortcutEditorV2(fragment, shortcut, dialog::dismiss)
+                }
+            }
         })
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }

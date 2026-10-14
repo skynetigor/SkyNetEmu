@@ -60,9 +60,13 @@ private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageMa
     ?: "Proton 10.0-5 arm64ec"
 
 private const val frameGenerationCategory = "Frame Generation"
+private const val linuxRuntimeCategory = "Linux Runtime"
+private const val linuxDriverCategory = "Linux Driver"
+private const val linuxEmulatorCategory = "Linux Emulator"
+private const val linuxRootfsCategory = "Linux Root Filesystem"
 
 private val componentCategories = listOf(
-    "Recommended", "Wine & Proton", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", frameGenerationCategory
+    "Recommended", "Wine & Proton", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", linuxRuntimeCategory, linuxDriverCategory, linuxEmulatorCategory, linuxRootfsCategory, frameGenerationCategory
 )
 
 private val latestRecommendedTypes = setOf("DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64")
@@ -120,7 +124,7 @@ private fun componentVersionParts(type: String, name: String): List<Int> {
     return token.split('.').map { it.toIntOrNull() ?: 0 }
 }
 
-private val componentTypeOrder = listOf("Proton", "Wine", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools")
+private val componentTypeOrder = listOf("Proton", "Wine", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", linuxRuntimeCategory, linuxDriverCategory, linuxEmulatorCategory, linuxRootfsCategory)
 
 /** Every number in the name, e.g. "Turnip_Gen8_V36" -> [8, 36], so drivers and 11.0-2 style suffixes sort sensibly. */
 private fun nameNumbers(name: String): List<Int> =
@@ -397,7 +401,8 @@ private fun ComponentSearchField(value: String, onChange: (String) -> Unit) {
 @Composable
 private fun LocalInstallButton(category: String, cb: OnboardingCallbacks, modifier: Modifier) {
     when (category) {
-        frameGenerationCategory -> Unit
+        frameGenerationCategory, linuxRuntimeCategory, linuxEmulatorCategory, linuxRootfsCategory -> Unit
+        linuxDriverCategory -> OutlinedButton(onClick = { cb.onBrowseLinuxDriver() }, modifier = modifier) { Text("Install Linux driver") }
         "AdrenoTools" -> OutlinedButton(onClick = { cb.onBrowseDriver() }, modifier = modifier) { Text("Install local driver") }
         else -> OutlinedButton(onClick = { cb.onBrowseLocal() }, modifier = modifier) { Text("Install local component") }
     }
@@ -544,8 +549,16 @@ private fun ComponentCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
+                    if (item.detail != null && !busy) {
+                        Text(
+                            item.detail,
+                            color = if (item.blocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
-                if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+                if (busy && item.cancellable) TextButton(onClick = { cb.onCancel(item.id) }) { Text("Cancel") }
+                else if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
                 else if (item.installed && item.removable) {
                     OutlinedButton(onClick = { cb.onRemove(item.id) }, enabled = !locked && !item.inUse) {
                         Icon(Icons.Outlined.DeleteOutline, null)
@@ -553,7 +566,7 @@ private fun ComponentCard(
                         Text(if (item.inUse) "In use" else "Delete")
                     }
                 } else if (!item.installed) {
-                    OutlinedButton(onClick = { cb.onInstall(item.id) }, enabled = !locked) { Text("Download") }
+                    OutlinedButton(onClick = { cb.onInstall(item.id) }, enabled = !locked && !item.blocked) { Text("Download") }
                 } else Icon(Icons.Outlined.Check, null)
             }
             if (busy) {

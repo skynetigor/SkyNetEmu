@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,8 +74,7 @@ private val startOptions = listOf(
         ContainerStart.Linux, Icons.Outlined.Terminal,
         "Linux system",
         "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver and x86 games through Box64 or FEX.",
-        "Games that have a Linux build, such as BeamNG.drive.",
-        enabled = false, badge = "Coming soon"
+        "Games that have a Linux build, such as BeamNG.drive."
     ) { MaterialTheme.colorScheme.tertiary },
     StartOption(
         ContainerStart.Game, Icons.Outlined.SportsEsports,

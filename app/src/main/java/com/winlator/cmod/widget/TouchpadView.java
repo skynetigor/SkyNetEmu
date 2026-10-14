@@ -45,6 +45,7 @@ public class TouchpadView extends View {
     private boolean scrolling = false;
     private final XServer xServer;
     private Runnable fourFingersTapCallback;
+    private Runnable fingerUpCallback;
     private final float[] xform = XForm.getInstance();
     private boolean simTouchScreen = false;
     private boolean continueClick = true;
@@ -102,6 +103,12 @@ public class TouchpadView extends View {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         updateXform(w, h, xServer.screenInfo.width, xServer.screenInfo.height);
+        resolutionScale = 1000.0f / Math.min(xServer.screenInfo.width, xServer.screenInfo.height);
+    }
+
+    /** The X screen changed size (a program picked another resolution): touches map onto the new one. */
+    public void onScreenResized() {
+        updateXform(getWidth(), getHeight(), xServer.screenInfo.width, xServer.screenInfo.height);
         resolutionScale = 1000.0f / Math.min(xServer.screenInfo.width, xServer.screenInfo.height);
     }
 
@@ -449,6 +456,7 @@ public class TouchpadView extends View {
 
 
     private void handleFingerUp(Finger finger1) {
+        if (fingerUpCallback != null) fingerUpCallback.run();
         switch (numFingers) {
             case 1:
                 if (simTouchScreen) {
@@ -545,12 +553,17 @@ public class TouchpadView extends View {
         }
     }
 
+    /** Linux programs (games with an embedded browser) miss clicks shorter than a frame or two; Wine is fine with 30 ms. */
+    private long clickDuration() {
+        return xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) != null ? 120 : 30;
+    }
+
     private void releasePointerButtonLeft(final Finger finger) {
         if (pointerButtonLeftEnabled && finger == fingerPointerButtonLeft && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
             postDelayed(() -> {
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
                 fingerPointerButtonLeft = null;
-            }, 30);
+            }, clickDuration());
         }
     }
 
@@ -559,7 +572,7 @@ public class TouchpadView extends View {
             postDelayed(() -> {
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
                 fingerPointerButtonRight = null;
-            }, 30);
+            }, clickDuration());
         }
     }
 
@@ -619,6 +632,11 @@ public class TouchpadView extends View {
 
     public void setPointerButtonRightEnabled(boolean pointerButtonRightEnabled) {
         this.pointerButtonRightEnabled = pointerButtonRightEnabled;
+    }
+
+    /** Called when a finger is lifted (after the click it makes has been handed to the X server). */
+    public void setFingerUpCallback(Runnable fingerUpCallback) {
+        this.fingerUpCallback = fingerUpCallback;
     }
 
     public void setFourFingersTapCallback(Runnable fourFingersTapCallback) {

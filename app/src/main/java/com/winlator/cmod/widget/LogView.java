@@ -186,7 +186,7 @@ public class LogView extends View {
     }
 
     public static void setFilename(String file) {
-        // Programs without an extension keep their whole name.
+        // Programs without an extension (native Linux binaries) keep their whole name.
         int dot = file.lastIndexOf(".");
         fileName = dot > 0 ? file.substring(0, dot) : file;
     }
