@@ -551,6 +551,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         dxwrapper = container.getDXWrapper();
         String dxwrapperConfig = container.getDXWrapperConfig();
         screenSize = container.getScreenSize();
+        if (desktopSession) {
+            // A desktop uses the display's own size (and is drawn at 2x on it, see LinuxDesktop); the container may name another.
+            String own = container.getExtra(com.winlator.cmod.linux.LinuxDesktop.EXTRA_SCREEN);
+            screenSize = own.isEmpty() ? "native" : own;
+        }
         winHandler.setInputType((byte) container.getInputType());
         lc_all = container.getLC_ALL();
 
@@ -658,6 +663,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     new com.winlator.cmod.xserver.extensions.XFixesExtension());
             xServer.extensions.put(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE,
                     new com.winlator.cmod.xserver.extensions.XInput2Extension(xServer));
+            // An on-screen keyboard of the desktop types through XTEST.
+            xServer.extensions.put(com.winlator.cmod.xserver.extensions.XTestExtension.MAJOR_OPCODE,
+                    new com.winlator.cmod.xserver.extensions.XTestExtension(xServer));
             // Like a real X server, start with the focus on PointerRoot, not None.
             xServer.windowManager.setFocus(xServer.windowManager.rootWindow, WindowManager.FocusRevertTo.POINTER_ROOT);
             xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
@@ -1495,6 +1503,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XClientRequestHandler.trace = new File(container.getLinuxHomeDir(), ".xtrace").exists();
         // A file named .xstats turns on a summary every few seconds of what the X server is asked to do and how long it takes (tag XStats).
         XClientRequestHandler.stats = new File(container.getLinuxHomeDir(), ".xstats").exists();
+        XClientRequestHandler.keyTrace = new File(container.getLinuxHomeDir(), ".xkeys").exists();
         // A file named .xdump logs the stack of every thread 15 seconds in (logcat tag XDump): for finding what a hung X client waits on.
         if (new File(container.getLinuxHomeDir(), ".xdump").exists()) {
             Thread dumper = new Thread(() -> {
@@ -1522,7 +1531,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command()
+        if (desktopSession) com.winlator.cmod.linux.LinuxDesktop.prepareLaunchers(this, container);
+        String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command(this, com.winlator.cmod.linux.LinuxDesktop.scaleFor(xServer.screenInfo.width))
                 : LinuxSession.programCommand(this, container, shortcut);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
@@ -2471,6 +2481,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * but the program shows its text cursor (an I-beam) over one, so that is what is looked for after a tap.
      */
     private void setupLinuxKeyboard(FrameLayout rootView) {
+        if (desktopSession) {
+            // A desktop has its own on-screen keyboard (skynet-osk, run by the session): the Android one stays closed, and a tap on
+            // a text field is passed to the keyboard of the desktop through a file in the guest's /tmp, which it watches.
+            File show = new File(com.winlator.cmod.linux.LinuxRuntime.rootDir(this, linuxRuntime.id), "tmp/" + com.winlator.cmod.linux.LinuxDesktop.OSK_SHOW_FILE);
+            touchpadView.setFingerUpCallback(() -> {
+                for (int delay : new int[]{300, 800, 1500}) {
+                    handler.postDelayed(() -> {
+                        com.winlator.cmod.xserver.Window under = xServer.inputDeviceManager.getPointWindow();
+                        com.winlator.cmod.xserver.Cursor cursor = under != null ? under.attributes.getCursor() : null;
+                        if (com.winlator.cmod.xserver.TextCursor.isTextCursor(cursor)) {
+                            try { show.createNewFile(); } catch (java.io.IOException ignored) {}
+                        }
+                    }, delay);
+                }
+            });
+            return;
+        }
         if (!"0".equals(container.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
             android.widget.ImageButton button = new android.widget.ImageButton(this);
             button.setImageResource(android.R.drawable.ic_menu_edit);

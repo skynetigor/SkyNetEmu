@@ -76,6 +76,7 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
 
     public void freeResources() {
         try (XLock lock = xServer.lockAll()) {
+            xServer.grabManager.removeGrabsOf(this);
             while (!resources.isEmpty()) {
                 XResource resource = resources.remove(resources.size()-1);
                 if (resource instanceof Window) {

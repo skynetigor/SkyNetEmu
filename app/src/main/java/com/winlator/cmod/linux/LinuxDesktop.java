@@ -42,20 +42,112 @@ public final class LinuxDesktop {
      * Starts what makes a desktop and stays until the panel is closed: a session bus, the settings daemon, the window manager
      * without compositing, the panel and the desktop. The script is the session's first process, so the session ends with it.
      */
-    public static String[] command() {
+    /** Container extra: the desktop's screen size, "native" or WIDTHxHEIGHT; the screen's own size when absent. */
+    public static final String EXTRA_SCREEN = "linuxDesktopScreen";
+
+    /** The size a desktop at this width of screen is drawn at: twice, on a screen as dense as a phone's. */
+    public static int scaleFor(int screenWidth) {
+        return screenWidth >= 1800 ? 2 : 1;
+    }
+
+    /** The file the app creates in the guest's /tmp when a text field was tapped: the on-screen keyboard shows itself and removes it. */
+    public static final String OSK_SHOW_FILE = "skynet-osk-show";
+
+    /** Prefix of what is generated for the desktop's launchers, so the next start can tell it from what the user made. */
+    private static final String GENERATED = "skynet-";
+
+    /**
+     * Makes the container's shortcuts launchable from the desktop. A shortcut's file only names a guest program, which a double-click
+     * could not start (an x86-64 one needs the emulator, a script needs bash, the launch options and the game's profile apply). Each
+     * shortcut gets a script that runs the very command its own session would, a launcher for it on the desktop and in the
+     * applications menu, and {@code skynet-run} runs any program the same way (Thunar's "Open With"). Everything is made again at
+     * every start, so it follows the shortcuts; the shortcut files themselves are not touched. Steam's shortcuts are left out.
+     */
+    public static void prepareLaunchers(Context context, Container container) {
+        File home = container.getLinuxHomeDir();
+        File skynet = new File(home, ".skynet");
+        File scripts = new File(skynet, "launch");
+        File icons = new File(skynet, "desktop");
+        File apps = new File(home, ".local/share/applications");
+        File bin = new File(skynet, "bin");
+        for (File dir : new File[]{scripts, icons, apps, bin, new File(home, ".config")}) dir.mkdirs();
+        for (File dir : new File[]{scripts, icons, apps}) {
+            File[] old = dir.listFiles();
+            if (old == null) continue;
+            for (File file : old) if (dir != apps || file.getName().startsWith(GENERATED)) file.delete();
+        }
+
+        LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
+        File emulatorFile = new File(skynet, "emulator");
+        if (emulator != null && !LinuxEmulator.NONE.equals(LinuxEmulator.choice(container))) {
+            com.winlator.cmod.core.FileUtils.writeString(emulatorFile, LinuxEmulator.binary(emulator).getPath() + "\n");
+        }
+        else emulatorFile.delete();
+
+        File run = new File(bin, "skynet-run");
+        com.winlator.cmod.core.FileUtils.writeString(run, "#!/bin/bash\n"
+                + "# skynet-run PROGRAM [ARGS]: runs a program of this container as its shortcuts do (x86-64 ones through the emulator).\n"
+                + "prog=\"$1\"; shift\n"
+                + "[ -f \"$prog\" ] || { echo \"skynet-run: no program $prog\" >&2; exit 2; }\n"
+                + "chmod +x \"$prog\" 2>/dev/null; cd \"$(dirname \"$prog\")\" || exit 1\n"
+                + "case \"$prog\" in *.sh) exec bash \"$prog\" \"$@\";; esac\n"
+                + "machine=$(od -An -tu2 -j18 -N2 \"$prog\" 2>/dev/null | tr -d ' ')\n"
+                + "if [ \"$machine\" = 62 ] && [ -s \"$HOME/.skynet/emulator\" ]; then exec \"$(cat \"$HOME/.skynet/emulator\")\" \"$prog\" \"$@\"; fi\n"
+                + "exec \"$prog\" \"$@\"\n");
+        com.winlator.cmod.core.FileUtils.chmod(run, 493 /* octal 0755 */);
+        com.winlator.cmod.core.FileUtils.writeString(new File(apps, GENERATED + "run.desktop"), "[Desktop Entry]\nType=Application\n"
+                + "Name=Run with SkyNet\nExec=skynet-run %f\nNoDisplay=true\nTerminal=false\n"
+                + "MimeType=application/x-executable;application/x-pie-executable;application/x-sharedlib;application/x-shellscript;\n");
+
+        File[] shortcuts = container.getDesktopDir().listFiles((dir, name) -> name.endsWith(".desktop"));
+        if (shortcuts != null) {
+            for (File file : shortcuts) {
+                com.winlator.cmod.container.Shortcut shortcut;
+                try {
+                    shortcut = new com.winlator.cmod.container.Shortcut(container, file);
+                }
+                catch (RuntimeException e) {
+                    continue; // a file that is not a shortcut
+                }
+                if (shortcut.path == null || shortcut.path.isEmpty() || LinuxSession.isSteam(shortcut.path) || LinuxSession.isSteamGame(shortcut.path)) continue;
+                String slug = file.getName().substring(0, file.getName().length() - ".desktop".length()).replaceAll("[^A-Za-z0-9._-]", "_");
+                StringBuilder script = new StringBuilder("#!/bin/bash\nmkdir -p \"$HOME/.skynet\"\nexec >>\"$HOME/.skynet/launch.log\" 2>&1\n"
+                        + "echo \"== $(date) " + slug + "\"\nexec");
+                for (String word : LinuxSession.programCommand(context, container, shortcut)) script.append(" '").append(word.replace("'", "'\\''")).append('\'');
+                File launch = new File(scripts, slug + ".sh");
+                com.winlator.cmod.core.FileUtils.writeString(launch, script.append('\n').toString());
+                com.winlator.cmod.core.FileUtils.chmod(launch, 493);
+                String entry = "[Desktop Entry]\nType=Application\nVersion=1.0\nName=" + shortcut.name + "\nExec=/root/.skynet/launch/" + slug
+                        + ".sh\nTerminal=false\nIcon=applications-games\nCategories=Game;\nStartupNotify=false\n";
+                File onDesktop = new File(icons, slug + ".desktop");
+                com.winlator.cmod.core.FileUtils.writeString(onDesktop, entry);
+                com.winlator.cmod.core.FileUtils.chmod(onDesktop, 493); // xfdesktop only launches a trusted (executable) launcher
+                com.winlator.cmod.core.FileUtils.writeString(new File(apps, GENERATED + slug + ".desktop"), entry);
+            }
+        }
+        // The desktop's icons are these launchers; the shortcut files stay where the app keeps them.
+        com.winlator.cmod.core.FileUtils.writeString(new File(home, ".config/user-dirs.dirs"), "XDG_DESKTOP_DIR=\"$HOME/.skynet/desktop\"\n");
+    }
+
+    public static String[] command(Context context, int scale) {
+        File osk = LinuxSession.stageAsset(context, "linux-shim", "skynet-osk.py");
         return new String[]{"/bin/bash", "-c",
                 "mkdir -p /storage/emulated/0/Winlator/logs; exec >" + LOG + " 2>&1; "
                         + "echo \"== desktop start $(date) DISPLAY=$DISPLAY uid=$(id -u)\"; "
                         + "export XDG_RUNTIME_DIR=/tmp XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE "
                         + "XDG_CONFIG_DIRS=/etc/xdg XDG_DATA_DIRS=/usr/local/share:/usr/share "
                         + "XDG_CONFIG_HOME=$HOME/.config XDG_CACHE_HOME=$HOME/.cache XDG_DATA_HOME=$HOME/.local/share "
-                        + "GTK_THEME=Adwaita; "
+                        // The screen is the display's own size, so a desktop is drawn at 2x on it (windows, text and the panel).
+                        + "GTK_THEME=Adwaita GDK_SCALE=" + scale + "; "
                         + "mkdir -p \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\"; "
                         // gdk-pixbuf 2.44 loads images through glycin, which wants bubblewrap and cannot get it under proot. glycin runs
                         // its decoders without a sandbox when bwrap says it may not make a namespace: this stand-in says so.
                         + "mkdir -p \"$HOME/.skynet/bin\"; "
                         + "printf '#!/bin/sh\\necho \"bwrap: setting up uid map: Permission denied\" >&2\\nexit 1\\n' > \"$HOME/.skynet/bin/bwrap\"; "
                         + "chmod 755 \"$HOME/.skynet/bin/bwrap\"; export PATH=\"$HOME/.skynet/bin:$PATH\"; "
+                        // "Log Out" of the panel asks the session manager, which this desktop has none of: the panel ending ends the desktop.
+                        + "printf '#!/bin/sh\\npkill -x xfce4-panel\\n' > \"$HOME/.skynet/bin/xfce4-session-logout\"; "
+                        + "chmod 755 \"$HOME/.skynet/bin/xfce4-session-logout\"; "
                         + "[ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id; "
                         + "rm -f /tmp/skynet-session-bus; "
                         + "dbus-daemon --session --nofork --address=unix:path=/tmp/skynet-session-bus & "
@@ -63,9 +155,15 @@ public final class LinuxDesktop {
                         // A file ~/.desktop-components.sh replaces the list below (for trying components from a computer).
                         + "if [ -f \"$HOME/.desktop-components.sh\" ]; then . \"$HOME/.desktop-components.sh\"; else "
                         + "xfsettingsd & sleep 1; "
+                        // The window frames come in a 2x set for a dense screen.
+                        + (scale > 1 ? "xfconf-query -c xfwm4 -p /general/theme -n -t string -s Default-xhdpi; " : "")
                         + "xfwm4 --compositor=off & sleep 2; "
                         + "xfce4-panel & panel=$!; sleep 1; "
                         + "xfdesktop & "
+                        // The desktop opens launchers and folders through the file manager service, which has to be running.
+                        + "thunar --daemon & "
+                        // The on-screen keyboard of the desktop: the Android one is not used here.
+                        + (osk != null ? "rm -f /tmp/" + OSK_SHOW_FILE + "; python3 \"" + osk.getPath() + "\" > /tmp/skynet-osk.log 2>&1 & " : "")
                         + "wait $panel; fi; echo \"== desktop ended $?\"",
                 "bannerlator-desktop"};
     }

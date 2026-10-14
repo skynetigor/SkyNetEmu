@@ -433,6 +433,17 @@ public abstract class WindowRequests {
         if (!valueMask.isEmpty()) client.xServer.windowManager.configureWindow(window, valueMask, inputStream, client);
     }
 
+    public static void clearArea(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        int windowId = inputStream.readInt();
+        Window window = client.xServer.windowManager.getWindow(windowId);
+        if (window == null) throw new BadWindow(windowId);
+        short x = inputStream.readShort();
+        short y = inputStream.readShort();
+        short width = inputStream.readShort();
+        short height = inputStream.readShort();
+        window.clearArea(x, y, width & 0xffff, height & 0xffff);
+    }
+
     public static void getGeometry(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int drawableId = inputStream.readInt();
         Drawable drawable =  client.xServer.drawableManager.getDrawable(drawableId);

@@ -692,7 +692,12 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
 
     /** XI_FocusIn / XI_FocusOut. */
     public void onFocus(boolean in, Window window) {
-        sendCrossing(in ? 9 : 10, window, 3, 0, 1);
+        onFocus(in, window, 3);
+    }
+
+    /** @param detail how the focus came to or left the window (Ancestor 0, Virtual 1, Inferior 2, Nonlinear 3, NonlinearVirtual 4) */
+    public void onFocus(boolean in, Window window, int detail) {
+        sendCrossing(in ? 9 : 10, window, detail, 0, 1);
     }
 
     private void sendCrossing(int evType, Window window, int detail, int mode, int focus) {
@@ -708,6 +713,9 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
             for (Selection s : selections) {
                 if (s.window == window && (s.wants(evType, DEVICE_MASTER_POINTER) || s.wants(evType, DEVICE_MASTER_KEYBOARD)) && !targets.contains(s.client)) targets.add(s.client);
             }
+        }
+        if (com.winlator.cmod.xserver.XClientRequestHandler.keyTrace && (evType == 9 || evType == 10)) {
+            android.util.Log.d("XKeys", "XI2 focus " + (evType == 9 ? "in" : "out") + " window=" + window.id + " detail=" + detail + " targets=" + targets.size());
         }
         if (targets.isEmpty()) return;
         Event event = new Event(GENERIC_EVENT) {
@@ -848,6 +856,15 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         if (start == null) start = xServer.windowManager.rootWindow;
 
         int evType = pressed ? EVENT_KEY_PRESS : EVENT_KEY_RELEASE;
+        if (com.winlator.cmod.xserver.XClientRequestHandler.keyTrace) {
+            StringBuilder chain = new StringBuilder();
+            for (Window w = start; w != null; w = w.getParent()) {
+                int n = 0;
+                synchronized (selections) { for (Selection s : selections) if (s.window == w && s.wants(evType, DEVICE_MASTER_KEYBOARD)) n++; }
+                chain.append(w.id).append('(').append(n).append(") ");
+            }
+            android.util.Log.d("XKeys", "XI2 key " + (pressed ? "press" : "release") + " " + (keycode & 0xff) + " chain: " + chain);
+        }
         for (Window window = start; window != null; window = window.getParent()) {
             XI2Event event = deviceEvent(evType, DEVICE_MASTER_KEYBOARD, DEVICE_SLAVE_KEYBOARD, keycode & 0xff, window, window != start ? start : null, buttonState(null), false);
             ArrayList<XClient> targets = new ArrayList<>();

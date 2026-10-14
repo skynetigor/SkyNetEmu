@@ -71,11 +71,14 @@ rm -rf "$work"/stage/usr/share/{man,doc,info,locale,licenses,gtk-doc}
 
 version="$(awk '$2 ~ /^xfce4-session-/ {split($3,a,"-"); print a[1]}' "$work/files.txt" | head -1)"
 [ -n "$version" ] || version="$(awk '/xfce4-session/ {print $3}' "$work/files.txt" | cut -d- -f1)"
-archive="$out/xfce-${version:-dev}.tar.zst"
+# The bundle's revision: raised when its contents change for the same XFCE version (the app tells releases apart by id).
+revision="$(tr -d ' \n' < "$here/revision.txt" 2>/dev/null || true)"
+tag="${version:-dev}${revision:+-r$revision}"
+archive="$out/xfce-$tag.tar.zst"
 ( cd "$work/stage" && COPYFILE_DISABLE=1 bsdtar --no-xattrs -cf - . ) | zstd -19 -T0 -q -f -o "$archive"
 sha="$(shasum -a 256 "$archive" | cut -d' ' -f1)"; size="$(wc -c < "$archive" | tr -d ' ')"
 echo "wrote $archive ($size bytes)"
 cat <<JSON
 Add to the "desktops" list of linux.json (the url is where you publish the file):
-{"id": "xfce-${version:-dev}", "name": "XFCE", "version": "${version:-dev}", "url": "https://.../xfce-${version:-dev}.tar.zst", "sha256": "$sha", "size": $size, "channel": "stable"}
+{"id": "xfce-$tag", "name": "XFCE", "version": "$tag", "url": "https://.../xfce-$tag.tar.zst", "sha256": "$sha", "size": $size, "channel": "stable"}
 JSON
