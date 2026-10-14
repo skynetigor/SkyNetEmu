@@ -40,6 +40,8 @@ import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -168,11 +170,9 @@ internal fun LibraryRoot(
                     )
                 }
             } else {
-                val context = LocalContext.current
-                val hasContainers = rememberHasContainers()
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Surface(
-                        onClick = { addGamesOrContainer(activity, context, hasContainers) },
+                        onClick = { activity?.addGame() },
                         modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surface,
@@ -190,7 +190,7 @@ internal fun LibraryRoot(
                                 Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Add, null, modifier = Modifier.size(34.dp)) }
                             }
                             Spacer(Modifier.height(16.dp))
-                            Text(if (hasContainers) "Add games" else "Add container", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text("Add game", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -229,7 +229,7 @@ private fun LibraryLandscapeHeader(
         LibraryTopIcon(if (grid) Icons.Outlined.ViewList else Icons.Outlined.GridView, false) {
             onGridViewChanged(!grid)
         }
-        LibraryTopIcon(Icons.Outlined.Add, false) { activity?.chooseContainerForNewShortcut() }
+        LibraryTopIcon(Icons.Outlined.Add, false) { activity?.addGame() }
         LibraryTopIcon(Icons.Outlined.Home, true) {}
         LibraryTopIcon(Icons.Outlined.SportsEsports, false) { activity?.navigateToMainDestination(R.id.main_menu_input_controls) }
         LibraryTopIcon(Icons.Outlined.Settings, false) { activity?.navigateToMainDestination(R.id.main_menu_settings) }
@@ -494,6 +494,24 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_EXPORT)
                 }
+            }
+            LibraryActionTileCompat(
+                Icons.Outlined.Storage,
+                "Storage",
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontal = landscape
+            ) {
+                close()
+                cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_STORAGE)
+            }
+            LibraryActionTileCompat(
+                Icons.Outlined.Tune,
+                "Container settings",
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontal = landscape
+            ) {
+                close()
+                cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_CONTAINER)
             }
             LibraryActionTileCompat(
                 Icons.Outlined.DeleteOutline,

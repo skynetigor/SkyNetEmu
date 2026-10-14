@@ -711,13 +711,24 @@ internal fun SettingToggle(
     label: String,
     checked: Boolean,
     enabled: Boolean = true,
+    description: String? = null,
     onChanged: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            if (description != null) {
+                Text(
+                    description,
+                    modifier = Modifier.padding(top = 2.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         Switch(checked = checked, onCheckedChange = onChanged, enabled = enabled)
     }
 }

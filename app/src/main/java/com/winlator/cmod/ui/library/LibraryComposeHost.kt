@@ -81,6 +81,8 @@ class LibraryComposeBinding internal constructor(
 
 object LibraryComposeHost {
     const val ACTION_SETTINGS = "settings"
+    const val ACTION_STORAGE = "storage"
+    const val ACTION_CONTAINER = "container"
     const val ACTION_ICON = "icon"
     const val ACTION_CLONE = "clone"
     const val ACTION_HOME = "home"

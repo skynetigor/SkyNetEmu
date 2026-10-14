@@ -103,6 +103,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
     private val containersState = mutableStateOf<List<Container>>(emptyList())
     private val propertiesState = mutableStateOf<Container?>(null)
     private var showingEditor = false
+    private var editedFromGame = false
 
     private var pendingExportId = -1
     private val exportLauncher =
@@ -123,6 +124,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
         supportFragmentManager.addOnBackStackChangedListener {
             if (supportFragmentManager.backStackEntryCount == 0 && showingEditor) {
                 showingEditor = false
+                // Opened straight into the editor from a game: closing the editor returns to the game.
+                if (editedFromGame) { finish(); return@addOnBackStackChangedListener }
                 refresh()
                 showHome()
             }
@@ -132,6 +135,11 @@ class ContainersSettingsActivity : AppCompatActivity() {
             showHome()
             // Started from the first-run screen with a way of making a container already chosen.
             intent.getStringExtra(EXTRA_START)?.let { startContainer(it) }
+            val edit = intent.getIntExtra(EXTRA_EDIT_CONTAINER, -1)
+            if (edit > 0) {
+                editedFromGame = true
+                openFragment(ContainerCreateComposeFragment.forEdit(edit))
+            }
         }
     }
 
@@ -149,6 +157,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
     companion object {
         /** "linux", "game", "import" or "steam": the screen to open straight away. */
         const val EXTRA_START = "start"
+        /** The id of a container whose editor opens straight away (from a game's "Container settings"). */
+        const val EXTRA_EDIT_CONTAINER = "edit_container"
     }
 
     override fun onResume() {

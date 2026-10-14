@@ -277,8 +277,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     fun detectChoice(path: String): ProfileChoice {
         for (entry in games) {
             val profile = GameProfileCatalog.game(context, entry.id, false) ?: continue
-            val executable = profile.defaults.executable
-            if (executable != null && path.endsWith("/$executable")) return ProfileChoice(entry.id, "")
+            val executables = profile.linuxExecutables + listOfNotNull(profile.defaults.executable)
+            if (executables.any { path.endsWith("/$it") }) return ProfileChoice(entry.id, "")
         }
         return ProfileChoice()
     }
@@ -287,7 +287,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     fun profileExtras(path: String, choice: ProfileChoice?): Map<String, String>? {
         if (choice == null || choice.gameId.isEmpty()) return null
         val profile = GameProfileCatalog.game(context, choice.gameId, false)
-        val executable = profile?.effective(profile.version(choice.versionId))?.executable
+        val executable = profile?.effective(profile.version(choice.versionId), GameProfile.Platform.LINUX)?.executable
         val root = if (executable != null && path.endsWith("/$executable")) path.removeSuffix("/$executable") else ""
         return mapOf(
             GameProfiles.EXTRA_PROFILE to choice.gameId,
@@ -400,9 +400,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 items(programs, key = { it.file.path }) { program ->
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -425,8 +425,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                             }) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
                             Surface(
                                 onClick = { start(program) },
-                                modifier = Modifier.size(44.dp),
-                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.size(46.dp),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Start") } }
@@ -436,9 +436,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 items(unused, key = { "unused:" + it.path }) { folder ->
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -467,7 +467,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         var choice by remember { mutableStateOf(ProfileChoice()) }
         var profile by remember { mutableStateOf<GameProfile?>(null) }
         // With a game profile the path is the game's folder and the program is the profile's executable inside it.
-        val executable = profile?.effective(profile?.version(choice.versionId))?.executable
+        val executable = profile?.effective(profile?.version(choice.versionId), GameProfile.Platform.LINUX)?.executable
         val finalPath = if (choice.gameId.isNotEmpty() && executable != null) path.trim().trimEnd('/') + "/" + executable else path.trim()
         val valid = path.startsWith("/") && path.length > 1
         AlertDialog(

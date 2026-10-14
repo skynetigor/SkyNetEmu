@@ -15,7 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The JSON files of the components repository (games.json, games/&lt;id&gt;.json, linux.json), each downloaded once per
+ * The JSON files of the components repository's registry/ folder (games.json, games/&lt;id&gt;.json, containers/index.json, socs.json), each downloaded once per
  * time-to-live instead of by every screen that needs it.
  *
  * One lookup goes: the copy in memory, a fresh copy on disk, the network, an old copy on disk, the copy bundled in the app
@@ -27,6 +27,8 @@ public final class RegistryCache {
     private static final String TAG = "RegistryCache";
     private static final String DIR = "registry-cache";
     private static final String ASSET_DIR = "registry/";
+    /** Where the registry lives in the components repository. */
+    private static final String REMOTE_DIR = "registry/";
 
     public static final long TTL_INDEX = 6L * 60 * 60 * 1000;
     public static final long TTL_GAME = 24L * 60 * 60 * 1000;
@@ -56,7 +58,7 @@ public final class RegistryCache {
 
     private RegistryCache() {}
 
-    /** The text of {@code relPath} (for example "games.json"), or null. Never blocks on the network when {@code allowNetwork} is false. */
+    /** The text of {@code relPath}, relative to the registry folder (for example "games.json"), or null. Never blocks on the network when {@code allowNetwork} is false. */
     public static String get(Context context, String relPath, long ttlMs, boolean allowNetwork) {
         return load(context, relPath, ttlMs, allowNetwork).json;
     }
@@ -79,7 +81,7 @@ public final class RegistryCache {
             }
 
             if (allowNetwork) {
-                String text = Downloader.downloadString(ContentsManager.COMPONENTS_BASE + relPath);
+                String text = Downloader.downloadString(ContentsManager.COMPONENTS_BASE + REMOTE_DIR + relPath);
                 if (text != null && isJson(text)) {
                     store(file, text);
                     return remember(relPath, new Result(text, Source.NETWORK, now), true);

@@ -267,6 +267,7 @@ public class ContainerManager {
             File containerDir = new File(homeDir, ImageFs.USER+"-"+id);
             if (!containerDir.mkdirs()) {
                 Log.e("ContainerManager", "Unable to create container directory: " + containerDir);
+                com.winlator.cmod.telemetry.ErrorReporter.report("container_create", "MkdirFailed", "Unable to create the container directory");
                 return null;
             }
 
@@ -278,6 +279,7 @@ public class ContainerManager {
 
             if (!extractContainerPatternFile(container, container.getWineVersion(), contentsManager, containerDir, null)) {
                 FileUtils.delete(containerDir);
+                com.winlator.cmod.telemetry.ErrorReporter.report("container_create", "PrefixExtractFailed", "Could not extract the Wine prefix");
                 return null;
             }
 
@@ -294,6 +296,7 @@ public class ContainerManager {
             return container;
         } catch (JSONException e) {
             e.printStackTrace();
+            com.winlator.cmod.telemetry.ErrorReporter.report("container_create", "JSONException", e.getMessage());
         }
         return null;
     }
@@ -333,6 +336,8 @@ public class ContainerManager {
         dstContainer.setBox64Preset(srcContainer.getBox64Preset());
         dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
         dstContainer.setWineVersion(srcContainer.getWineVersion());
+        // The new container keeps the experimental file-system cache switch of the one it was made from.
+        if (!srcContainer.getExtra("fileCache").isEmpty()) dstContainer.putExtra("fileCache", srcContainer.getExtra("fileCache"));
         dstContainer.saveData();
 
         maxContainerId = Math.max(maxContainerId, id);

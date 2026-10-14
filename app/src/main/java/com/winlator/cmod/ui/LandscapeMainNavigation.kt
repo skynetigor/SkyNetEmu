@@ -161,13 +161,15 @@ private fun Destination(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val whiteTheme = MaterialTheme.colorScheme.background.luminance() > .65f
+    val lightTheme = MaterialTheme.colorScheme.background.luminance() > .65f
     val normalIcon = if (selected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onBackground.copy(alpha = .68f)
-    val iconColor = if (whiteTheme) Color.White else normalIcon
+    // On a light theme the buttons are filled with the theme's own colours: the chosen one solid, the others tinted.
+    val iconColor = if (!lightTheme) normalIcon
+        else if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
     val selectedBackground = MaterialTheme.colorScheme.primary.copy(alpha = .12f)
-    val background = if (whiteTheme) {
-        Color.Black.copy(alpha = if (selected) .90f else .78f)
+    val background = if (lightTheme) {
+        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer
     } else if (selected) selectedBackground else Color.Transparent
 
     Surface(

@@ -28,8 +28,8 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -55,6 +56,9 @@ private class StartOption(
     val title: String,
     val description: String,
     val bestWhen: String,
+    /** An option that is not available yet is shown dimmed with [badge] instead of the arrow, and does nothing when tapped. */
+    val enabled: Boolean = true,
+    val badge: String? = null,
     val accent: @Composable () -> Color
 )
 
@@ -69,7 +73,8 @@ private val startOptions = listOf(
         ContainerStart.Linux, Icons.Outlined.Terminal,
         "Linux system",
         "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver and x86 games through Box64 or FEX.",
-        "Games that have a Linux build, such as BeamNG.drive. Steam has its own place in Settings."
+        "Games that have a Linux build, such as BeamNG.drive.",
+        enabled = false, badge = "Coming soon"
     ) { MaterialTheme.colorScheme.tertiary },
     StartOption(
         ContainerStart.Game, Icons.Outlined.SportsEsports,
@@ -166,10 +171,25 @@ internal fun OnboardingCreateScreen(
 
 @Composable
 private fun StartCard(option: StartOption, modifier: Modifier, onClick: () -> Unit) {
-    val accent = option.accent()
+    TileCard(option.icon, option.title, option.description, option.bestWhen, option.accent(), modifier, option.enabled, option.badge, onClick)
+}
+
+/** One large tile: an icon, a title, what it is and when to choose it. The screens that offer ways to start share it. */
+@Composable
+internal fun TileCard(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    bestWhen: String,
+    accent: Color,
+    modifier: Modifier,
+    enabled: Boolean = true,
+    badge: String? = null,
+    onClick: () -> Unit
+) {
     val shape = RoundedCornerShape(28.dp)
     Surface(
-        modifier = modifier.clip(shape).clickable(onClick = onClick),
+        modifier = modifier.clip(shape).alpha(if (enabled) 1f else 0.55f).clickable(enabled = enabled, onClick = onClick),
         shape = shape,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, accent.copy(alpha = 0.35f))
@@ -188,20 +208,35 @@ private fun StartCard(option: StartOption, modifier: Modifier, onClick: () -> Un
                             Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(accent.copy(alpha = 0.18f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(option.icon, null, tint = accent, modifier = Modifier.size(30.dp))
+                            Icon(icon, null, tint = accent, modifier = Modifier.size(30.dp))
                         }
                         Spacer(Modifier.width(16.dp))
                         Text(
-                            option.title,
+                            title,
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        Icon(Icons.Outlined.ArrowForward, null, tint = accent)
+                        if (badge == null) Icon(Icons.Outlined.ArrowForward, null, tint = accent)
+                    }
+                    if (badge != null) {
+                        Surface(
+                            modifier = Modifier.padding(top = 10.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = accent.copy(alpha = 0.22f)
+                        ) {
+                            Text(
+                                badge,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = accent
+                            )
+                        }
                     }
                     Spacer(Modifier.height(14.dp))
                     Text(
-                        option.description,
+                        description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -210,7 +245,7 @@ private fun StartCard(option: StartOption, modifier: Modifier, onClick: () -> Un
                     Icon(Icons.Outlined.CheckCircle, null, tint = accent, modifier = Modifier.size(18.dp).padding(top = 1.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        option.bestWhen,
+                        bestWhen,
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -43,12 +43,9 @@ enum class WinlatorThemeType(
     val displayName: String,
     val description: String
 ) {
-    WHITE("white", "White", "Bright surfaces with dark text"),
-    BLACK("black", "Black", "Balanced dark theme · Default"),
-    AMOLED("amoled", "AMOLED", "Pure black background for OLED displays"),
-    BLUE("blue", "Blue", "Dark interface with cool blue accents"),
-    RED("red", "Red", "Dark interface with warm red accents"),
-    PURPLE("purple", "Purple", "Dark interface with rich purple accents");
+    WHITE("white", "SkyNet Light", "Bright surfaces with violet and cyan accents"),
+    BLACK("black", "SkyNet", "Deep navy with cyan and violet · Default"),
+    AMOLED("amoled", "SkyNet AMOLED", "Pure black for OLED displays, cyan and violet accents");
 
     companion object {
         fun fromId(id: String?): WinlatorThemeType = values().firstOrNull { it.id == id } ?: BLACK
@@ -91,84 +88,48 @@ object WinlatorThemeManager {
 }
 
 private val BlackColors = darkColorScheme(
-    primary = Color(0xFFF4F4F6), onPrimary = Color(0xFF090A0D),
-    primaryContainer = Color(0xFF303138), onPrimaryContainer = Color(0xFFF7F7F8),
-    secondary = Color(0xFFC7C8CF), onSecondary = Color(0xFF111217),
-    secondaryContainer = Color(0xFF24252B), onSecondaryContainer = Color(0xFFE7E7EA),
-    background = Color(0xFF06070A), onBackground = Color(0xFFF5F5F7),
-    surface = Color(0xFF101116), onSurface = Color(0xFFF5F5F7),
-    surfaceVariant = Color(0xFF1C1D23), onSurfaceVariant = Color(0xFFA8A9B1),
-    outline = Color(0xFF41434D), outlineVariant = Color(0xFF2A2B32),
+    primary = Color(0xFF5EE7FF), onPrimary = Color(0xFF00252C),
+    primaryContainer = Color(0xFF1B2C66), onPrimaryContainer = Color(0xFFD2F6FF),
+    secondary = Color(0xFFB07CFF), onSecondary = Color(0xFF2A0F5C),
+    secondaryContainer = Color(0xFF2E1B6B), onSecondaryContainer = Color(0xFFE7D8FF),
+    tertiary = Color(0xFF8CA2FF), onTertiary = Color(0xFF0B1A5A),
+    background = Color(0xFF070B1E), onBackground = Color(0xFFEAF0FF),
+    surface = Color(0xFF0F1530), onSurface = Color(0xFFEAF0FF),
+    surfaceVariant = Color(0xFF1A2147), onSurfaceVariant = Color(0xFF9FAAD6),
+    outline = Color(0xFF3C4A85), outlineVariant = Color(0xFF1F2A5A),
     error = Color(0xFFFFB4AB), onError = Color(0xFF690005)
 )
 
 private val AmoledColors = darkColorScheme(
-    primary = Color.White, onPrimary = Color.Black,
-    primaryContainer = Color(0xFF191919), onPrimaryContainer = Color.White,
-    secondary = Color(0xFFD0D0D0), onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF101010), onSecondaryContainer = Color(0xFFECECEC),
-    background = Color.Black, onBackground = Color(0xFFF7F7F7),
-    surface = Color(0xFF050505), onSurface = Color(0xFFF7F7F7),
-    surfaceVariant = Color(0xFF0D0D0D), onSurfaceVariant = Color(0xFFAAAAAA),
-    outline = Color(0xFF383838), outlineVariant = Color(0xFF202020),
+    primary = Color(0xFF5EE7FF), onPrimary = Color(0xFF00252C),
+    primaryContainer = Color(0xFF0E2A38), onPrimaryContainer = Color(0xFFCFF7FF),
+    secondary = Color(0xFFB07CFF), onSecondary = Color(0xFF2A0F5C),
+    secondaryContainer = Color(0xFF1C1038), onSecondaryContainer = Color(0xFFE7D8FF),
+    tertiary = Color(0xFF8CA2FF), onTertiary = Color(0xFF0B1A5A),
+    background = Color.Black, onBackground = Color(0xFFEAF0FF),
+    surface = Color(0xFF04060F), onSurface = Color(0xFFEAF0FF),
+    surfaceVariant = Color(0xFF0B1022), onSurfaceVariant = Color(0xFF8E99C7),
+    outline = Color(0xFF2A3566), outlineVariant = Color(0xFF151B3A),
     error = Color(0xFFFFB4AB), onError = Color(0xFF690005)
 )
 
 private val WhiteColors = lightColorScheme(
-    primary = Color(0xFF23252B), onPrimary = Color.White,
-    primaryContainer = Color(0xFFE1E3E8), onPrimaryContainer = Color(0xFF17191E),
-    secondary = Color(0xFF555861), onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE7E8EC), onSecondaryContainer = Color(0xFF26282E),
-    background = Color(0xFFF5F6F8), onBackground = Color(0xFF18191D),
-    surface = Color.White, onSurface = Color(0xFF18191D),
-    surfaceVariant = Color(0xFFE8E9ED), onSurfaceVariant = Color(0xFF60636B),
-    outline = Color(0xFF92959D), outlineVariant = Color(0xFFD1D3D8),
+    primary = Color(0xFF3A1C8F), onPrimary = Color.White,
+    primaryContainer = Color(0xFFE3DBFF), onPrimaryContainer = Color(0xFF1E0B5C),
+    secondary = Color(0xFF0A7C99), onSecondary = Color.White,
+    secondaryContainer = Color(0xFFCDF4FF), onSecondaryContainer = Color(0xFF00323E),
+    tertiary = Color(0xFF7C4DDB), onTertiary = Color.White,
+    background = Color(0xFFF4F6FF), onBackground = Color(0xFF0A1030),
+    surface = Color.White, onSurface = Color(0xFF0A1030),
+    surfaceVariant = Color(0xFFE6E9F8), onSurfaceVariant = Color(0xFF4A5280),
+    outline = Color(0xFF7C84B0), outlineVariant = Color(0xFFCDD2EC),
     error = Color(0xFFBA1A1A), onError = Color.White
-)
-
-private val BlueColors = darkColorScheme(
-    primary = Color(0xFF82B8FF), onPrimary = Color(0xFF001B3A),
-    primaryContainer = Color(0xFF173A63), onPrimaryContainer = Color(0xFFD5E7FF),
-    secondary = Color(0xFFAFC9EA), onSecondary = Color(0xFF102033),
-    secondaryContainer = Color(0xFF17283D), onSecondaryContainer = Color(0xFFD3E5FF),
-    background = Color(0xFF050A12), onBackground = Color(0xFFF2F6FC),
-    surface = Color(0xFF0C1320), onSurface = Color(0xFFF2F6FC),
-    surfaceVariant = Color(0xFF121D2D), onSurfaceVariant = Color(0xFFA9B9CD),
-    outline = Color(0xFF45617F), outlineVariant = Color(0xFF25384F),
-    error = Color(0xFFFFB4AB), onError = Color(0xFF690005)
-)
-
-private val RedColors = darkColorScheme(
-    primary = Color(0xFFFF8A8F), onPrimary = Color(0xFF3C0006),
-    primaryContainer = Color(0xFF662128), onPrimaryContainer = Color(0xFFFFDADB),
-    secondary = Color(0xFFE7B7BA), onSecondary = Color(0xFF301416),
-    secondaryContainer = Color(0xFF432326), onSecondaryContainer = Color(0xFFFFDADB),
-    background = Color(0xFF0C0607), onBackground = Color(0xFFFFF2F2),
-    surface = Color(0xFF160B0D), onSurface = Color(0xFFFFF2F2),
-    surfaceVariant = Color(0xFF241214), onSurfaceVariant = Color(0xFFCDB0B2),
-    outline = Color(0xFF74454A), outlineVariant = Color(0xFF45292C),
-    error = Color(0xFFFFB4AB), onError = Color(0xFF690005)
-)
-
-private val PurpleColors = darkColorScheme(
-    primary = Color(0xFFD0BCFF), onPrimary = Color(0xFF381E72),
-    primaryContainer = Color(0xFF4F378B), onPrimaryContainer = Color(0xFFEADDFF),
-    secondary = Color(0xFFCCC2DC), onSecondary = Color(0xFF332D41),
-    secondaryContainer = Color(0xFF4A4458), onSecondaryContainer = Color(0xFFE8DEF8),
-    background = Color(0xFF0E0A13), onBackground = Color(0xFFE9E1EC),
-    surface = Color(0xFF17111E), onSurface = Color(0xFFE9E1EC),
-    surfaceVariant = Color(0xFF241C2D), onSurfaceVariant = Color(0xFFCCC2DC),
-    outline = Color(0xFF958DA0), outlineVariant = Color(0xFF494151),
-    error = Color(0xFFFFB4AB), onError = Color(0xFF690005)
 )
 
 internal fun winlatorColorScheme(theme: WinlatorThemeType): ColorScheme = when (theme) {
     WinlatorThemeType.WHITE -> WhiteColors
     WinlatorThemeType.BLACK -> BlackColors
     WinlatorThemeType.AMOLED -> AmoledColors
-    WinlatorThemeType.BLUE -> BlueColors
-    WinlatorThemeType.RED -> RedColors
-    WinlatorThemeType.PURPLE -> PurpleColors
 }
 
 private val WinlatorTypography = Typography(

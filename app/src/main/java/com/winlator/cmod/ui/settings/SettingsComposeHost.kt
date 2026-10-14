@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Refresh
@@ -120,7 +121,8 @@ data class SettingsModel(
     val steamSummary: String,
     val steamReady: Boolean,
     /** Where the game profiles of the registry came from, for the "Game profiles" group. */
-    val gameProfilesSummary: String
+    val gameProfilesSummary: String,
+    val telemetry: Boolean
 )
 
 @Stable
@@ -137,6 +139,8 @@ interface SettingsCallbacks {
     fun onCustomApiKeyChanged(value: String)
     fun onContentsUrlChanged(value: String)
     fun onWineDebugChannelsChanged(value: String)
+    fun onTelemetryChanged(on: Boolean)
+    fun onShowTelemetryData()
     fun onReinstallImageFs()
     fun onPresetAction(kind: String, id: String, action: String)
     fun onOpenSteam()
@@ -190,11 +194,11 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
             WinlatorThemePreferenceCard()
         },
         EditorCategory("environments", "Environments", "Containers, Steam and components", !model.steamReady) {
-            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
+            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows and Linux environments") {
                 context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
             }
             NavigationRow(
-                Icons.Outlined.Memory, "Steam",
+                Icons.Outlined.SportsEsports, "Steam",
                 if (model.steamReady) model.steamSummary else "Not set up yet: ${model.steamSummary}",
                 callbacks::onOpenSteam
             )
@@ -323,6 +327,13 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                 ToggleRow(stringResource(R.string.remove_loading_bar_when_booting_games), model.removeLoadingBar) { callbacks.onBooleanChanged("remove_loading_bar_when_booting_games", it) }
             }
             EditableValueCard("Downloadable Contents URL", model.contentsUrl, callbacks::onContentsUrlChanged)
+        },
+        EditorCategory("privacy", "Privacy", if (model.telemetry) "Anonymous usage data is shared" else "Off", false) {
+            GroupCard {
+                ToggleRow("Share anonymous usage data", model.telemetry) { callbacks.onTelemetryChanged(it) }
+                GroupDivider()
+                NavigationRow(Icons.Outlined.Info, "What is sent", null, callbacks::onShowTelemetryData)
+            }
         },
         EditorCategory("system", "System", "ImageFS and about", false) {
             NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null, callbacks::onReinstallImageFs)

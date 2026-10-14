@@ -130,6 +130,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             return;
         }
 
+        // Installs set up before telemetry existed are asked once, after the screen is up.
+        getWindow().getDecorView().post(() -> com.winlator.cmod.telemetry.TelemetryScreen.askOnce(this));
+
         notificationService = new Intent(this, NotificationService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED))
             createNotificationChannel();
@@ -465,32 +468,73 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
     }
 
-    /** The container comes first: its type decides what can be added (a .exe for Wine, a Linux program otherwise). */
+    /** The container comes first: its type decides what can be added (a .exe for Wine, a Linux program otherwise). A single container is used straight away. */
     public void chooseContainerForNewShortcut() {
         java.util.ArrayList<com.winlator.cmod.container.Container> containers = new ContainerManager(this).getContainers();
         if (containers == null || containers.isEmpty()) {
             android.widget.Toast.makeText(this, "Create a container first!", android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
+        if (containers.size() == 1) {
+            openAddShortcutFor(containers.get(0));
+            return;
+        }
+        boolean mixed = false;
+        for (com.winlator.cmod.container.Container container : containers) {
+            if (container.isLinux() != containers.get(0).isLinux()) mixed = true;
+        }
         String[] names = new String[containers.size()];
         for (int i = 0; i < names.length; i++) {
             com.winlator.cmod.container.Container container = containers.get(i);
-            names[i] = container.getName() + (container.isLinux() ? "  (Linux)" : "  (Windows)");
+            names[i] = container.getName() + (mixed ? (container.isLinux() ? "  (Linux)" : "  (Windows)") : "");
         }
         new android.app.AlertDialog.Builder(this)
                 .setTitle("Add shortcut to")
-                .setItems(names, (dialog, which) -> {
-                    com.winlator.cmod.container.Container container = containers.get(which);
-                    Fragment target = container.isLinux()
-                            ? com.winlator.cmod.ui.container.LinuxProgramsFragment.forContainer(container.id, true)
-                            : FileManagerFragment.forContainer(container.id);
-                    getSupportFragmentManager().beginTransaction()
-                            .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
-                            .addToBackStack(null)
-                            .replace(R.id.FLFragmentContainer, target)
-                            .commit();
-                })
+                .setItems(names, (dialog, which) -> openAddShortcutFor(containers.get(which)))
                 .show();
+    }
+
+    private void openAddShortcutFor(com.winlator.cmod.container.Container container) {
+        Fragment target = container.isLinux()
+                ? com.winlator.cmod.ui.container.LinuxProgramsFragment.forContainer(container.id, true)
+                : FileManagerFragment.forContainer(container.id);
+        getSupportFragmentManager().beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, target)
+                .commit();
+    }
+
+    /** "Add game": the user picks the exe first; the container is made for the game afterwards. */
+    public void addGame() {
+        com.winlator.cmod.telemetry.Telemetry.event("skynet.funnel", "add_game_started");
+        getSupportFragmentManager().beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame())
+                .commit();
+    }
+
+    /** The file manager of {@link #addGame} found the exe: the file manager is left and the screen for choosing how to run it opens. */
+    public void onGamePicked(java.io.File exe) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, com.winlator.cmod.ui.addgame.AddGameFragment.Companion.newInstance(exe.getAbsolutePath()))
+                .commit();
+    }
+
+    /** The shortcut is written: the add-game screen is left and the game's own screen opens. */
+    public void gameAdded(String shortcutPath) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, new GameDetailFragment(shortcutPath))
+                .commit();
     }
 
     private void show(Fragment fragment, boolean reverse) {

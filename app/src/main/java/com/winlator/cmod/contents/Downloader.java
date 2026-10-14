@@ -48,6 +48,7 @@ public class Downloader {
             return true;
         } catch (Exception e) {
             e.printStackTrace();
+            com.winlator.cmod.telemetry.ErrorReporter.reportDownload(address, e);
             return false;
         }
     }
@@ -69,6 +70,7 @@ public class Downloader {
             return sb.toString();
         } catch (Exception e) {
             e.printStackTrace();
+            com.winlator.cmod.telemetry.ErrorReporter.reportDownload(address, e);
             return null;
         }
     }

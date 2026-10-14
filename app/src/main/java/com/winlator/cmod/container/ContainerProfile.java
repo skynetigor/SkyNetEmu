@@ -49,7 +49,7 @@ public final class ContainerProfile {
         public final JSONObject container;
         public final JSONArray components;
 
-        Envelope(JSONObject container, JSONArray components) {
+        public Envelope(JSONObject container, JSONArray components) {
             this.container = container;
             this.components = components;
         }

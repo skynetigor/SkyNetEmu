@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
@@ -25,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.container.Shortcut
@@ -36,7 +38,8 @@ import com.winlator.cmod.linux.LinuxLaunchOptions
 import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.lsfg.LsfgManager
 import com.winlator.cmod.ui.settings.EditorCategory
-import com.winlator.cmod.ui.settings.GroupedSettings
+import com.winlator.cmod.ui.settings.RailEditor
+import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.container.ResolutionSetting
 import com.winlator.cmod.ui.container.isValidScreenSize
 import com.winlator.cmod.ui.container.UPSCALER_MODES
@@ -193,13 +196,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     ) { profileVersion = it }
                     if (!shortcut.isSteamGame) {
                         SettingsDivider()
-                        OutlinedTextField(
-                            value = gameRoot,
-                            onValueChange = { gameRoot = it },
-                            label = { Text("Game folder") },
-                            placeholder = { Text("/root/programs/${current.name.replace(' ', '_')}") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(14.dp)
+                        SettingText("Game folder", gameRoot) { gameRoot = it }
+                        Text(
+                            "e.g. /root/programs/${current.name.replace(' ', '_')}",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     val shown = effective
@@ -243,7 +245,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             if (profile == null) {
                 Text(
                     "A game profile from the registry gives the shortcut the program to start, the arguments and the resolution that are " +
-                        "known to work for a version of the game. Whatever you set in the groups below wins over it.",
+                        "known to work for a version of the game. Whatever you set in the other groups wins over it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -251,14 +253,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         // A Steam game started through the client has launch options of its own (in the game's properties in Steam).
         if (throughSteam) null else EditorCategory("launch", "Launch options", options.ifBlank { "None" }, false) {
-            OutlinedTextField(
-                value = options,
-                onValueChange = { options = it },
-                label = { Text("Launch options") },
-                placeholder = { Text("NAME=value %command% -windowed") },
-                singleLine = false,
-                modifier = Modifier.fillMaxWidth()
-            )
+            SettingsCard { SettingText("Launch options (NAME=value %command% -windowed)", options, minLines = 2) { options = it } }
             Text(
                 "Like Steam's: variables before %command%, the program's arguments after it " +
                     "(MANGOHUD=1 BOX64_LOG=1 %command% -windowed -width 1280). A wrapper may stand between them " +
@@ -408,24 +403,24 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         }
     )
 
+    // As in the Windows shortcut editor: the groups in a rail (chips in portrait), saved when the screen is left.
+    fun leave() {
+        if (sizeValid) save()
+        else android.widget.Toast.makeText(context, "Fix the screen size first.", android.widget.Toast.LENGTH_SHORT).show()
+    }
+    androidx.activity.compose.BackHandler(onBack = ::leave)
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(shortcut.name) },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Outlined.ArrowBack, null) } }
+                title = { Text(shortcut.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = ::leave) { Icon(Icons.Outlined.ArrowBack, null) } }
             )
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            GroupedSettings(categories) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, androidx.compose.ui.Alignment.End)
-                ) {
-                    TextButton(onClick = onClose) { Text("Cancel") }
-                    Button(onClick = { save() }, enabled = sizeValid) { Text("Save") }
-                }
-            }
+            RailEditor("Shortcut settings", categories)
         }
     }
 }

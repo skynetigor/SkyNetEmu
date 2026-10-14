@@ -19,6 +19,7 @@ import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Callback;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.ProcessHelper;
@@ -393,6 +394,63 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         if ((new File(imageFs.getLibDir(), "libandroid-sysvshm.so")).exists()){
             ld_preload = imageFs.getLibDir() + "/libandroid-sysvshm.so";
+        }
+
+        // Metadata shim (libfscache.so): SKY_FSCACHE=1 (set from the container's "File system cache" switch, see
+        // XServerDisplayActivity.applyFileCache) caches the file-system questions Wine asks about the game's folder (see
+        // winlator/fscache.c); SKY_FSCACHE_STATS=1 counts them and writes a summary to Winlator/logs. Put before libfakeinput so that it sees the calls first. Roots, the shared change
+        // counters and the log folder are set here; a variable the user sets wins, because the container variables are
+        // applied afterwards.
+        boolean fsCache = this.envVars != null && "1".equals(this.envVars.get("SKY_FSCACHE"));
+        boolean fsStats = this.envVars != null && "1".equals(this.envVars.get("SKY_FSCACHE_STATS"));
+        if (fsCache || fsStats) {
+            File fscacheSrc = new File(environment.getContext().getApplicationInfo().nativeLibraryDir, "libfscache.so");
+            File fscacheDest = new File(imageFs.getLibDir(), "libfscache.so");
+            try {
+                if (fscacheSrc.exists()) FileUtils.copy(fscacheSrc, fscacheDest);
+            } catch (Exception e) {
+                Log.e("GuestLauncher", "Failed to copy libfscache.so: " + e.getMessage());
+            }
+            if (fscacheDest.exists()) {
+                ld_preload = mergePreloadValue(ld_preload, fscacheDest.getAbsolutePath());
+                String roots = fsCache ? GameFolder.cacheRoots(imageFs, container, shortcut == null ? null : shortcut.path) : "";
+                if (roots.isEmpty() && !fsCache) {
+                    StringBuilder all = new StringBuilder(imageFs.getRootDir().getPath() + "/home/games");
+                    if (bindingPaths != null) for (String path : bindingPaths) all.append(':').append(path);
+                    roots = all.toString();
+                }
+                execEnvVars.put("SKY_FSCACHE_ROOTS", roots);
+                if (fsCache) {
+                    // Change counters shared by every Wine process (see fscache.c: shm_t); zeroed at each start.
+                    File shm = new File(imageFs.getTmpDir(), "sky_fscache.shm");
+                    try (java.io.RandomAccessFile f = new java.io.RandomAccessFile(shm, "rw")) {
+                        f.setLength(0);
+                        f.setLength(80 * 1024);
+                        execEnvVars.put("SKY_FSCACHE_SHM", shm.getAbsolutePath());
+                    } catch (IOException e) {
+                        Log.e("GuestLauncher", "Cannot create " + shm + ": " + e.getMessage());
+                    }
+                }
+                if (fsCache && "1".equals(this.envVars.get("SKY_FSCACHE_COPY"))) {
+                    // Copies of the game's small read-only files on internal storage (see fscache.c). Kept between sessions;
+                    // cleared when it has grown past the cap.
+                    File copyDir = new File(environment.getContext().getFilesDir(), "fscache");
+                    copyDir.mkdirs();
+                    long used = 0;
+                    File[] files = copyDir.listFiles();
+                    if (files != null) for (File f : files) used += f.length();
+                    if (used > 8L * 1024 * 1024 * 1024) FileUtils.clear(copyDir);
+                    execEnvVars.put("SKY_FSCACHE_DIR", copyDir.getAbsolutePath());
+                }
+                if (fsStats) {
+                    File logDir = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/logs");
+                    logDir.mkdirs();
+                    execEnvVars.put("SKY_FSCACHE_LOG_DIR", logDir.getAbsolutePath());
+                }
+                Log.d("GuestLauncher", "fscache roots: " + roots);
+            } else {
+                Log.e("GuestLauncher", "libfscache.so not found: " + fscacheSrc.getAbsolutePath());
+            }
         }
 
         File fakeinputDest = new File(imageFs.getLibDir(), "libfakeinput.so");

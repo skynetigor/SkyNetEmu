@@ -150,7 +150,7 @@ public final class GameProfiles {
             }
         }
 
-        GameProfile.Settings settings = profile.effective(version);
+        GameProfile.Settings settings = profile.effective(version, GameProfile.Platform.LINUX);
         if (noSteamExtra == null) noSteamExtra = "";
         boolean noSteam = noSteamExtra.equals("1")
                 || (noSteamExtra.isEmpty() && settings.noSteam != null && settings.noSteam.enabled);

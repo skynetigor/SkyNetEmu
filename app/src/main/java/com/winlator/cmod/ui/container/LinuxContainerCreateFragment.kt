@@ -13,6 +13,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.winlator.cmod.ui.settings.RailEditor
+import com.winlator.cmod.ui.settings.SettingText
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.Surface
@@ -174,16 +181,6 @@ private class RuntimeInstallUi {
 
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
 private val HUD_LABELS = listOf("Off", "Classic", "Modern")
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        modifier = Modifier.padding(start = 4.dp, top = 6.dp),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-}
 
 /** What the Steam settings screen adds to the container editor. */
 private class SteamScreen(
@@ -564,13 +561,7 @@ private fun LinuxContainerEditorBody(
 
     val categories = listOfNotNull(
         if (steam != null) null else EditorCategory("general", "General", name.ifBlank { "Unnamed" }, name.isBlank()) {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
+            SettingsCard { SettingText("Name", name) { name = it } }
         },
         EditorCategory(
             "runtime", "Runtime",
@@ -831,20 +822,67 @@ private fun LinuxContainerEditorBody(
         )
     }
 
+    if (steam != null) {
+        // The Steam settings are a page of the app's Settings, in their layout.
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Steam") },
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
+                )
+            }
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                GroupedSettings(categories, header = steam.header, enabled = steam.ready) {
+                    problems()
+                    saveButton()
+                    resetButton()
+                }
+            }
+        }
+        return
+    }
+
+    // A container is edited in the layout of the Windows container editor: the groups in a rail (chips in portrait), "Create
+    // container" in a bar at the bottom of a new one, and an existing one saved when the screen is left.
+    val toastContext = LocalContext.current
+    fun leave() {
+        when {
+            editing == null || busy -> onBack()
+            canSave -> save()
+            else -> android.widget.Toast.makeText(toastContext, "Fix the highlighted settings first.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    androidx.activity.compose.BackHandler(onBack = ::leave)
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(if (steam != null) "Steam" else if (editing != null) "Edit Linux container" else "New Linux container") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
+                title = { Text(if (editing == null) "New container" else name.ifBlank { editing.name }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = ::leave) { Icon(Icons.Outlined.ArrowBack, null) } }
             )
+        },
+        bottomBar = {
+            if (editing == null) {
+                Surface(modifier = Modifier.navigationBarsPadding(), color = MaterialTheme.colorScheme.background) {
+                    Button(
+                        onClick = ::save,
+                        enabled = canSave,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            if (busy) "Creating…" else if (needsDownload) "Download runtime and create" else "Create container",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            GroupedSettings(categories, header = steam?.header, enabled = steam?.ready != false) {
-                problems()
-                saveButton()
-                resetButton()
-            }
+            RailEditor("Container settings", categories, header = problems)
         }
     }
 }
