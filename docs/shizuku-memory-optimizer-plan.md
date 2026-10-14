@@ -51,6 +51,7 @@ Verify each against the current code before editing.
 - **Start:** `XServerDisplayActivity.onCreate` (line about 310), after the container is resolved and before the environment starts. Run `apply` on a background thread. Never block launch: if Shizuku is not READY, skip and show a toast.
 - **Stop:** `XServerDisplayActivity.exit()` (line about 935), which is guarded by an `exiting` flag so it runs once, and again defensively in `onDestroy()` (line about 1002) in case `exit()` was bypassed. `restore` must be idempotent.
 - **Crash and kill recovery:** on `MainActivity` start (and `Application.onCreate`), if a journal file exists and no container session is active, run `restore`. This covers the activity being killed by the system or a native crash.
+- **Linux containers:** `LinuxSession` and `LinuxProgramLauncherComponent` are currently modified in the working tree. Confirm the same activity lifecycle covers Linux sessions, otherwise add the same start and stop hooks there.
 - **Settings:** a global "Free memory during games" section in `SettingsFragment`: toggle, Shizuku status row with a "Grant" button, package picker, "Restore now" button. A per-container override in `ContainerDetailFragment` (inherit, on, off), stored in the container data like the other options.
 - **`.wcfg` import:** carry the per-container key through import and export like other container keys; ignore it silently if Shizuku is unavailable.
 
@@ -76,7 +77,7 @@ Verify each against the current code before editing.
 
 1. **Spike (half a day):** manual measurement during BeamNG as in section 2. Add Shizuku dependency and a throwaway button that restricts and restores one package. Confirm the `UserService` works under the `.dev` applicationId on Android 17.
 2. **Core:** `ShizukuGate`, `ShellService`, `MemPrepController` with journal, unit tests for journal and command building (no device needed).
-3. **Hooks:** start, stop, crash recovery in the activity lifecycle.
+3. **Hooks:** start, stop, crash recovery in the activity lifecycle, then Linux sessions.
 4. **UI:** global settings, package picker, per-container override, `.wcfg` keys.
 5. **Hardening:** device pass on SM-F976B: force-kill Winlator mid-game and verify recovery, reboot with a pending journal, Shizuku stopped mid-session, an app the user had pre-restricted.
 
