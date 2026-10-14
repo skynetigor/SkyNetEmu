@@ -8,6 +8,7 @@ import com.winlator.cmod.xserver.Pixmap;
 import com.winlator.cmod.xserver.Window;
 import com.winlator.cmod.xserver.XClient;
 import com.winlator.cmod.xserver.XResource;
+import com.winlator.cmod.xserver.ShmFence;
 import com.winlator.cmod.xserver.XResourceManager;
 import com.winlator.cmod.xserver.XServer;
 import com.winlator.cmod.xserver.errors.BadFence;
@@ -35,6 +36,7 @@ public class SyncExtension implements Extension, XResourceManager.OnResourceLife
         int fenceId;
         int drawableId;
         boolean triggered;
+        long shm;  // the client's shared word for a fence made by DRI3 FenceFromFD, 0 for one made by CreateFence
     }
     
     public SyncExtension(XServer xserver) {
@@ -68,7 +70,22 @@ public class SyncExtension implements Extension, XResourceManager.OnResourceLife
             if (fences.indexOfKey(id) >= 0) {
                 SyncFence fence = fences.get(id);
                 fence.triggered = true;
+                if (fence.shm != 0) ShmFence.trigger(fence.shm);
             }
+        }
+    }
+
+    /** DRI3 FenceFromFD: a fence whose state lives in memory the client shares with the server. */
+    public void createShmFence(int fenceId, int drawableId, int fd, boolean initiallyTriggered) throws XRequestError {
+        synchronized (fences) {
+            if (fences.indexOfKey(fenceId) >= 0) throw new BadIdChoice(fenceId);
+            SyncFence fence = new SyncFence();
+            fence.drawableId = drawableId;
+            fence.fenceId = fenceId;
+            fence.shm = ShmFence.map(fd);
+            fence.triggered = initiallyTriggered;
+            fences.put(fenceId, fence);
+            if (initiallyTriggered && fence.shm != 0) ShmFence.trigger(fence.shm);
         }
     }
 
@@ -96,6 +113,7 @@ public class SyncExtension implements Extension, XResourceManager.OnResourceLife
             if (fences.indexOfKey(id) < 0) throw new BadFence(id);
             SyncFence fence = fences.get(id);
             fence.triggered = true;
+            if (fence.shm != 0) ShmFence.trigger(fence.shm);
         }
     }
 
@@ -115,6 +133,8 @@ public class SyncExtension implements Extension, XResourceManager.OnResourceLife
         synchronized (fences) {
             int id = inputStream.readInt();
             if (fences.indexOfKey(id) < 0) throw new BadFence(id);
+            SyncFence fence = fences.get(id);
+            if (fence.shm != 0) ShmFence.unmap(fence.shm);
             fences.delete(id);
         }
     }
@@ -182,6 +202,45 @@ public class SyncExtension implements Extension, XResourceManager.OnResourceLife
                 break;
             case ClientOpcodes.AWAIT_FENCE:
                 awaitFence(client, inputStream, outputStream);
+                break;
+            case 0: { // Initialize: libXext / SDL ask for the version before anything else
+                client.skipRequest();
+                try (com.winlator.cmod.xconnector.XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(com.winlator.cmod.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeByte((byte)3);
+                    outputStream.writeByte((byte)1);
+                    outputStream.writePad(22);
+                }
+                break;
+            }
+            case 1: // ListSystemCounters: none
+                client.skipRequest();
+                try (com.winlator.cmod.xconnector.XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(com.winlator.cmod.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeInt(0);
+                    outputStream.writePad(20);
+                }
+                break;
+            case 5: // QueryCounter: counters are accepted but not tracked, so report zero
+                client.skipRequest();
+                try (com.winlator.cmod.xconnector.XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(com.winlator.cmod.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeInt(0);
+                    outputStream.writeInt(0);
+                    outputStream.writePad(16);
+                }
+                break;
+            case 2: case 3: case 4: case 6: case 7: case 8: case 10: case 11: case 12: // counter / alarm / priority requests without reply
+                client.skipRequest();
                 break;
             default:
                 throw new BadImplementation();

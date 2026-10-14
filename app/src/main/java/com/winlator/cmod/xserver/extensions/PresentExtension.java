@@ -42,6 +42,8 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private final SparseArray<Event> events = new SparseArray<>();
     private SyncExtension syncExtension;
     private XServer xServer;
+    private int presentCount;
+    private long presentWindowStart = System.nanoTime();
     private final Object limiterLock = new Object();
     private HashMap<Integer, Long> limiterDeadlines;
     private ScheduledThreadPoolExecutor limiterExecutor;
@@ -50,6 +52,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         private static final byte QUERY_VERSION = 0;
         private static final byte PRESENT_PIXMAP = 1;
         private static final byte SELECT_INPUT = 3;
+        private static final byte QUERY_CAPABILITIES = 4;
     }
 
     private static class Event {
@@ -164,6 +167,19 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         }
     }
 
+    private static void queryCapabilities(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        inputStream.skip(4);
+
+        try (XStreamLock lock = outputStream.lock()) {
+            outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+            outputStream.writeByte((byte)0);
+            outputStream.writeShort(client.getSequenceNumber());
+            outputStream.writeInt(0);
+            outputStream.writeInt(0);
+            outputStream.writePad(20);
+        }
+    }
+
     private void presentPixmap(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int windowId = inputStream.readInt();
         int pixmapId = inputStream.readInt();
@@ -180,6 +196,16 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
 
         final Pixmap pixmap = client.xServer.pixmapManager.getPixmap(pixmapId);
         if (pixmap == null) throw new BadPixmap(pixmapId);
+
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            presentCount++;
+            long now = System.nanoTime();
+            if (now - presentWindowStart >= 1_000_000_000L) {
+                Log.d("Present", presentCount + " presents in " + (now - presentWindowStart) / 1_000_000 + " ms");
+                presentCount = 0;
+                presentWindowStart = now;
+            }
+        }
 
         int targetFps = client.xServer.getXServerView() != null
                 ? client.xServer.getXServerView().getFpsLimit() : 0;
@@ -277,6 +303,9 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
                 try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
                     selectInput(client, inputStream, outputStream);
                 }
+                break;
+            case ClientOpcodes.QUERY_CAPABILITIES:
+                queryCapabilities(client, inputStream, outputStream);
                 break;
             default:
                 throw new BadImplementation();

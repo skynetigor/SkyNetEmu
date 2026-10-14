@@ -94,6 +94,8 @@ struct VkTable {
     PFN_vkGetFenceStatus GetFenceStatus;
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
+    PFN_vkGetMemoryFdPropertiesKHR GetMemoryFdPropertiesKHR;
+    PFN_vkGetImageSubresourceLayout GetImageSubresourceLayout;
 };
 
 #include <android/log.h>
@@ -108,6 +110,7 @@ struct VkTable {
 #include <jni.h>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <utility>
 #include <thread>
@@ -164,6 +167,8 @@ public:
     void updatePointerPosition(short x, short y);
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
+    // A frame a Linux client rendered into a dma-buf (DRI3). [key] names the buffer (its pixmap) across frames.
+    void updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
@@ -199,6 +204,8 @@ public:
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
+    /** The X screen changed size (a program picked another resolution): scene coordinates are relative to this size. */
+    void setScreenSize(int w, int h);
     void setCustomScissor(int x, int y, int w, int h);
     void clearCustomScissor();
     inline void setTransformAndScissor(float ox, float oy, float sx, float sy,
@@ -225,6 +232,8 @@ private:
         bool                 isAHB          = false;
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
+        bool                 stgBorrowed    = false;  // stg belongs to dmaBufSrcCache, not to this texture
+        int                  rowPx          = 0;      // pixels per source row when stg is a dma-buf (0: tightly packed)
     };
     struct RetiredTex {
         WinTex wt;
@@ -240,6 +249,7 @@ private:
         int             x=0, y=0, w=0, h=0;
         bool            needsTransition = false;
         bool            isAHB          = false;
+        int             rowPx          = 0;
     };
 
     struct WinNode {
@@ -435,6 +445,18 @@ public:
 
     bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
+    enum class DmaImport { Ok, Failed, PitchMismatch };
+    DmaImport importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int stride, int offset);
+    // A dma-buf whose row pitch the driver would not lay an image out with: imported as a buffer and copied into
+    // an ordinary image on the GPU every frame, which takes any pitch.
+    struct DmaBufSrc { VkBuffer buf = VK_NULL_HANDLE; VkDeviceMemory mem = VK_NULL_HANDLE; int rowPx = 0; };
+    bool  importDmaBufAsBuffer(DmaBufSrc& src, int fd, int h, int stride, int offset);
+    std::unordered_map<AHardwareBuffer*, DmaBufSrc>            dmaBufSrcCache;
+    std::unordered_map<int64_t, std::vector<AHardwareBuffer*>> windowDmaSrcs;
+    bool  hasDmaBufImport = false;
+    // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
+    std::unordered_set<AHardwareBuffer*> dmaBufKeys;
+    void releaseAhbKey(AHardwareBuffer* key) { if (key && !dmaBufKeys.erase(key)) AHardwareBuffer_release(key); }
     void  cleanupAllAHBCache();
     void  flushDeleteQueue();
     void  destroyTexNow(RetiredTex& retired);

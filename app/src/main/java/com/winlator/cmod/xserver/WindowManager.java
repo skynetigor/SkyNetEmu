@@ -152,9 +152,21 @@ public class WindowManager extends XResourceManager {
         }
     }
 
+    public interface OnFocusChangeListener {
+        void onFocusChanged(Window oldFocus, Window newFocus);
+    }
+
+    private OnFocusChangeListener focusChangeListener;
+
+    public void setOnFocusChangeListener(OnFocusChangeListener listener) {
+        this.focusChangeListener = listener;
+    }
+
     public void setFocus(Window focusedWindow, FocusRevertTo focusRevertTo) {
+        Window oldFocus = this.focusedWindow;
         this.focusedWindow = focusedWindow;
         this.focusRevertTo = focusRevertTo;
+        if (oldFocus != focusedWindow && focusChangeListener != null) focusChangeListener.onFocusChanged(oldFocus, focusedWindow);
     }
 
     public FocusRevertTo getFocusRevertTo() {
@@ -200,6 +212,14 @@ public class WindowManager extends XResourceManager {
         triggerOnCreateResourceListener(window);
         triggerOnCreateWindow(window, parent);
         return window;
+    }
+
+    /** The screen changed size (RandR): the root window follows, with a new picture, and its listeners are told. */
+    public void resizeRootWindow(short width, short height) {
+        if (rootWindow.getWidth() == width && rootWindow.getHeight() == height) return;
+        changeWindowGeometry(rootWindow, (short)0, (short)0, width, height);
+        rootWindow.getContent().fillColor(0xff000000);
+        rootWindow.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(rootWindow, rootWindow, null, 0, 0, width, height, 0, false));
     }
 
     private void changeWindowGeometry(Window window, short x, short y, short width, short height) {
