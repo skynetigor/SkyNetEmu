@@ -26,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.MainActivity
+import com.winlator.cmod.core.GameTransfer
 import com.winlator.cmod.ui.KeepLandscapeChromeHidden
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.theme.WinZTheme
@@ -71,6 +74,11 @@ interface GameDetailCallbacks {
     fun onConfigure()
     fun onArguments()
     fun onSaves()
+    fun onStorage()
+    /** Opens the settings of the container the game lives in. */
+    fun onContainerSettings()
+    /** "Internal storage" or "Shared storage" (empty when unknown); read again after a copy or move. */
+    fun storageLabel(): String
     fun onFavorite(favorite: Boolean)
     fun onRemove()
 }
@@ -111,12 +119,19 @@ private fun GameDetailScreen(title: String, subtitle: String, artworkPath: Strin
         favorite = !favorite
         callbacks.onFavorite(favorite)
     }
-    if (landscape) LandscapeDetail(title, subtitle, artwork, favorite, callbacks, toggle)
-    else PortraitDetail(title, subtitle, artwork, favorite, callbacks, toggle)
+    var storage by remember { mutableStateOf(callbacks.storageLabel()) }
+    DisposableEffect(Unit) {
+        val listener = Runnable { storage = callbacks.storageLabel() }
+        GameTransfer.get().addListener(listener)
+        onDispose { GameTransfer.get().removeListener(listener) }
+    }
+    val storageText = if (storage.isEmpty()) "Storage" else "Storage: $storage"
+    if (landscape) LandscapeDetail(title, subtitle, artwork, favorite, callbacks, toggle, storageText)
+    else PortraitDetail(title, subtitle, artwork, favorite, callbacks, toggle, storageText)
 }
 
 @Composable
-private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
+private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit, storageText: String) {
     val activity = LocalContext.current as? MainActivity
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (artwork != null) Image(artwork.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -179,8 +194,12 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         DetailAction(Icons.Outlined.Folder, "Saves", Modifier.weight(1f), callbacks::onSaves)
-                        DetailAction(Icons.Outlined.DeleteOutline, "Remove", Modifier.weight(1f), callbacks::onRemove, true)
+                        DetailAction(Icons.Outlined.Storage, storageText, Modifier.weight(1f), callbacks::onStorage)
                     }
+                    Spacer(Modifier.height(10.dp))
+                    DetailAction(Icons.Outlined.Tune, "Container settings", Modifier.fillMaxWidth(), callbacks::onContainerSettings)
+                    Spacer(Modifier.height(10.dp))
+                    DetailAction(Icons.Outlined.DeleteOutline, "Remove", Modifier.fillMaxWidth(), callbacks::onRemove, true)
                 }
             }
             Spacer(Modifier.weight(.75f))
@@ -189,7 +208,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
 }
 
 @Composable
-private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit) {
+private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit, storageText: String) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.fillMaxWidth().aspectRatio(1.28f).background(MaterialTheme.colorScheme.surface)) {
             if (artwork != null) Image(artwork.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -212,6 +231,8 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, fa
             DetailAction(Icons.Outlined.Settings, "Configure", Modifier.fillMaxWidth(), callbacks::onConfigure)
             DetailAction(Icons.Outlined.PlayArrow, "Enter container", Modifier.fillMaxWidth(), callbacks::onArguments)
             DetailAction(Icons.Outlined.Folder, "Saves", Modifier.fillMaxWidth(), callbacks::onSaves)
+            DetailAction(Icons.Outlined.Storage, storageText, Modifier.fillMaxWidth(), callbacks::onStorage)
+            DetailAction(Icons.Outlined.Tune, "Container settings", Modifier.fillMaxWidth(), callbacks::onContainerSettings)
             DetailAction(Icons.Outlined.DeleteOutline, "Remove", Modifier.fillMaxWidth(), callbacks::onRemove, true)
             Spacer(Modifier.height(12.dp))
         }

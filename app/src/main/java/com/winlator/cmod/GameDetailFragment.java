@@ -21,10 +21,13 @@ import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contentdialog.ContentDialog;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.ui.library.GameDetailCallbacks;
 import com.winlator.cmod.ui.library.GameDetailComposeHost;
 import com.winlator.cmod.ui.library.GameSavesComposeDialog;
+import com.winlator.cmod.ui.library.GameStorageComposeDialog;
+import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.ui.shortcut.ShortcutSettingsComposeDialog;
 
 import java.io.File;
@@ -39,6 +42,12 @@ public class GameDetailFragment extends Fragment {
 
     public GameDetailFragment(String shortcutPath) {
         this.shortcutPath = shortcutPath;
+    }
+
+    /** A copy or move changed where the game is: read the shortcut again so Play starts the new location. */
+    private void reloadShortcut() {
+        if (shortcut == null) return;
+        shortcut = new Shortcut(shortcut.container, shortcut.file);
     }
 
     @Nullable
@@ -98,6 +107,31 @@ public class GameDetailFragment extends Fragment {
                     @Override
                     public void onSaves() {
                         GameSavesComposeDialog.show(GameDetailFragment.this, shortcut);
+                    }
+
+                    @Override
+                    public void onStorage() {
+                        GameStorageComposeDialog.show(GameDetailFragment.this, shortcut, GameDetailFragment.this::reloadShortcut);
+                    }
+
+                    @Override
+                    public void onContainerSettings() {
+                        startActivity(new android.content.Intent(requireContext(), com.winlator.cmod.ui.settings.ContainersSettingsActivity.class)
+                                .putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_EDIT_CONTAINER, shortcut.container.id));
+                    }
+
+                    @NonNull
+                    @Override
+                    public String storageLabel() {
+                        try {
+                            Shortcut fresh = new Shortcut(shortcut.container, shortcut.file);
+                            GameFolder game = GameFolder.of(ImageFs.find(requireContext()), fresh.container, fresh.path);
+                            if (game == null) return "";
+                            return GameFolder.isInternal(requireContext(), game.folder) ? "Internal storage" : "Shared storage";
+                        }
+                        catch (Exception e) {
+                            return "";
+                        }
                     }
 
                     @Override

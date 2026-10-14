@@ -130,6 +130,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             return;
         }
 
+        // Installs set up before telemetry existed are asked once, after the screen is up.
+        getWindow().getDecorView().post(() -> com.winlator.cmod.telemetry.TelemetryScreen.askOnce(this));
+
         notificationService = new Intent(this, NotificationService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED))
             createNotificationChannel();
@@ -465,30 +468,35 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
     }
 
-    /** The container comes first; a single container is used straight away. */
-    public void chooseContainerForNewShortcut() {
-        java.util.ArrayList<com.winlator.cmod.container.Container> containers = new ContainerManager(this).getContainers();
-        if (containers == null || containers.isEmpty()) {
-            android.widget.Toast.makeText(this, "Create a container first!", android.widget.Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (containers.size() == 1) {
-            openFileManagerFor(containers.get(0));
-            return;
-        }
-        String[] names = new String[containers.size()];
-        for (int i = 0; i < names.length; i++) names[i] = containers.get(i).getName();
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("Add shortcut to")
-                .setItems(names, (dialog, which) -> openFileManagerFor(containers.get(which)))
-                .show();
-    }
-
-    private void openFileManagerFor(com.winlator.cmod.container.Container container) {
+    /** "Add game": the user picks the exe first; the container is made for the game afterwards. */
+    public void addGame() {
+        com.winlator.cmod.telemetry.Telemetry.event("skynet.funnel", "add_game_started");
         getSupportFragmentManager().beginTransaction()
                 .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
                 .addToBackStack(null)
-                .replace(R.id.FLFragmentContainer, FileManagerFragment.forContainer(container.id))
+                .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame())
+                .commit();
+    }
+
+    /** The file manager of {@link #addGame} found the exe: the file manager is left and the screen for choosing how to run it opens. */
+    public void onGamePicked(java.io.File exe) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, com.winlator.cmod.ui.addgame.AddGameFragment.Companion.newInstance(exe.getAbsolutePath()))
+                .commit();
+    }
+
+    /** The shortcut is written: the add-game screen is left and the game's own screen opens. */
+    public void gameAdded(String shortcutPath) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, new GameDetailFragment(shortcutPath))
                 .commit();
     }
 

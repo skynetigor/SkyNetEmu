@@ -21,19 +21,13 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.preference.PreferenceManager;
 
-import com.winlator.cmod.box64.Box64Preset;
-import com.winlator.cmod.container.Container;
-import com.winlator.cmod.container.ContainerManager;
 import com.winlator.cmod.contents.AdrenotoolsManager;
 import com.winlator.cmod.contents.ContentProfile;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.contents.RemoteDriverCatalog;
-import com.winlator.cmod.core.DefaultVersion;
-import com.winlator.cmod.core.OpenGLDriverDefaults;
 import com.winlator.cmod.core.ProtonPackageManager;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
-import com.winlator.cmod.fexcore.FEXCorePreset;
 import com.winlator.cmod.ui.onboarding.OnboardingCallbacks;
 import com.winlator.cmod.ui.onboarding.OnboardingComponent;
 import com.winlator.cmod.ui.onboarding.OnboardingComposeController;
@@ -41,7 +35,6 @@ import com.winlator.cmod.ui.onboarding.OnboardingComposeHost;
 import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.ImageFsInstaller;
 
-import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -69,7 +62,6 @@ public class OnboardingActivity extends AppCompatActivity {
     public static final String EXTRA_AUTO_INSTALL_VERSION = "auto_install_version";
     public static final String EXTRA_AUTO_INSTALL_VERSION_CODE = "auto_install_version_code";
 
-    private static final String PREF_INITIAL_WINE = "winz_initial_wine_version";
     private static final String BUNDLED_RUNTIME_ID = "bundled:" + ProtonPackageManager.DEFAULT_IDENTIFIER;
     private static final String BUNDLED_RUNTIME_NAME =
             ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER) != null
@@ -96,10 +88,7 @@ public class OnboardingActivity extends AppCompatActivity {
     private boolean installBusy;
     private boolean finishing;
     /** Set when the user skipped the Wine/Proton install and first container; finishing then creates neither. */
-    private boolean skipSetup;
     /** How the first container is made when it is not the Windows setup: "game", "import" or null (see the start screen). */
-    private String pendingStart;
-    private String selectedInitialWine;
     private String pendingInstallType;
     private String pendingInstallVersion;
     private int pendingInstallVersionCode;
@@ -117,7 +106,6 @@ public class OnboardingActivity extends AppCompatActivity {
         pendingInstallType = getIntent().getStringExtra(EXTRA_AUTO_INSTALL_TYPE);
         pendingInstallVersion = getIntent().getStringExtra(EXTRA_AUTO_INSTALL_VERSION);
         pendingInstallVersionCode = getIntent().getIntExtra(EXTRA_AUTO_INSTALL_VERSION_CODE, Integer.MIN_VALUE);
-        selectedInitialWine = preferences.getString(PREF_INITIAL_WINE, "");
 
         ImageFs imageFs = ImageFs.find(this);
         coreReady = imageFs.isValid() && imageFs.getVersion() >= ImageFsInstaller.LATEST_VERSION;
@@ -167,33 +155,6 @@ public class OnboardingActivity extends AppCompatActivity {
                         intent.addCategory(Intent.CATEGORY_OPENABLE);
                         intent.setType("*/*");
                         startActivityForResult(intent, REQUEST_LOCAL_DRIVER);
-                    }
-
-                    @Override
-                    public void onSkipSetup() {
-                        skipSetup = true;
-                    }
-
-                    @Override
-                    public void onChooseStart(@NonNull String start) {
-                        pendingStart = start.isEmpty() ? null : start;
-                    }
-
-                    @Override
-                    public void onOpenSettings() {
-                        skipSetup = true;
-                        pendingStart = null;
-                        if (!finishing) {
-                            finishing = true;
-                            enterMainApp(R.id.main_menu_settings);
-                        }
-                    }
-
-                    @Override
-                    public void onRuntimeSelected(@NonNull String runtimeIdentifier) {
-                        skipSetup = false;
-                        selectedInitialWine = runtimeIdentifier;
-                        preferences.edit().putString(PREF_INITIAL_WINE, runtimeIdentifier).apply();
                     }
 
                     @Override
@@ -897,90 +858,8 @@ public class OnboardingActivity extends AppCompatActivity {
         }
         finishing = true;
         contentsManager.syncContents();
-        ContainerManager manager = new ContainerManager(this);
-        if (!manager.getContainers().isEmpty() || skipSetup) {
-            enterMainApp();
-            return;
-        }
-
-        String runtime = resolveSelectedRuntime();
-        if (runtime == null) {
-            finishing = false;
-            Toast.makeText(this, "Install and select a Wine or Proton layer first.", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        WineInfo wineInfo = WineInfo.fromIdentifier(this, contentsManager, runtime);
-        if (wineInfo.path == null || wineInfo.path.isEmpty()) {
-            finishing = false;
-            Toast.makeText(this, "The selected Wine/Proton layer is no longer installed.", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        try {
-            JSONObject data = new JSONObject();
-            data.put("name", "Container-" + manager.getNextContainerId());
-            data.put("screenSize", Container.DEFAULT_SCREEN_SIZE);
-            data.put("envVars", Container.DEFAULT_ENV_VARS);
-            data.put("graphicsDriver", Container.DEFAULT_GRAPHICS_DRIVER);
-            data.put("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG);
-            data.put("rendererNative", false);
-            data.put("rendererPresentMode", "fifo");
-            data.put("dxwrapper", Container.DEFAULT_DXWRAPPER);
-            data.put("dxwrapperConfig", Container.DEFAULT_DXWRAPPERCONFIG);
-            data.put("audioDriver", Container.DEFAULT_AUDIO_DRIVER);
-            data.put("emulator", wineInfo.isArm64EC() ? "FEXCore" : "Box64");
-            data.put("wincomponents", Container.DEFAULT_WINCOMPONENTS);
-            data.put("drives", Container.DEFAULT_DRIVES);
-            data.put("box64Version", wineInfo.isArm64EC() ? DefaultVersion.WOWBOX64 : DefaultVersion.BOX64);
-            data.put("box64Preset", Box64Preset.COMPATIBILITY);
-            data.put("fexcoreVersion", DefaultVersion.FEXCORE);
-            data.put("fexcorePreset", FEXCorePreset.INTERMEDIATE);
-            data.put("wineVersion", runtime);
-            OpenGLDriverDefaults.initialize(this, data);
-
-            manager.createContainerAsync(data, contentsManager, created -> {
-                if (created == null) {
-                    finishing = false;
-                    Toast.makeText(this, "Unable to create the first container.", Toast.LENGTH_LONG).show();
-                } else {
-                    enterMainApp();
-                }
-            });
-        } catch (Exception error) {
-            finishing = false;
-            Toast.makeText(this, "Unable to prepare the first container.", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private String resolveSelectedRuntime() {
-        if (selectedInitialWine != null && !selectedInitialWine.isEmpty() && runtimeInstalled(selectedInitialWine)) {
-            return selectedInitialWine;
-        }
-        if (WineRuntimeGuard.isBundledMainInstalled(this)) return WineInfo.MAIN_WINE_VERSION.identifier();
-        for (ContentProfile.ContentType type : ContentProfile.ContentType.values()) {
-            String typeName = displayType(type);
-            if (!typeName.equals("Wine") && !typeName.equals("Proton")) continue;
-            for (ContentProfile profile : contentsManager.getInstalledProfiles(type)) {
-                return ContentsManager.getEntryName(profile);
-            }
-        }
-        for (String identifier : ProtonPackageManager.getInstalledIdentifiers(this)) {
-            if (!WineInfo.MAIN_WINE_VERSION.identifier().equals(identifier)) return identifier;
-        }
-        return null;
-    }
-
-    private boolean runtimeInstalled(String identifier) {
-        if (WineInfo.MAIN_WINE_VERSION.identifier().equals(identifier)) {
-            return WineRuntimeGuard.isBundledMainInstalled(this);
-        }
-        if (ProtonPackageManager.isKnownPackage(identifier)) {
-            return ProtonPackageManager.isInstalled(this, identifier);
-        }
-        ContentProfile profile = contentsManager.getProfileByEntryName(identifier);
-        return profile != null && (profile.type == ContentProfile.ContentType.CONTENT_TYPE_WINE
-                || profile.type == ContentProfile.ContentType.CONTENT_TYPE_PROTON);
+        // No container is made here: the first game added from the library gets one made for it.
+        enterMainApp();
     }
 
     private void enterMainApp() {
@@ -989,19 +868,10 @@ public class OnboardingActivity extends AppCompatActivity {
 
     /** @param menuItemId the page of the app to open (0 for the default one) */
     private void enterMainApp(int menuItemId) {
-        preferences.edit()
-                .putBoolean(PREF_ONBOARDING_COMPLETE, true)
-                .putString(PREF_INITIAL_WINE, selectedInitialWine == null ? "" : selectedInitialWine)
-                .apply();
+        preferences.edit().putBoolean(PREF_ONBOARDING_COMPLETE, true).apply();
         Intent main = new Intent(this, MainActivity.class);
         if (menuItemId > 0) main.putExtra("selected_menu_item_id", menuItemId);
         startActivity(main);
-        // The way of making the first container chosen on the start screen opens on top of the app.
-        if (pendingStart != null) {
-            Intent create = new Intent(this, com.winlator.cmod.ui.settings.ContainersSettingsActivity.class);
-            create.putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_START, pendingStart);
-            startActivity(create);
-        }
         overridePendingTransition(0, 0);
         finish();
     }

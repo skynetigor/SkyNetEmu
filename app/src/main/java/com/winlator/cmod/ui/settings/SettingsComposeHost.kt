@@ -115,7 +115,8 @@ data class SettingsModel(
     val customApiKeyEnabled: Boolean,
     val customApiKey: String,
     val contentsUrl: String,
-    val wineDebugOptions: List<String>
+    val wineDebugOptions: List<String>,
+    val telemetry: Boolean
 )
 
 @Stable
@@ -132,6 +133,8 @@ interface SettingsCallbacks {
     fun onCustomApiKeyChanged(value: String)
     fun onContentsUrlChanged(value: String)
     fun onWineDebugChannelsChanged(value: String)
+    fun onTelemetryChanged(on: Boolean)
+    fun onShowTelemetryData()
     fun onReinstallImageFs()
     fun onPresetAction(kind: String, id: String, action: String)
 }
@@ -292,6 +295,13 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                 ToggleRow(stringResource(R.string.remove_loading_bar_when_booting_games), model.removeLoadingBar) { callbacks.onBooleanChanged("remove_loading_bar_when_booting_games", it) }
             }
             EditableValueCard("Downloadable Contents URL", model.contentsUrl, callbacks::onContentsUrlChanged)
+        },
+        EditorCategory("privacy", "Privacy", if (model.telemetry) "Anonymous usage data is shared" else "Off", false) {
+            GroupCard {
+                ToggleRow("Share anonymous usage data", model.telemetry) { callbacks.onTelemetryChanged(it) }
+                GroupDivider()
+                NavigationRow(Icons.Outlined.Info, "What is sent", null, callbacks::onShowTelemetryData)
+            }
         },
         EditorCategory("system", "System", "ImageFS and about", false) {
             NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null, callbacks::onReinstallImageFs)

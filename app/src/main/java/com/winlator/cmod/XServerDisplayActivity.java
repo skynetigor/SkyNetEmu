@@ -109,6 +109,9 @@ import com.winlator.cmod.winhandler.TaskManagerSidebar;
 import com.winlator.cmod.winhandler.WinHandler;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
+import com.winlator.cmod.core.GameFolder;
+import com.winlator.cmod.telemetry.GameSessionRecorder;
+import com.winlator.cmod.telemetry.Telemetry;
 import com.winlator.cmod.xenvironment.XEnvironment;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
@@ -587,7 +590,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     preloaderDialog.closeOnUiThread();
                     winStarted[0] = true;
+                    GameSessionRecorder.onWindow();
                 }
+
+                if (window.id == activeRendererWindowId) GameSessionRecorder.onFrame();
 
                 if (frameRatingWindowId == window.id) {
                     if (classicHud != null) classicHud.update();
@@ -599,6 +605,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
                     frameRatingWindowId = window.id;
                     activeRendererWindowId = window.id;
+                    if (xServerView != null) xServerView.setSessionWindowId(window.id);
                     if (xServerView != null) xServerView.setFpsWindowId(window.id);
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
@@ -891,8 +898,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
         editor.apply();
     }
 
+    /** Hands what is known about the game that is about to start to the telemetry recorder (which does nothing when telemetry is off). */
+    private void startGameSessionRecording() {
+        if (!Telemetry.isEnabled()) return;
+        try {
+            boolean storageKnown = false, internal = false;
+            if (shortcut != null) {
+                GameFolder game = GameFolder.of(imageFs, container, shortcut.path);
+                if (game != null) {
+                    storageKnown = true;
+                    internal = GameFolder.isInternal(this, game.folder);
+                }
+            }
+            GameSessionRecorder.start(this,
+                    blankToNull(shortcut != null ? shortcut.getExtra("gameProfile") : ""),
+                    blankToNull(shortcut != null ? shortcut.getExtra("gameProfileVersion") : ""),
+                    blankToNull(container.getExtra("configId")),
+                    blankToNull(container.getWineVersion()),
+                    blankToNull(container.getEmulator()),
+                    blankToNull(container.getGraphicsDriver()),
+                    envVars.has("SKY_FSCACHE"),
+                    storageKnown ? (internal ? "internal" : "shared") : null);
+        }
+        catch (RuntimeException ignored) {}
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isEmpty() ? null : value;
+    }
+
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
+        GameSessionRecorder.end();
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
         boolean removeLoadingBar = PreferenceManager.getDefaultSharedPreferences(this)
                 .getBoolean("remove_loading_bar_when_booting_games", false);
@@ -945,6 +982,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             }
 
+            // The process ends right after this: one bounded attempt to send the session summary.
+            Telemetry.flushNow(1500);
             preloaderDialog.closeOnUiThread();
             runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext()));
         });
@@ -1139,6 +1178,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.saveData();
     }
 
+    /**
+     * The experimental file-system cache (libfscache.so, see winlator/fscache.c): a switch on the container that a shortcut can
+     * override (its "fileCache" extra is "" to follow the container, "1" for on, "0" for off). It becomes the SKY_FSCACHE
+     * variables the launcher reads; a SKY_FSCACHE the user typed among the environment variables is left alone unless the
+     * shortcut says off.
+     */
+    private void applyFileCache() {
+        String own = shortcut != null ? shortcut.getExtra("fileCache") : "";
+        boolean on = own.isEmpty() ? "1".equals(container.getExtra("fileCache")) : "1".equals(own);
+        if (!own.isEmpty() && !on) {
+            envVars.remove("SKY_FSCACHE");
+            envVars.remove("SKY_FSCACHE_PROBE");
+        } else if (on && !envVars.has("SKY_FSCACHE")) {
+            envVars.put("SKY_FSCACHE", "1");
+            if (!envVars.has("SKY_FSCACHE_PROBE")) envVars.put("SKY_FSCACHE_PROBE", "1");
+        }
+    }
+
     private void setupXEnvironment() throws PackageManager.NameNotFoundException {
 
         envVars.put("LC_ALL", lc_all);
@@ -1174,6 +1231,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             if (shortcut != null)
                 envVars.putAll(shortcut.getExtra("envVars"));
+
+            applyFileCache();
 
             applyOpenGLDriverEnvVars();
 
@@ -1236,7 +1295,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> runOnUiThread(this::exit));
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            GameSessionRecorder.onGuestExit(status);
+            runOnUiThread(this::exit);
+        });
 
         environment.addComponent(guestProgramLauncherComponent);
 
@@ -1245,6 +1307,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         }
 
+        startGameSessionRecording();
         environment.startEnvironmentComponents();
         LsfgManager.startVsyncClock(this, container);
 
@@ -3151,6 +3214,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (property != null) {
             if (activeRendererWindowId == -1 && propName.contains("_MESA_DRV")) {
                 activeRendererWindowId = window.id;
+                if (xServerView != null) xServerView.setSessionWindowId(window.id);
+                GameSessionRecorder.onRenderer();
             }
 
             if (propName.contains("_MESA_DRV_ENGINE_NAME")
@@ -3161,6 +3226,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             activeRendererWindowId = -1;
             lastRendererName = null;
+            if (xServerView != null) xServerView.setSessionWindowId(-1);
         }
 
         if (classicHud == null && modernHud == null) return;

@@ -301,7 +301,7 @@ public class ShortcutsFragment extends Fragment {
             return true;
         }
         if (item.getItemId() == MENU_FILE_MANAGER) {
-            ((MainActivity) requireActivity()).chooseContainerForNewShortcut();
+            ((MainActivity) requireActivity()).addGame();
             return true;
         }
         MainActivity activity = (MainActivity) requireActivity();
@@ -697,6 +697,13 @@ public class ShortcutsFragment extends Fragment {
         }
         else if (LibraryComposeHost.ACTION_SETTINGS.equals(action)) {
             ShortcutSettingsComposeDialog.show(this, shortcut);
+        }
+        else if (LibraryComposeHost.ACTION_STORAGE.equals(action)) {
+            com.winlator.cmod.ui.library.GameStorageComposeDialog.show(this, shortcut, this::loadShortcutsList);
+        }
+        else if (LibraryComposeHost.ACTION_CONTAINER.equals(action)) {
+            startActivity(new Intent(requireContext(), com.winlator.cmod.ui.settings.ContainersSettingsActivity.class)
+                    .putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_EDIT_CONTAINER, shortcut.container.id));
         }
         else if (LibraryComposeHost.ACTION_ICON.equals(action)) {
             shortcutForIconUpdate = shortcut;

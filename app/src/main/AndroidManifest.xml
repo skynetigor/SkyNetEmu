@@ -26,6 +26,7 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
 
     <application
+        android:name="com.winlator.cmod.SkyNetApplication"
         android:label="${appLabel}"
         android:icon="@mipmap/ic_launcher_sky"
         android:roundIcon="@mipmap/ic_launcher_sky_round"

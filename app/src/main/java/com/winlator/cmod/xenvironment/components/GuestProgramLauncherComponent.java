@@ -19,6 +19,7 @@ import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Callback;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.ProcessHelper;
@@ -248,42 +249,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
     }
 
-    /**
-     * The folders of the game that is being started, for the file-system cache: the folder of the exe and, when the exe sits
-     * in a binaries folder (Bin64, x64, ...), the game's folder above it. Empty when the exe cannot be worked out.
-     */
-    private String gameFolderRoots(ImageFs imageFs) {
-        if (shortcut == null || shortcut.path == null) return "";
-        String p = shortcut.path.replace("\"", "").trim();
-        int exe = p.toLowerCase(java.util.Locale.ENGLISH).indexOf(".exe");
-        if (exe >= 0) p = p.substring(0, exe + 4);
-        String unix = null;
-        if (p.length() > 2 && p.charAt(1) == ':' && (p.charAt(2) == '\\' || p.charAt(2) == '/')) {
-            // A Windows path: the drive letter says where it is on the device.
-            String letter = p.substring(0, 1).toLowerCase(java.util.Locale.ENGLISH);
-            String rest = p.substring(2).replace('\\', '/');
-            String base = null;
-            if (letter.equals("z")) base = imageFs.getRootDir().getPath();
-            else if (letter.equals("c") && container != null) base = new File(container.getRootDir(), ".wine/drive_c").getPath();
-            else if (container != null) {
-                for (String[] drive : container.drivesIterator())
-                    if (drive[0].equalsIgnoreCase(letter)) base = drive[1];
-            }
-            if (base == null) return "";
-            unix = base + rest;
-        } else if (p.startsWith("/")) {
-            unix = p;
-        }
-        if (unix == null) return "";
-        File dir = new File(unix).getParentFile();
-        if (dir == null || dir.getPath().length() < 2) return "";
-        StringBuilder roots = new StringBuilder(dir.getPath());
-        File parent = dir.getParentFile();
-        if (parent != null && dir.getName().matches("(?i)bin|bin32|bin64|binaries|win64|x64|x86_64|game"))
-            roots.append(':').append(parent.getPath());
-        return roots.toString();
-    }
-
     private static String mergePreloadValue(String baseValue, String overrideValue) {
         if (overrideValue == null || overrideValue.isEmpty()) {
             return baseValue == null ? "" : baseValue;
@@ -431,9 +396,9 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             ld_preload = imageFs.getLibDir() + "/libandroid-sysvshm.so";
         }
 
-        // Metadata shim (libfscache.so): SKY_FSCACHE=1 in the container's environment variables caches the file-system
-        // questions Wine asks about the game's folder (see winlator/fscache.c); SKY_FSCACHE_STATS=1 counts them and writes
-        // a summary to Winlator/logs. Put before libfakeinput so that it sees the calls first. Roots, the shared change
+        // Metadata shim (libfscache.so): SKY_FSCACHE=1 (set from the container's "File system cache" switch, see
+        // XServerDisplayActivity.applyFileCache) caches the file-system questions Wine asks about the game's folder (see
+        // winlator/fscache.c); SKY_FSCACHE_STATS=1 counts them and writes a summary to Winlator/logs. Put before libfakeinput so that it sees the calls first. Roots, the shared change
         // counters and the log folder are set here; a variable the user sets wins, because the container variables are
         // applied afterwards.
         boolean fsCache = this.envVars != null && "1".equals(this.envVars.get("SKY_FSCACHE"));
@@ -448,7 +413,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             }
             if (fscacheDest.exists()) {
                 ld_preload = mergePreloadValue(ld_preload, fscacheDest.getAbsolutePath());
-                String roots = fsCache ? gameFolderRoots(imageFs) : "";
+                String roots = fsCache ? GameFolder.cacheRoots(imageFs, container, shortcut == null ? null : shortcut.path) : "";
                 if (roots.isEmpty() && !fsCache) {
                     StringBuilder all = new StringBuilder(imageFs.getRootDir().getPath() + "/home/games");
                     if (bindingPaths != null) for (String path : bindingPaths) all.append(':').append(path);

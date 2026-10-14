@@ -45,6 +45,8 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract void onSurfaceChanged(int width, int height);
     public abstract void forceCleanup();
     public abstract void setFpsWindowId(int windowId);
+    /** The game's render window, for the telemetry recorder (independent of any HUD). */
+    public abstract void setSessionWindowId(int windowId);
     public abstract void setPipMode(boolean pipMode);
     public abstract void setFrameRating(Object frameRating);
 

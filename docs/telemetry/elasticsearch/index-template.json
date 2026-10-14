@@ -1,0 +1,288 @@
+{
+  "index_patterns": [
+    "logs-skynet.*-*"
+  ],
+  "data_stream": {},
+  "priority": 200,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "skynet-90d"
+    },
+    "mappings": {
+      "dynamic": "false",
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "device": {
+          "properties": {
+            "manufacturer": {
+              "type": "keyword"
+            },
+            "model": {
+              "properties": {
+                "identifier": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "error": {
+          "properties": {
+            "message": {
+              "type": "text"
+            },
+            "stack_trace": {
+              "type": "wildcard"
+            },
+            "type": {
+              "type": "keyword"
+            }
+          }
+        },
+        "event": {
+          "properties": {
+            "action": {
+              "type": "keyword"
+            },
+            "dataset": {
+              "type": "keyword"
+            },
+            "duration": {
+              "type": "long"
+            },
+            "id": {
+              "type": "keyword"
+            },
+            "ingested": {
+              "type": "date"
+            },
+            "outcome": {
+              "type": "keyword"
+            }
+          }
+        },
+        "host": {
+          "properties": {
+            "os": {
+              "properties": {
+                "name": {
+                  "type": "keyword"
+                },
+                "version": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "service": {
+          "properties": {
+            "name": {
+              "type": "keyword"
+            },
+            "version": {
+              "type": "keyword"
+            }
+          }
+        },
+        "session": {
+          "properties": {
+            "id": {
+              "type": "keyword"
+            }
+          }
+        },
+        "skynet": {
+          "properties": {
+            "android": {
+              "properties": {
+                "sdk": {
+                  "type": "integer"
+                }
+              }
+            },
+            "battery": {
+              "properties": {
+                "drain_pct": {
+                  "type": "float"
+                }
+              }
+            },
+            "build": {
+              "properties": {
+                "type": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "client_timestamp": {
+              "type": "date"
+            },
+            "config": {
+              "properties": {
+                "id": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "cpu": {
+              "properties": {
+                "avg_pct": {
+                  "type": "float"
+                }
+              }
+            },
+            "driver": {
+              "type": "keyword"
+            },
+            "emulator": {
+              "type": "keyword"
+            },
+            "error": {
+              "properties": {
+                "occurred_at": {
+                  "type": "date",
+                  "format": "epoch_millis"
+                },
+                "stage": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "exit": {
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "keyword"
+                },
+                "rss_kb": {
+                  "type": "long"
+                }
+              }
+            },
+            "file_cache": {
+              "type": "boolean"
+            },
+            "fps": {
+              "properties": {
+                "avg": {
+                  "type": "float"
+                },
+                "p1_low": {
+                  "type": "float"
+                }
+              }
+            },
+            "frametime": {
+              "properties": {
+                "p99_ms": {
+                  "type": "float"
+                }
+              }
+            },
+            "game": {
+              "properties": {
+                "id": {
+                  "type": "keyword"
+                },
+                "version": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "gpu": {
+              "properties": {
+                "avg_pct": {
+                  "type": "float"
+                },
+                "renderer": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "ingest": {
+              "properties": {
+                "version": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "memory": {
+              "properties": {
+                "peak_used_bytes": {
+                  "type": "long"
+                },
+                "total_bytes": {
+                  "type": "long"
+                }
+              }
+            },
+            "soc": {
+              "properties": {
+                "family": {
+                  "type": "keyword"
+                },
+                "model": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "storage": {
+              "type": "keyword"
+            },
+            "telemetry": {
+              "properties": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "temp": {
+              "properties": {
+                "battery_max_c": {
+                  "type": "float"
+                },
+                "cpu_max_c": {
+                  "type": "float"
+                }
+              }
+            },
+            "thermal": {
+              "properties": {
+                "max_status": {
+                  "type": "integer"
+                }
+              }
+            },
+            "time_to_renderer_ms": {
+              "type": "long"
+            },
+            "time_to_window_ms": {
+              "type": "long"
+            },
+            "timestamp_fixed": {
+              "type": "boolean"
+            },
+            "wine": {
+              "type": "keyword"
+            }
+          }
+        },
+        "user": {
+          "properties": {
+            "id": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "description": "Generated from docs/telemetry/schema/v1.json by gen_template.py. Do not edit by hand."
+  }
+}

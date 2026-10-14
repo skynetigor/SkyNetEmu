@@ -47,13 +47,6 @@ interface OnboardingCallbacks {
     fun onRemoveBundledRuntime()
     fun onBrowseLocal()
     fun onBrowseDriver()
-    fun onRuntimeSelected(runtimeIdentifier: String)
-    /** The user chose to skip installing Wine/Proton and creating the first container. */
-    fun onSkipSetup()
-    /** A first container made another way than the Windows setup of the next pages: opened in the app once the permissions are granted. */
-    fun onChooseStart(start: String)
-    /** The gear on the start screen: leave the setup and open the app's settings. */
-    fun onOpenSettings()
     fun onRequestPermissions()
     fun onRetryCore()
     fun onCloseComponents()
@@ -67,9 +60,7 @@ class OnboardingComposeController internal constructor(
     private val components: MutableState<List<OnboardingComponent>>,
     private val installingId: MutableState<String?>,
     private val installingLabel: MutableState<String?>,
-    private val installingProgress: MutableState<Int>,
-    private val initialContainerPreparing: MutableState<Boolean>,
-    private val initialContainerReady: MutableState<Boolean>
+    private val installingProgress: MutableState<Int>
 ) {
     fun updateCore(ready: Boolean, progress: Int) {
         coreReady.value = ready
@@ -100,11 +91,6 @@ class OnboardingComposeController internal constructor(
         installingLabel.value = label
         installingProgress.value = progress.coerceIn(-1, 100)
     }
-
-    fun updateInitialContainer(preparing: Boolean, ready: Boolean) {
-        initialContainerPreparing.value = preparing
-        initialContainerReady.value = ready
-    }
 }
 
 object OnboardingComposeHost {
@@ -126,8 +112,6 @@ object OnboardingComposeHost {
         val installing = mutableStateOf<String?>(null)
         val installLabel = mutableStateOf<String?>(null)
         val installProgress = mutableStateOf(-1)
-        val containerPreparing = mutableStateOf(false)
-        val containerReady = mutableStateOf(false)
         val controller = OnboardingComposeController(
             ready,
             progress,
@@ -136,9 +120,7 @@ object OnboardingComposeHost {
             components,
             installing,
             installLabel,
-            installProgress,
-            containerPreparing,
-            containerReady
+            installProgress
         )
 
         applyAppFullscreen(activity)
@@ -154,8 +136,6 @@ object OnboardingComposeHost {
                     installing,
                     installLabel,
                     installProgress,
-                    containerPreparing,
-                    containerReady,
                     componentManagerMode,
                     callbacks
                 )
@@ -165,77 +145,7 @@ object OnboardingComposeHost {
     }
 }
 
-private enum class OnboardingPage { Welcome, Theme, Create, Components, Runtime, Access }
-
-private fun prepareInitialContainer(
-    activity: ComponentActivity,
-    runtimeIdentifier: String,
-    preparing: MutableState<Boolean>,
-    ready: MutableState<Boolean>
-) {
-    if (preparing.value || ready.value || runtimeIdentifier.isBlank()) return
-
-    val manager = ContainerManager(activity)
-    if (manager.containers.isNotEmpty()) {
-        ready.value = true
-        return
-    }
-
-    val contents = ContentsManager(activity).apply { syncContents() }
-    val wineInfo = WineInfo.fromIdentifier(activity, contents, runtimeIdentifier)
-    if (wineInfo.path.isNullOrBlank()) {
-        Toast.makeText(activity, "The selected Wine/Proton layer is no longer installed.", Toast.LENGTH_LONG).show()
-        return
-    }
-
-    preparing.value = true
-    ready.value = false
-    try {
-        val defaultDriver = if (GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, activity)) {
-            DefaultVersion.WRAPPER_ADRENO
-        } else {
-            DefaultVersion.WRAPPER
-        }
-        val graphicsConfig = Container.DEFAULT_GRAPHICSDRIVERCONFIG.replace(
-            ";version=;",
-            ";version=$defaultDriver;"
-        )
-        val data = JSONObject().apply {
-            put("name", "Container-${manager.nextContainerId}")
-            put("screenSize", Container.DEFAULT_SCREEN_SIZE)
-            put("envVars", cleanContainerEnvironment(Container.DEFAULT_ENV_VARS))
-            put("graphicsDriver", Container.DEFAULT_GRAPHICS_DRIVER)
-            put("graphicsDriverConfig", graphicsConfig)
-            put("rendererNative", false)
-            put("rendererPresentMode", "fifo")
-            put("dxwrapper", Container.DEFAULT_DXWRAPPER)
-            put("dxwrapperConfig", Container.DEFAULT_DXWRAPPERCONFIG)
-            put("audioDriver", Container.DEFAULT_AUDIO_DRIVER)
-            put("emulator", if (wineInfo.isArm64EC) "FEXCore" else "Box64")
-            put("wincomponents", Container.DEFAULT_WINCOMPONENTS)
-            put("drives", Container.DEFAULT_DRIVES)
-            put("box64Version", if (wineInfo.isArm64EC) DefaultVersion.WOWBOX64 else DefaultVersion.BOX64)
-            put("box64Preset", Box64Preset.COMPATIBILITY)
-            put("fexcoreVersion", DefaultVersion.FEXCORE)
-            put("fexcorePreset", FEXCorePreset.INTERMEDIATE)
-            put("wineVersion", runtimeIdentifier)
-        }
-
-        manager.createContainerAsync(data, contents) { created ->
-            preparing.value = false
-            if (created == null) {
-                ready.value = false
-                Toast.makeText(activity, "Unable to create the first container.", Toast.LENGTH_LONG).show()
-            } else {
-                ready.value = true
-            }
-        }
-    } catch (_: Exception) {
-        preparing.value = false
-        ready.value = false
-        Toast.makeText(activity, "Unable to prepare the first container.", Toast.LENGTH_LONG).show()
-    }
-}
+private enum class OnboardingPage { Welcome, Theme, Components, Privacy, Access }
 
 @Composable
 private fun OnboardingFlow(
@@ -248,8 +158,6 @@ private fun OnboardingFlow(
     installing: State<String?>,
     installingLabel: State<String?>,
     installingProgress: State<Int>,
-    containerPreparing: MutableState<Boolean>,
-    containerReady: MutableState<Boolean>,
     managerMode: Boolean,
     cb: OnboardingCallbacks
 ) {
@@ -257,17 +165,8 @@ private fun OnboardingFlow(
         mutableStateOf(if (managerMode) OnboardingPage.Components else OnboardingPage.Theme)
     }
 
-    // Set when the first container is not made by the Windows pages: the permissions page then goes back to the start screen.
-    var startedElsewhere by rememberSaveable { mutableStateOf(false) }
-
     val hasInstalledRuntime = bundledInstalled.value || components.value.any {
         it.installed && (it.type == "Wine" || it.type == "Proton") && !it.runtimeIdentifier.isNullOrBlank()
-    }
-
-    LaunchedEffect(containerReady.value, page) {
-        if (!managerMode && page == OnboardingPage.Runtime && containerReady.value) {
-            page = OnboardingPage.Access
-        }
     }
 
     when (page) {
@@ -275,34 +174,12 @@ private fun OnboardingFlow(
             ready,
             progress,
             start = { page = OnboardingPage.Theme },
-            skip = { page = OnboardingPage.Runtime },
+            skip = { page = OnboardingPage.Privacy },
             retry = { cb.onRetryCore() }
         )
 
         OnboardingPage.Theme -> OnboardingThemeScreen(
-            onContinue = { page = OnboardingPage.Create }
-        )
-
-        OnboardingPage.Create -> OnboardingCreateScreen(
-            onChoose = { start ->
-                if (start == ContainerStart.Windows) {
-                    startedElsewhere = false
-                    cb.onChooseStart("")
-                    page = OnboardingPage.Components
-                } else {
-                    startedElsewhere = true
-                    cb.onSkipSetup()
-                    cb.onChooseStart(start.name.lowercase())
-                    page = OnboardingPage.Access
-                }
-            },
-            onSettings = { cb.onOpenSettings() },
-            onSkip = {
-                startedElsewhere = true
-                cb.onSkipSetup()
-                cb.onChooseStart("")
-                page = OnboardingPage.Access
-            }
+            onContinue = { page = OnboardingPage.Components }
         )
 
         OnboardingPage.Components -> OnboardingComponentsScreen(
@@ -317,39 +194,27 @@ private fun OnboardingFlow(
             managerMode = managerMode,
             onBack = {
                 if (managerMode) cb.onCloseComponents()
-                else page = OnboardingPage.Create
+                else page = OnboardingPage.Theme
             },
             onContinue = {
                 if (managerMode) cb.onCloseComponents()
-                else if (ready.value && hasInstalledRuntime) page = OnboardingPage.Runtime
+                else if (ready.value && hasInstalledRuntime) page = OnboardingPage.Privacy
             },
             cb = cb,
-            // No Wine/Proton installed and no container yet: both can be done later from Settings.
-            onSkip = {
-                cb.onSkipSetup()
-                page = OnboardingPage.Access
-            }
+            // No Wine/Proton installed yet: it can be done later from Settings.
+            onSkip = { page = OnboardingPage.Privacy }
         )
 
-        OnboardingPage.Runtime -> OnboardingRuntimeSelectionScreen(
-            components = components.value,
-            bundledInstalled = bundledInstalled.value,
-            preparing = containerPreparing.value,
-            onBack = { page = OnboardingPage.Components },
-            onContinue = { runtime ->
-                if (ready.value && hasInstalledRuntime && !containerPreparing.value) {
-                    cb.onRuntimeSelected(runtime)
-                    prepareInitialContainer(activity, runtime, containerPreparing, containerReady)
-                }
-            },
-            onSkip = {
-                cb.onSkipSetup()
+        OnboardingPage.Privacy -> OnboardingPrivacyScreen(
+            onChoose = { share ->
+                com.winlator.cmod.telemetry.Telemetry.setEnabled(activity, share)
                 page = OnboardingPage.Access
-            }
+            },
+            back = { page = OnboardingPage.Components }
         )
 
         OnboardingPage.Access -> OnboardingAccessScreen(
-            back = { page = if (startedElsewhere) OnboardingPage.Create else OnboardingPage.Runtime },
+            back = { page = OnboardingPage.Privacy },
             next = { cb.onRequestPermissions() }
         )
     }

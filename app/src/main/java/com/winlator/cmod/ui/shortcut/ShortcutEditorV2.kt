@@ -251,6 +251,8 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var gameSavesEnabled by mutableStateOf(GameSaveManager.isEnabled(shortcut))
     var autoSaveBackup by mutableStateOf(GameSaveManager.isAutoBackupEnabled(shortcut))
     var execArgs by mutableStateOf(shortcut.getExtra("execArgs"))
+    // Experimental file-system cache: "" follows the container, "1" on, "0" off.
+    var fileCache by mutableStateOf(shortcut.getExtra("fileCache"))
     var autoMesaGlVersionOverride by mutableStateOf(
         shortcut.getExtra(
             "autoMesaGlVersionOverride",
@@ -918,6 +920,15 @@ private fun ShortcutCategoryV2(
                 }
                 SettingsDivider()
                 SettingToggle("DXVK HUD", s.dxvkHud) { s.updateDxvkHud(it) }
+            }
+            SettingsCard {
+                val cacheEntries = listOf("Use container setting", "On", "Off")
+                val cacheValue = when (s.fileCache) { "1" -> "On"; "0" -> "Off"; else -> cacheEntries[0] }
+                SettingChoice("File system cache (experimental)", cacheValue, cacheEntries) {
+                    val value = when (it) { "On" -> "1"; "Off" -> "0"; else -> "" }
+                    s.fileCache = value
+                    s.extra("fileCache", value.ifEmpty { null })
+                }
             }
             SettingsCard {
                 val locale = localeDisplayValue(s.lcAll)

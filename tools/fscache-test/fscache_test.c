@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/vfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -96,6 +98,66 @@ int main(void) {
     if (chdir(R) == 0) {
         CHECK(exists("c.txt") && !exists("zzz.txt"), "relative paths");
         CHECK(listed(".", "c.txt") == 1, "opendir(\".\")");
+    }
+    // 8. the case-sensitivity probe of Wine (only with SKY_FSCACHE_PROBE=1): open the directory, FS_IOC_GETFLAGS, fstatfs,
+    //    ".ciopfs", close; the answers must be the same every time and the descriptor must be a working directory descriptor
+    if (getenv("SKY_FSCACHE_PROBE")) {
+        char pd[128];
+        snprintf(pd, sizeof pd, "%s/probedir", R);
+        mkdir(pd, 0755);
+        int first_ioctl = 0, first_errno = 0;
+        long first_type = 0;
+        for (int round = 0; round < 4; round++) {
+            int pfd = open(pd, O_RDONLY | O_NONBLOCK);
+            struct stat ps;
+            int flags = 0;
+            struct statfs sfs;
+            CHECK(pfd >= 0 && fstat(pfd, &ps) == 0 && S_ISDIR(ps.st_mode), "probe descriptor is a directory");
+            int ir = ioctl(pfd, 0x80086601, &flags);
+            int ie = errno;
+            int fr = fstatfs(pfd, &sfs);
+            struct stat cs;
+            int cr = fstatat(pfd, ".ciopfs", &cs, 0);
+            int ce = errno;
+            CHECK(fr == 0 && cr == -1 && ce == ENOENT, "fstatfs works, .ciopfs absent");
+            if (round == 0) { first_ioctl = ir; first_errno = ie; first_type = (long)sfs.f_type; }
+            else CHECK(ir == first_ioctl && (ir == 0 || ie == first_errno) && (long)sfs.f_type == first_type, "same answers on a repeat");
+            close(pfd);
+        }
+        // the directory is replaced: the probe must see the new one
+        rmdir(pd);
+        CHECK(!exists(pd), "probe directory removed");
+        mkdir(pd, 0755);
+        int pfd = open(pd, O_RDONLY | O_NONBLOCK);
+        struct stat ps1, ps2;
+        CHECK(pfd >= 0 && fstat(pfd, &ps1) == 0 && stat(pd, &ps2) == 0 && ps1.st_ino == ps2.st_ino,
+              "after rmdir + mkdir the probe descriptor is the new directory");
+        close(pfd);
+        // opening a directory with other flags is untouched, and a file is not a directory
+        pfd = open(pd, O_RDONLY | O_DIRECTORY);
+        CHECK(pfd >= 0, "open with O_DIRECTORY works");
+        close(pfd);
+        pfd = open(c, O_RDONLY | O_NONBLOCK);
+        CHECK(pfd >= 0, "open of a file with O_NONBLOCK works");
+        close(pfd);
+        // two descriptors of one directory give two independent read positions
+        char dd[128], nm[160];
+        snprintf(dd, sizeof dd, "%s/twodirs", R);
+        mkdir(dd, 0755);
+        for (int i = 0; i < 6; i++) { snprintf(nm, sizeof nm, "%s/f%d", dd, i); touch(nm); }
+        int fa = open(dd, O_RDONLY), fb = open(dd, O_RDONLY | O_DIRECTORY);
+        DIR *da = fdopendir(fa), *db = fdopendir(fb);
+        int na = 0, nb = 0;
+        for (int i = 0; i < 3; i++) if (readdir(da)) na++;
+        while (readdir(db)) nb++;
+        while (readdir(da)) na++;
+        CHECK(da && db && na == 8 && nb == 8, "two streams over one directory both read all 8 entries");
+        closedir(da);
+        closedir(db);
+        int fc = open(dd, O_RDONLY);
+        CHECK(fc >= 0 && fchdir(fc) == 0, "fchdir on a directory descriptor works");
+        close(fc);
+        chdir(R);
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL PASSED", fails);
     return fails != 0;
