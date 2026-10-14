@@ -400,9 +400,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 items(programs, key = { it.file.path }) { program ->
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -425,8 +425,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                             }) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
                             Surface(
                                 onClick = { start(program) },
-                                modifier = Modifier.size(44.dp),
-                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.size(46.dp),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Start") } }
@@ -436,9 +436,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 items(unused, key = { "unused:" + it.path }) { folder ->
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {

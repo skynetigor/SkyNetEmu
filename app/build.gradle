@@ -88,7 +88,7 @@ tasks.register("prepareKotlinBuildScriptModel"){}
 downloadProton.dependsOn(downloadImageFS)
 preBuild.dependsOn(downloadProton)
 
-// The debug build reads its registry (contents.json) from the branch of winlator-skynet-components that is
+// The debug build reads its registry (contents.json, linux.json) from the branch of winlator-skynet-components that is
 // named like the branch this checkout is on, when that repository has one; otherwise from main. A release build always
 // reads main.
 def currentBranch = providers.exec {
@@ -125,8 +125,8 @@ android {
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
 
-        versionCode 23
-        versionName "1.0"
+        versionCode 24
+        versionName "2.0.0"
 
         // External native build from Winlator
         externalNativeBuild {

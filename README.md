@@ -32,6 +32,7 @@ Changes already in this fork, on top of Ludashi:
 - **Lossless Scaling frame generation (LSFG).** Integrates the [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk) Vulkan layer (Android port by [FrankBarretta](https://github.com/FrankBarretta/lsfg-vk-android) / [GameNative](https://github.com/GameNative/lsfg-vk-android)) so games get interpolated frames on the GPU. You supply your own `Lossless.dll` from Lossless Scaling — it is never bundled.
   - Configure it per-container under **Video → Frame Generation**: multiplier, flow scale, performance mode, present mode.
   - **Tune it live in-game** from the sidebar's **Rendering** section — switch Off / 2x / 3x / 4x and drag flow scale without leaving the game, so you can A/B the effect instantly.
+- **Linux containers.** A real Linux (Arch Linux ARM) in a sandbox with its own Vulkan driver (Turnip, Zink for OpenGL) and x86 games through Box64 or FEX, including Steam and its games as shortcuts. Create one from **Linux system** on the start screen; Steam is set up from **Settings → Environments**.
 - **Bulk environment-variable editing.** Edit a container's env vars as plain text — paste a whole block at once instead of adding them one modal at a time.
 - **Side-by-side install.** Ships under its own application id, so it installs alongside an existing Ludashi (or other Winlator) build without conflicts and without touching their containers.
 

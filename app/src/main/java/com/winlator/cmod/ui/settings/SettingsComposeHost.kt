@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Refresh
@@ -190,11 +191,11 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
             WinlatorThemePreferenceCard()
         },
         EditorCategory("environments", "Environments", "Containers, Steam and components", !model.steamReady) {
-            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
+            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows and Linux environments") {
                 context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
             }
             NavigationRow(
-                Icons.Outlined.Memory, "Steam",
+                Icons.Outlined.SportsEsports, "Steam",
                 if (model.steamReady) model.steamSummary else "Not set up yet: ${model.steamSummary}",
                 callbacks::onOpenSteam
             )
