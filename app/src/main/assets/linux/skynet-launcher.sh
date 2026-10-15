@@ -35,8 +35,23 @@ done
 # The emulator of this game: the shortcut that started it left the variables (LinuxSession.writeSteamEmulatorEnv); the Steam client
 # may be running with the ones of another game's session.
 [ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.env" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.env"
+# The Steam runtime wraps every x86 game, 32-bit or 64-bit: what the game needs depends on the class of its executables
+# (game32 = it has 32-bit ones and no 64-bit one).
+game32=""
 if [ -n "$scout" ]; then
     game_dir="$(dirname "${cmd[0]}")"
+    has32=""; has64=""
+    for f in "$game_dir"/bin/*; do
+        [ -f "$f" ] && [ -x "$f" ] || continue
+        case "$f" in *.so|*.so.*) continue ;; esac
+        case "$(od -An -tx1 -j0 -N5 "$f" 2>/dev/null | tr -d ' \n')" in
+            7f454c4601) has32=1 ;;
+            7f454c4602) has64=1 ;;
+        esac
+    done
+    [ -n "$has32" ] && [ -z "$has64" ] && game32=1
+fi
+if [ "$game32" = 1 ]; then
     libs=""
     for d in "$game_dir/lib/i686" "$game_dir/bin"; do
         [ -d "$d" ] && libs="${libs:+$libs:}$d"
@@ -76,10 +91,10 @@ unset LD_PRELOAD
 # (A 32-bit game gets its own thunk selection (SKY_FEX_THUNKCONFIG32: none of the 64-bit guests' thunks). With the OpenGL one on
 # (SKY_FEX_GL32) its OpenGL is the runtime's own Mesa, so it gets Zink too. Without it the game keeps the software OpenGL of the
 # root filesystem.)
-if [ -n "$scout" ] && [ -n "$SKY_FEX_THUNKCONFIG32" ]; then
+if [ "$game32" = 1 ] && [ -n "$SKY_FEX_THUNKCONFIG32" ]; then
     export FEX_THUNKCONFIG="$SKY_FEX_THUNKCONFIG32"
 fi
-if [ "$SKY_GAME_GL" = zink ] && { [ -z "$scout" ] || [ "$SKY_FEX_GL32" = 1 ]; }; then
+if [ "$SKY_GAME_GL" = zink ] && { [ "$game32" != 1 ] || [ "$SKY_FEX_GL32" = 1 ]; }; then
     export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
     unset LIBGL_ALWAYS_SOFTWARE
 fi
@@ -99,4 +114,11 @@ if [ -n "$SKY_MIMALLOC_STUB" ] && [ -f "$SKY_MIMALLOC_STUB" ]; then
         esac
     done
 fi
-exec "${cmd[@]}" >> "$log" 2>&1
+# Not exec: the game's exit status goes to the log (a signal shows as 128+N), and Steam's stop request still reaches it.
+"${cmd[@]}" >> "$log" 2>&1 &
+game=$!
+trap 'kill -TERM "$game" 2>/dev/null' TERM INT
+wait "$game"; status=$?
+[ "$status" -gt 128 ] && kill -0 "$game" 2>/dev/null && { wait "$game"; status=$?; }
+echo "exit: $status ($(date +%T))" >> "$log"
+exit "$status"

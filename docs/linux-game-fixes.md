@@ -72,9 +72,18 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 - **Result:** the game starts, draws through Vulkan on the Adreno (HUD: Vulkan, 60 FPS) and shows the Feral logo.
 - **Also fixed on the way:** the game's first `CreateWindow` asked for depth 24 and got `BadMatch` (the screen has one visual, depth 32).
   `WindowManager.createWindow` now accepts depth 24 on that visual. Found with `.xkeys` (logcat tag `XErrors`).
-- **Open:** the game stays at the Feral logo for minutes (Vulkan swapchain alive, 47-60 FPS, CPU 20-30%, Feral's HTML UI loaded and
-  fetching its remote resources). The CEF line `gles2_command_buffer_stub: Failed to create default offscreen surface` is probably
-  harmless: CEF never dlopens libGL/libEGL/libosmesa (Box64's log shows no attempt), so it has no GL and falls back to software.
-  Tried without effect: `-nolauncher` (CEF still starts), `--disable-gpu --disable-gpu-compositing` as game arguments (the game
-  exits right after SDL init: it rejects unknown arguments, like Tomb Raider 2013 with `-windowed`).
-  Next: find out what the game waits for (its HTML UI has a startup video and a loading overlay: `cache/GameFeralUI/emergency.js`).
+- **Cause of the logo hang: the game was on Box64.** The Feral pre-game window (the "Options" launcher, a CEF page with a PLAY
+  button) never drew under Box64: only the looping logo overlay was visible, and the game quit itself with exit code 8 after
+  about four minutes. With the shortcut on FEX (`linuxEmulator=fex`, `fex-2610`, the Ubuntu rootfs, thunks on) the window draws and
+  shows its dialogs (usage statistics, CPU governor, unsupported card, Vulkan drivers).
+- **Second bug found on the way (`skynet-launcher.sh`):** every game started through the Steam runtime got the 32-bit thunk
+  selection (`FEX_THUNKCONFIG=ThunkConfig32.json`, Vulkan off), the 64-bit Shadow too: the guest loader then looked for the host
+  Turnip ICD, failed (`libvulkan_freedreno.so: cannot open shared object file`) and the launcher said "Vulkan-capable drivers
+  required". The launcher now reads the ELF class of the executables in `bin/` and applies the 32-bit selection only to 32-bit-only
+  games (`game32`). After that the log shows the Vulkan thunk working (`Linking address ... to host invoker`).
+- **Launcher log:** the launcher no longer `exec`s the game; it writes `exit: <status>` to `steam-game-launch.log`.
+- **Input into the Feral window:** taps reach the window (`XTrace: XI button press ... pointWin`), but the page updates slowly
+  and the screenshots lag; the dialogs need several clicks. Not solved: after "Continue Anyway" on the last dialog the game went on
+  to crash once (exit 11) while it still had no Vulkan; with the thunk on it has not been through that step yet.
+- **Tried without effect:** `-nolauncher` (CEF still starts), `--disable-gpu --disable-gpu-compositing` as game arguments (the
+  game exits right after SDL init), Enter, Space.
