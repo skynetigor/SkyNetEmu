@@ -66,3 +66,12 @@ width allows (720 dp or more), otherwise they are sections that open and close; 
 3. The Steam screen from scratch (fresh app data): download, the container appearing by itself, the shortcut in the library, Steam native and
    in Big Picture.
 4. Settings on the unfolded display (list on the left) and the cover display (sections).
+
+## BeamNG.drive: the Linux profile (Box64, Performance)
+
+`containers/beamng-linux-box64-performance.wcfg` (index entry `"platform": "linux"`) is a Linux container on Box64 0.4.4 with the
+PERFORMANCE preset, the `bannerlator-r9` runtime, Turnip 26.3 and Zink. It is listed in every version of `games/beamng-drive.json`.
+A version's single `preferredContainer` names a Windows config, so for the Linux platform `ConfigChooser` takes the first listed Linux
+config that suits (a config made for any processor family counts when the preferred one belongs to the other platform): the Add-game
+screen shows it as "Recommended" for `BinLinux/BeamNG.drive.x64`. Box64 reads the program, so it can stay on shared storage (no copy).
+The registry lives in the components repository: these files must be published there, or the app's cached copy replaces them after its TTL.

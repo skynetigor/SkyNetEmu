@@ -37,7 +37,8 @@
     }
    },
    "containers": [
-    "cachyos-arm64ec-box64-dd-turnip"
+    "cachyos-arm64ec-box64-dd-turnip",
+    "beamng-linux-box64-performance"
    ],
    "preferredContainer": "cachyos-arm64ec-box64-dd-turnip",
    "default": true
@@ -57,7 +58,8 @@
    },
    "containers": [
     "proton11-x64-box64-turnip-stable",
-    "cachyos-x64-box64-dd-turnip"
+    "cachyos-x64-box64-dd-turnip",
+    "beamng-linux-box64-performance"
    ],
    "preferredContainer": "proton11-x64-box64-turnip-stable"
   },
@@ -75,7 +77,8 @@
     }
    },
    "containers": [
-    "proton9-x64-box64-zink-turnip263"
+    "proton9-x64-box64-zink-turnip263",
+    "beamng-linux-box64-performance"
    ],
    "preferredContainer": "proton9-x64-box64-zink-turnip263"
   },
@@ -93,7 +96,8 @@
     }
    },
    "containers": [
-    "proton9-x64-box64-turnip-gen8"
+    "proton9-x64-box64-turnip-gen8",
+    "beamng-linux-box64-performance"
    ],
    "preferredContainer": "proton9-x64-box64-turnip-gen8"
   }
