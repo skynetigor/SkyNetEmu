@@ -385,6 +385,28 @@ static const char *x86_emulator(void) {
     return emulator;
 }
 
+/* The emulator for 32-bit x86 programs (FEX with a root filesystem that has the 32-bit libraries); Box64 runs only 64-bit ones. */
+static const char *x86_32_emulator(void) {
+    static const char *emulator;
+    static int looked;
+    if (!looked) {
+        emulator = getenv("SKY_X86_32_EMULATOR");
+        if (emulator && !*emulator) emulator = NULL;
+        looked = 1;
+    }
+    return emulator;
+}
+
+/* Whether the file at path is a 32-bit x86 ELF (e_machine 3). */
+static int is_x86_32(const char *path) {
+    unsigned char header[20];
+    int fd = syscall(SYS_openat, AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    ssize_t n = syscall(SYS_read, fd, header, sizeof header);
+    syscall(SYS_close, fd);
+    return n == (ssize_t)sizeof header && memcmp(header, "\177ELF", 4) == 0 && header[4] == 1 && header[18] == 3 && header[19] == 0;
+}
+
 /* Whether the file at path is a 64-bit x86 ELF (e_machine 62). */
 static int is_x86_64(const char *path) {
     unsigned char header[20];
@@ -393,6 +415,16 @@ static int is_x86_64(const char *path) {
     ssize_t n = syscall(SYS_read, fd, header, sizeof header);
     syscall(SYS_close, fd);
     return n == (ssize_t)sizeof header && memcmp(header, "\177ELF", 4) == 0 && header[4] == 2 && header[18] == 62 && header[19] == 0;
+}
+
+/* The emulator that runs the program at path (NULL for a native program): Box64 for a 64-bit x86 one, FEX for a 32-bit one. */
+static const char *emulator_for(const char *path) {
+    if (!path) return NULL;
+    const char *emulator = x86_emulator();
+    if (emulator && is_x86_64(path)) return emulator;
+    emulator = x86_32_emulator();
+    if (emulator && is_x86_32(path)) return emulator;
+    return NULL;
 }
 
 /* argv with the emulator and the program in front; NULL if it cannot be built. */
@@ -433,8 +465,8 @@ static const char *search_path(const char *file, char *buffer, size_t size) {
 int execve(const char *path, char *const argv[], char *const envp[]) {
     static int (*real)(const char *, char *const[], char *const[]);
     if (!real) real = dlsym(RTLD_NEXT, "execve");
-    const char *emulator = x86_emulator();
-    if (emulator && path && is_x86_64(path)) {
+    const char *emulator = emulator_for(path);
+    if (emulator) {
         char **wrapped = with_emulator(emulator, path, argv);
         if (wrapped) {
             int result = real(emulator, wrapped, envp);
@@ -455,8 +487,7 @@ int execvpe(const char *file, char *const argv[], char *const envp[]) {
     char buffer[4096];
     const char *found = file ? search_path(file, buffer, sizeof buffer) : NULL;
     if (found) {
-        const char *emulator = x86_emulator();
-        if (emulator && is_x86_64(found)) return execve(found, argv, envp);
+        if (emulator_for(found)) return execve(found, argv, envp);
     }
     static int (*real)(const char *, char *const[], char *const[]);
     if (!real) real = dlsym(RTLD_NEXT, "execvpe");
@@ -576,11 +607,11 @@ typedef int (*spawn_fn)(pid_t *, const char *, const posix_spawn_file_actions_t 
 
 static int spawn_wrapped(spawn_fn real, int search, pid_t *pid, const char *file, const posix_spawn_file_actions_t *actions,
                          const posix_spawnattr_t *attr, char *const argv[], char *const envp[]) {
-    const char *emulator = x86_emulator();
-    if (emulator && file) {
+    if (file) {
         char buffer[4096];
         const char *found = search ? search_path(file, buffer, sizeof buffer) : file;
-        if (found && is_x86_64(found)) {
+        const char *emulator = found ? emulator_for(found) : NULL;
+        if (emulator) {
             char **wrapped = with_emulator(emulator, found, argv);
             if (wrapped) {
                 int result = real(pid, emulator, actions, attr, wrapped, envp);

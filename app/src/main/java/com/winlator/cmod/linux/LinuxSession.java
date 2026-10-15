@@ -490,6 +490,15 @@ public final class LinuxSession {
             // x86-64 program to Box64 (proot's own -q does not work in this build). libskyshim's exec and spawn functions
             // do it: any program that starts an x86-64 one gets it run through this emulator.
             env.put("SKY_X86_EMULATOR", LinuxEmulator.binary(emulator).getPath());
+            // Box64 runs 64-bit programs only. A 32-bit one (Tomb Raider, 2013) goes to FEX when one is installed with a root
+            // filesystem that has the 32-bit libraries; libskyshim picks the emulator by the program's ELF class.
+            java.util.List<LinuxEmulator.Installed> fexBuilds = LinuxEmulator.list(context, LinuxEmulator.FEX);
+            java.util.List<LinuxRootfs.Installed> rootfsList = LinuxRootfs.list(context);
+            if (!fexBuilds.isEmpty() && !rootfsList.isEmpty()) {
+                env.put("SKY_X86_32_EMULATOR", LinuxEmulator.binary(fexBuilds.get(0)).getPath());
+                env.put("FEX_ROOTFS", rootfsList.get(0).dir.getPath());
+                env.put("FEX_SILENTLOG", "1");
+            }
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
             File launcher = stageAsset(context, "skynet-launcher.sh");
             if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
