@@ -75,6 +75,7 @@ import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.fexcore.FEXCorePreset
 import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxEmulatorSetup
 import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxRuntime
@@ -390,6 +391,7 @@ private fun LinuxContainerEditorBody(
     var keyboardButton by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON) != "0") }
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
+    var tuSysmem by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM) == "1") }
     var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
     var glVendor by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_VENDOR)?.ifEmpty { null } ?: "nvidia") }
     var glDriver by remember {
@@ -486,6 +488,7 @@ private fun LinuxContainerEditorBody(
         container.putExtra(LinuxEmulator.EXTRA_ROOTFS, if (emulator == LinuxEmulator.FEX) (rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.firstOrNull())?.id ?: "" else "")
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
+        container.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, if (tuSysmem) "1" else "")
         container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor)
         container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
@@ -720,6 +723,8 @@ private fun LinuxContainerEditorBody(
                 ) { upscaler = it }
                 SettingsDivider()
                 SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
+                SettingsDivider()
+                SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
                 SettingsDivider()
                 val driverEntries = LinkedHashMap<String, String>().apply {
                     put("", "Runtime default")

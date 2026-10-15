@@ -36,6 +36,7 @@ import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxEmulatorSetup
 import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxLaunchOptions
 import com.winlator.cmod.linux.LinuxRootfs
@@ -90,6 +91,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var fexPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)) }
     var fexThunks by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS)) }
     var fexGl32 by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_32)) }
+    var tuSysmem by remember { mutableStateOf(shortcut.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM)) }
     var glVendor by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_VENDOR)) }
     val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
     val fexBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.FEX) }
@@ -176,6 +178,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, fexThunks.ifEmpty { null })
         shortcut.putExtra(LinuxFex.EXTRA_GL_32, fexGl32.ifEmpty { null })
         shortcut.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, tuSysmem.ifEmpty { null })
         shortcut.saveData()
         onClose()
     }
@@ -350,6 +353,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                         UPSCALER_MODES.forEach { put(it.first, it.second) }
                     }
                 ) { upscaler = it }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "Turnip without tiled rendering (TU_DEBUG=sysmem)",
+                    tuSysmem,
+                    linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                ) { tuSysmem = it }
             }
         },
         EditorCategory("framegen", "Frame generation", frameGenerationSummary, false) {

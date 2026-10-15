@@ -137,3 +137,16 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 - **Checked on the device (2026-10-15):** with the launcher alone (no `~/.drirc`, the game's own preferences untouched) the game
   draws as intended at 60 FPS, GPU 79 %. **Not checked:** the TextureQuality auto path on the product build over a long session
   (32-bit address space), other Feral or 32-bit games, the "amd" choice.
+
+## Turnip without tiled rendering (`TU_DEBUG=sysmem`): a setting, off by default
+
+- **Source:** a community note for Turnip builds that GMEM rendering is glitchy on Adreno 8xx and `TU_DEBUG=sysmem` helps
+  (https://github.com/whitebelyash/freedreno_turnip-CI/releases); Mesa issue 10466 (SuperTux Kart on Adreno 630,
+  https://gitlab.freedesktop.org/mesa/mesa/-/issues/10466) cured the same way on the native driver.
+- **What is added:** container and shortcut extra `linuxTuSysmem` ("1" = on; a shortcut's "Container default / On / Off"), in
+  both editors. The session sets `TU_DEBUG=sysmem` (appended to an existing `TU_DEBUG`); a game started by Steam gets it from its
+  `<appId>.env` like the emulator's variables.
+- **What it does not do:** it did not remove the black patches in Tomb Raider (that was the GL vendor string, see above).
+- **Measured, but not controlled:** in the first test the menu ran at 57 FPS with it against 35-47 without; in a later pair of runs
+  the scenes differed (a cutscene, the menu, a loading screen) and the numbers (52 -> 92 without, 103 -> 0 with) say nothing.
+  Whether it is faster, and what it costs in power, is **not established**.

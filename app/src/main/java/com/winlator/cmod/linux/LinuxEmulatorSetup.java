@@ -13,11 +13,14 @@ import java.util.Map;
  * the session gets {@link #of} instead of the container.
  */
 public final class LinuxEmulatorSetup {
+    /** Container (or shortcut) extra: "1" runs Turnip without its tiled (GMEM) rendering, TU_DEBUG=sysmem. */
+    public static final String EXTRA_TU_SYSMEM = "linuxTuSysmem";
+
     /** The shortcut extras that belong to the emulator. */
     public static final String[] EXTRAS = {
             LinuxEmulator.EXTRA_EMULATOR, LinuxEmulator.EXTRA_ID, LinuxEmulator.EXTRA_PRESET, LinuxEmulator.EXTRA_ROOTFS,
             LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS, LinuxFex.EXTRA_GL_32,
-            LinuxFex.EXTRA_GL_VENDOR
+            LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM
     };
 
     private LinuxEmulatorSetup() {}

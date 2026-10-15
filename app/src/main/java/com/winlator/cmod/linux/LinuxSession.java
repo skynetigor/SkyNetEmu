@@ -461,7 +461,7 @@ public final class LinuxSession {
     /** The variables that make up the x86 emulator of a session: the launcher of a Steam game applies the ones of its own game. */
     private static boolean isEmulatorVariable(String name) {
         return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
-                || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB");
+                || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB") || name.equals("TU_DEBUG");
     }
 
     /**
@@ -545,6 +545,12 @@ public final class LinuxSession {
         // binds over /dev/input. SDL lists a pad by reading that directory, so the bind is what makes it visible;
         // on its own the shim only answers a path a program already knows.
         env.put("SKY_INPUT_DIR", inputDir(context).getPath());
+        // Turnip's tiled rendering (GMEM) switched off: sysmem renders straight into memory. A game started by Steam gets it from
+        // ~/.skynet/steam-emulator/<appId>.env like the emulator's variables.
+        if ("1".equals(container.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM))) {
+            String tuDebug = env.get("TU_DEBUG");
+            env.put("TU_DEBUG", tuDebug == null || tuDebug.isEmpty() ? "sysmem" : tuDebug + ",sysmem");
+        }
         // No udev runs in the session, so SDL must scan /dev/input itself instead of waiting on a monitor.
         env.put("SDL_JOYSTICK_DISABLE_UDEV", "1");
         env.put("SDL_HIDAPI_JOYSTICK_DISABLE_UDEV", "1");
