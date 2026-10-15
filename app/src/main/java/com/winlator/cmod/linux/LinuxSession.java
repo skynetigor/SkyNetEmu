@@ -184,7 +184,7 @@ public final class LinuxSession {
         if (runsOnFex && program != null
                 && program.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
             // FEX maps a program and its libraries as executable, which shared storage (mounted noexec) refuses.
-            return refusal("FEX cannot run a program from shared storage. Copy the program into the container (add it with \"Program only\" "
+            return refusal((machine == 3 ? "This 32-bit program is run by FEX (Box64 cannot run it), and " : "") + "FEX cannot run a program from shared storage. Copy the program into the container (add it with \"Program only\" "
                     + "or \"Whole game\"), or choose Box64 for this shortcut.");
         }
         // $1 the program, $2 the emulator (empty for a native program), $3 and $4 how many variables and wrapper words

@@ -39,6 +39,25 @@ public final class LinuxProgramInstaller {
         return !file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/");
     }
 
+    /** Why {@link #needsCopy} says yes, in a sentence for the person adding the program (the reason depends on what the program is). */
+    public static String copyReason(Container container, File file) {
+        if (!file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
+            return "This file is on a storage that the container does not see, so it is copied in.";
+        }
+        switch (LinuxSession.elfMachine(file)) {
+            case 3:
+                return "A 32-bit program is run by FEX, even in a Box64 container (Box64 cannot run it), and FEX needs the program and its "
+                        + "libraries as executable files, which shared storage does not allow.";
+            case 62:
+                return "This container runs x86-64 programs through FEX, which needs the program and its libraries as executable files, "
+                        + "which shared storage does not allow. (Box64 reads a program where it lies, so a Box64 container does not copy it.)";
+            case 183:
+                return "An ARM64 program is started as it is, and shared storage does not allow starting programs from it.";
+            default:
+                return "A script starts programs of its own from its folder, and shared storage does not allow that.";
+        }
+    }
+
     /** The folder above the program's folder, when the game may keep its data there; null when it cannot be told. */
     public static File gameFolder(File file) {
         File folder = file.getParentFile();

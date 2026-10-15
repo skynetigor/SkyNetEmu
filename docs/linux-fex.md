@@ -77,3 +77,12 @@ left out; when none can, the tile says so and a tap shows why for each. The same
 ways, with a sentence naming what is missing. Checked on the device (2026-10-15) with a 32-bit ELF in Download: the file manager lists it
 with the Linux icon and offers "Add this game"; the screen offers no Windows environment; the list holds the two Linux containers that fit.
 Not checked: that the standard Linux container is made and the program started from it (needs FEX and the root filesystem installed).
+
+### "Copy into the container?" and why it appears for a Box64 container
+
+A Box64 container copies nothing for an x86-64 program on the internal shared storage (Box64 reads the program where it lies). It copies
+for: a **32-bit program** (always run by FEX, even in a Box64 container: Box64 cannot run it; FEX maps the program and its libraries as
+executable code and shared storage is mounted noexec), an **ARM64 program** and a **script** (started as they are), a file on **another
+volume** (not bound in the container). The dialog now says which of these it is (`LinuxProgramInstaller.copyReason`), and the refusal at
+start names FEX for a 32-bit program. The dialog showed no choices at all before (an `AlertDialog` with a message does not list its items:
+the reason and the list are in one view now), so "Program only / Whole game / Folder" could not be chosen.

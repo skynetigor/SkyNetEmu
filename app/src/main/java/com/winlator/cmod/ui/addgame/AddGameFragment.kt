@@ -298,7 +298,7 @@ class AddGameFragment : Fragment() {
         }
         var guest = exe.absolutePath
         if (LinuxProgramInstaller.needsCopy(container, exe)) {
-            val mode = askCopyMode() ?: run {
+            val mode = askCopyMode(container) ?: run {
                 phase = Phase.Failed("Nothing was added.")
                 return null
             }
@@ -317,7 +317,7 @@ class AddGameFragment : Fragment() {
     }
 
     /** Asks (on the screen, from the worker thread) what of the program's folder goes into the container; null when cancelled. */
-    private fun askCopyMode(): LinuxProgramInstaller.CopyMode? {
+    private fun askCopyMode(container: Container): LinuxProgramInstaller.CopyMode? {
         val host = activity ?: return null
         val latch = java.util.concurrent.CountDownLatch(1)
         var answer: LinuxProgramInstaller.CopyMode? = null
@@ -332,13 +332,29 @@ class AddGameFragment : Fragment() {
             }
         }.toTypedArray()
         host.runOnUiThread {
-            AlertDialog.Builder(host)
+            // A dialog with a message shows no list of items: the reason and the choices go into one view.
+            val pad = (20 * host.resources.displayMetrics.density).toInt()
+            val reason = android.widget.TextView(host).apply {
+                text = LinuxProgramInstaller.copyReason(container, exe) + "\n\nWhat goes into the container?"
+                setPadding(pad, pad / 2, pad, pad / 2)
+                textSize = 16f
+            }
+            val list = android.widget.ListView(host).apply {
+                adapter = android.widget.ArrayAdapter(host, android.R.layout.simple_list_item_1, labels)
+            }
+            val body = android.widget.LinearLayout(host).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                addView(reason)
+                addView(list)
+            }
+            val dialog = AlertDialog.Builder(host)
                 .setTitle("Copy into the container?")
-                .setMessage("Programs cannot run from shared storage here, so they are copied into the Linux container. What goes in?")
-                .setItems(labels) { _, which -> answer = modes[which]; latch.countDown() }
+                .setView(body)
                 .setNegativeButton(android.R.string.cancel) { _, _ -> latch.countDown() }
                 .setOnCancelListener { latch.countDown() }
-                .show()
+                .create()
+            list.setOnItemClickListener { _, _, which, _ -> answer = modes[which]; dialog.dismiss(); latch.countDown() }
+            dialog.show()
         }
         latch.await()
         return answer

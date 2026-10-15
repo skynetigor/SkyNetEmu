@@ -69,6 +69,7 @@ import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxProgramInstaller
 import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.theme.WinZTheme
@@ -606,7 +607,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Programs cannot run from shared storage, so the folder \"${folder.name}\" " +
+                    LinuxProgramInstaller.copyReason(container, file) + "\n\nThe folder \"${folder.name}\" " +
                         "(${formatSize(pendingCopySize)}) will be copied into this container." +
                         if (gameFolder != null) "\n\nIf the game keeps its data next to this folder, copy the whole game folder \"${gameFolder.name}\" " +
                             "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead, or only the program and read the rest from storage." else ""
