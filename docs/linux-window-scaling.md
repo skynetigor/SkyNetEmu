@@ -11,7 +11,7 @@ shortcut or container (`graphicsFilterMode`) works on the window's own resolutio
 window being drawn as their source.
 
 **Which window.** `VulkanXServerView.pickGameWindow`: the biggest mapped window directly under the root that is at least 100x100,
-is not override-redirect (menus, tooltips), is not a window of the Steam client (named "Steam", "Steam - ...", "Steam Big Picture...") and does not cover the X screen already (not the FPS window). A full-screen window
+is not override-redirect (menus, tooltips), is not a window of the Steam client (named "Steam", "Steam - ...", "Steam Big Picture...") and does not cover the X screen already. A full-screen window
 beneath the game (the Steam client in the Steam container) is passed over. The list of windows is copied in one step: it is changed
 by the X server's thread, and walking it from the render thread's pool crashed the app (`ConcurrentModificationException`). Picked again when a window is mapped, unmapped, destroyed or changes its geometry; when
 there is none, or the game is full size, the screen is shown as before.
@@ -21,5 +21,8 @@ there is none, or the game is full size, the screen is shown as before.
 
 **Checked on the device (2026-10-15).** `glxgears` (a 300x300 window) and Tomb Raider (2013, 1280x720 on FEX, started by the Steam
 client) in the native-size Steam container with FSR 1 fill the view's width with their proportions kept; a touch on the game's OK
-button dismissed its message. Not checked: a game that changes its window size while running, the Wine path (the option is
+button dismissed its message. A change of the screen's mode while it runs (`xrandr --size 1280x720`, then `1600x1200`; what an SDL game does for a fullscreen mode) keeps
+the 300x300 window scaled to the view: the window is picked again when the screen is resized (`VulkanXServerView.onScreenResized`),
+and when it changes its own size or place the same happens. If the game's window then fills the new screen, the whole screen is
+shown (the "Fit to screen" path with the upscaler). Not checked: a game that resizes its own window while running, the Wine path (the option is
 Linux-only; the OpenGL renderer ignores it).

@@ -249,6 +249,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             viewTransformation.update(surfaceWidth, surfaceHeight, w, h);
             updateTransform();
         }
+        // Whether the game's window fills the screen depends on the screen's size.
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
     }
 
     public void onSurfaceChanged(int width, int height) {
@@ -329,7 +331,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         }
         Window best = null;
         for (Window child : children) {
-            if (child == null || !child.isMappedTopLevel() || child.id == fpsWindowId || child.attributes.isOverrideRedirect()) continue;
+            if (child == null || !child.isMappedTopLevel() || child.attributes.isOverrideRedirect()) continue;
             if (child.getWidth() < 100 || child.getHeight() < 100) continue;
             // The Steam client's own windows (its update and login windows) are not the game: they stay as they are.
             String name = child.getName();
