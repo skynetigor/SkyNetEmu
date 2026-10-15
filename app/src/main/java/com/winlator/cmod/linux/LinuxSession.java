@@ -579,7 +579,7 @@ public final class LinuxSession {
                 // it Zink and the thunk selection (SKY_FEX_THUNKCONFIG32).
                 env.put("FEX_ROOTFS", rootfsList.get(0).dir.getPath());
                 env.put("FEX_SILENTLOG", "1");
-                String thunks32 = LinuxFex.prepareFor32Bit(container, fexBuilds.get(0), rootfsList.get(0));
+                String thunks32 = LinuxFex.prepareFor32Bit(context, container, fexBuilds.get(0), rootfsList.get(0));
                 if (thunks32 != null) {
                     env.put("SKY_FEX_THUNKCONFIG32", thunks32);
                     if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) env.put("SKY_FEX_GL32", "1");

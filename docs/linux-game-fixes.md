@@ -99,3 +99,20 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
   to crash once (exit 11) while it still had no Vulkan; with the thunk on it has not been through that step yet.
 - **Tried without effect:** `-nolauncher` (CEF still starts), `--disable-gpu --disable-gpu-compositing` as game arguments (the
   game exits right after SDL init), Enter, Space.
+
+## 32-bit game (Tomb Raider 2013) has no gamepad
+
+- **Symptom:** the app's gamepad (the on-screen one or a real one) does nothing in a 32-bit game on FEX; the same pad works in 64-bit
+  games. The game's log shows `libskyshim_x64.so ... wrong ELF class: ELFCLASS64` for it.
+- **Cause:** `libskyshim` (it answers the evdev ioctls of the app's fake `/dev/input/event0`, hides the udev socket and turns
+  the app's events into what a reader expects) existed for aarch64 and x86-64 only; a 32-bit guest had none, so SDL found no
+  usable pad. A 32-bit reader also wants 16-byte events (a 32-bit `timeval`); the app's file holds 24-byte ones.
+- **Fix:** `libskyshim_x86.so` (`tools/linux-shim/build.sh`, i386, with a `read` that converts the 24-byte events to 16-byte ones
+  and keeps a half event for the next read), put in the guest's `LD_PRELOAD` in both FEX configurations (`LinuxFex.prepare`
+  and `prepareFor32Bit`). The `stat` hooks now use the fields of the type they were given (`struct stat64` differs from
+  `struct stat` on 32-bit).
+- **Checked on the device (2026-10-15):** the game's process maps `libskyshim_x86.so` and keeps `/dev/input/event0` open (it used
+  to drop it, the ioctls were not answered); with the stick pushed up by events written into that file, Lara walks forward within
+  three seconds (the scene had stood still for minutes). **Not checked:** the buttons, the right stick and the triggers one by
+  one, a real controller, other 32-bit games; an old binary that calls `__xstat` rather than `stat` is not hooked.
+- **Source:** found by experiment (reading `skyshim.c` and `FakeInputWriter`).

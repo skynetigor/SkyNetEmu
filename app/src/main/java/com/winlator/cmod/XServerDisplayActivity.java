@@ -189,6 +189,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private WineInfo wineInfo;
     /** True when the container is a Linux container: the session runs under proot instead of Wine. */
     private boolean linuxSession;
+    /** The shortcut or container asks for the game window to be scaled up whatever the upscaler (Scaling: game window). */
+    private boolean gameWindowZoomConfigured;
     /** A Linux container started without a shortcut: its XFCE desktop (see {@link com.winlator.cmod.linux.LinuxDesktop}). */
     private boolean desktopSession;
     /** What the game's registry profile says about the Linux shortcut being run; null when there is none. */
@@ -1707,10 +1709,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             zoomGameWindow = linuxSession && "1".equals(container.getExtra("scaleGameWindow"));
         }
 
-        if (zoomGameWindow) {
-            renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
-            renderer.setGameWindowZoom(true);
-        }
+        gameWindowZoomConfigured = zoomGameWindow;
+        if (linuxSession) renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
+        if (zoomGameWindow) renderer.setGameWindowZoom(true);
 
         if (shouldStretch) {
 
@@ -2381,8 +2382,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     spUpscalerMode.setSelection(savedMode - 2);
                 vkRenderer.setFilterMode(spUpscalerMode != null
                     ? spUpscalerMode.getSelectedItemPosition() + 2 : 2);
+                // An upscaler has nothing to scale up while a game's window sits 1:1 in a native-size container: scale the window.
+                if (linuxSession) vkRenderer.setGameWindowZoom(true);
             }
             swEnableFSR.setOnCheckedChangeListener((btn, checked) -> {
+                if (linuxSession) vkRenderer.setGameWindowZoom(checked || gameWindowZoomConfigured);
                 if (spUpscalerMode != null)
                     spUpscalerMode.setVisibility(checked ? View.VISIBLE : View.GONE);
                 vkRenderer.setFilterMode(checked

@@ -62,10 +62,11 @@ public final class LinuxFex {
             appendOption(config, "ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
         }
         // The guest's own environment: our x86-64 shims (the gamepad's evdev ioctls and uevent socket, and CEF's
-        // sandbox check) are the ones Box64 preloads. FEX falls back to the phone's file system for a path the root
-        // filesystem does not have, so the files under the app's data folder can be named as they are.
+        // sandbox check) are the ones Box64 preloads, and the 32-bit one is for a 32-bit game (the loader skips a library of the other
+        // class). FEX falls back to the phone's file system for a path the root filesystem does not have, so the files under the
+        // app's data folder can be named as they are.
         List<String> preload = new ArrayList<>();
-        for (String name : new String[]{"libskyshim_x64.so", "libcefnosb_x64.so"}) {
+        for (String name : new String[]{"libskyshim_x64.so", "libskyshim_x86.so", "libcefnosb_x64.so"}) {
             File shim = LinuxSession.stageAsset(context, "linux-shim", name);
             if (shim != null) preload.add(shim.getPath());
         }
@@ -152,7 +153,7 @@ public final class LinuxFex {
      *
      * @return the 32-bit thunk selection (see above), or null
      */
-    static String prepareFor32Bit(Container container, LinuxEmulator.Installed emulator, LinuxRootfs.Installed rootfs) {
+    static String prepareFor32Bit(Context context, Container container, LinuxEmulator.Installed emulator, LinuxRootfs.Installed rootfs) {
         File configDir = new File(container.getLinuxHomeDir(), CONFIG_DIR);
         if (!configDir.isDirectory() && !configDir.mkdirs()) return null;
         String thunks = writeThunkConfig32(container, emulator);
@@ -162,6 +163,9 @@ public final class LinuxFex {
             appendOption(config, "ThunkHostLibs", new File(emulator.dir, "lib/fex-emu/HostThunks").getPath());
             appendOption(config, "ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
         }
+        // A 32-bit game has no shim otherwise: its gamepad (evdev events in the 32-bit layout) and its udev socket need ours.
+        File shim32 = LinuxSession.stageAsset(context, "linux-shim", "libskyshim_x86.so");
+        if (shim32 != null) appendOption(config, "Env", "LD_PRELOAD=" + shim32.getPath());
         int last = config.lastIndexOf(",\n");
         if (last >= 0 && last == config.length() - 2) config.setLength(last);
         config.append("\n  }");

@@ -173,12 +173,6 @@ int open64(const char *path, int flags, ...) {
     return open(path, flags, mode);
 }
 
-static void pad_fake_stat(const char *path, struct stat *st, int slot) {
-    (void)path;
-    st->st_mode = S_IFCHR | 0660;
-    st->st_rdev = makedev(13, 64 + slot);
-}
-
 #define STAT_HOOK(name, type) \
 int name(const char *path, type *st) { \
     static int (*real)(const char *, type *); \
@@ -187,7 +181,7 @@ int name(const char *path, type *st) { \
     int slot = pad_path(path, backing, sizeof backing); \
     if (slot >= 0) { \
         int r = real(backing, st); \
-        if (r == 0) pad_fake_stat(path, (struct stat *)st, slot); \
+        if (r == 0) { st->st_mode = S_IFCHR | 0660; st->st_rdev = makedev(13, 64 + slot); } \
         return r; \
     } \
     return real(path, st); \
@@ -278,6 +272,41 @@ int ioctl(int fd, unsigned long req, ...) {
     return real(fd, req, arg);
 }
 
+#if defined(__i386__)
+/* The app's file holds the 64-bit kernel's events (24 bytes: a 64-bit timeval); a 32-bit reader (a 32-bit game under FEX) wants the
+ * 32-bit kernel's (16 bytes). */
+struct app_event { long long sec, usec; unsigned short type, code; int value; };
+
+ssize_t read(int fd, void *buf, size_t count) {
+    static ssize_t (*real)(int, void *, size_t);
+    if (!real) real = dlsym(RTLD_NEXT, "read");
+    if (!pad_is(fd)) return real(fd, buf, count);
+    size_t want = count / sizeof(struct input_event);
+    if (want == 0) { errno = EINVAL; return -1; }
+    if (want > 64) want = 64;
+    struct app_event raw[64];
+    ssize_t n = real(fd, raw, want * sizeof(struct app_event));
+    if (n < 0) return n;
+    if (n == 0) { errno = EAGAIN; return -1; }
+    size_t whole = (size_t)n / sizeof(struct app_event);
+    size_t rest = (size_t)n % sizeof(struct app_event);
+    if (rest) lseek(fd, -(off_t)rest, SEEK_CUR); // half an event: leave it for the next read
+    if (whole == 0) { errno = EAGAIN; return -1; }
+    struct timespec now;
+    if (clock_gettime(pad_clock(fd), &now) != 0) now.tv_sec = now.tv_nsec = 0;
+    struct input_event *out = buf;
+    for (size_t i = 0; i < whole; i++) {
+        out[i].time.tv_sec = now.tv_sec;
+        out[i].time.tv_usec = now.tv_nsec / 1000;
+        out[i].type = raw[i].type;
+        out[i].code = raw[i].code;
+        out[i].value = raw[i].value;
+        if (out[i].type == EV_ABS && out[i].code == ABS_BRAKE) out[i].code = ABS_Z;
+        else if (out[i].type == EV_ABS && out[i].code == ABS_GAS) out[i].code = ABS_RZ;
+    }
+    return (ssize_t)(whole * sizeof(struct input_event));
+}
+#else
 ssize_t read(int fd, void *buf, size_t count) {
     static ssize_t (*real)(int, void *, size_t);
     if (!real) real = dlsym(RTLD_NEXT, "read");
@@ -299,6 +328,7 @@ ssize_t read(int fd, void *buf, size_t count) {
     }
     return n;
 }
+#endif
 
 int socket(int domain, int type, int protocol) {
     static int (*real)(int, int, int);

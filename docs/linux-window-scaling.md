@@ -10,6 +10,10 @@ set to 1280x720, a launcher): the screen was shown 1:1 and the game stayed a sma
 shortcut or container (`graphicsFilterMode`) works on the window's own resolution, because the filters take the size of the
 window being drawn as their source.
 
+**The upscaler turns it on.** In a Linux session an upscaler (SGSR, FSR 1, Lanczos 2) that is switched on, in the container, the
+shortcut or the side panel while the game runs, also scales the game window up (it has nothing to work on while the window sits 1:1
+in a native-size container); switched off, the window goes back to its size unless "Scale the game window" is chosen.
+
 **Which window.** `VulkanXServerView.pickGameWindow`: the biggest mapped window directly under the root that is at least 100x100,
 is not override-redirect (menus, tooltips), is not a window of the Steam client (named "Steam", "Steam - ...", "Steam Big Picture...") and does not cover the X screen already. A full-screen window
 beneath the game (the Steam client in the Steam container) is passed over. The list of windows is copied in one step: it is changed

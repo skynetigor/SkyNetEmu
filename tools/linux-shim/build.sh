@@ -16,3 +16,6 @@ ls -l libskyshim_x64.so
 # A game that ships mimalloc (BeamNG 0.39): its mi_* functions on plain malloc, installed as libmimalloc.so.3 (the soname).
 $ZIG cc -target x86_64-linux-gnu.2.17 -shared -fPIC -O2 -Wall -o libmimalloc_compat_x64.so mimalloc_compat.c -lpthread
 ls -l libmimalloc_compat_x64.so
+# 32-bit x86 programs (a 32-bit game under FEX): the same shim for that architecture, with the gamepad's events in the 32-bit layout.
+$ZIG cc -target x86-linux-gnu.2.17 -shared -fPIC -O2 -Wall -o libskyshim_x86.so skyshim.c -ldl
+ls -l libskyshim_x86.so
