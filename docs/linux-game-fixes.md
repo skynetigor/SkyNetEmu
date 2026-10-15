@@ -34,6 +34,13 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 
 - Feral's launcher is an embedded Chromium; with the library problems above fixed it opens. Not investigated further.
 
+## Tomb Raider (32-bit) segfaults when FEX is the container's main emulator, not when it is the second one
+
+- **Cause:** `FEX_ROOTFS` was set only in the Box64 branch of the session setup. The launcher's check "is this scout library in the root
+  filesystem?" used it, found nothing, and linked the scout runtime's old `libgcc_s` into `~/.skynet/lib32`: the same `GCC_7.0.0 not found`
+  that breaks Mesa. **Fix:** set `FEX_ROOTFS` in the FEX branch too. Found with `LD_DEBUG=libs` (the library came from `/root/.skynet/lib32`).
+- **Source:** found by experiment (web search for it found nothing: the FEX issues on 32-bit thunks are about something else).
+
 ## OPEN: Tomb Raider on the GPU (FEX OpenGL thunk)
 
 - **Symptom:** `X Error of failed request: GLXBadFBConfig, Major opcode 151 (GLX)`, serial 83, on the host side, right

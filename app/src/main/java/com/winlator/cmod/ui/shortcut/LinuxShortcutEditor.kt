@@ -421,8 +421,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         },
-        // The Steam client runs its games itself: its session has one emulator, the container's.
-        if (shortcut.isSteamGame) null else EditorCategory(
+        // A Steam game's emulator is applied by the launcher that starts the game, so it can differ from the client's session.
+        EditorCategory(
             "emulation", "x86 emulator",
             if (emulatorChoice.isEmpty()) "Container default · $containerEmulatorName" else emulator,
             emulatorProblem

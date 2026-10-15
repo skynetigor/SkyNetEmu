@@ -85,8 +85,15 @@ emulator rows are hidden for Steam game shortcuts.
 - Verified on the device (Z Fold8 Ultra), with a FEX container: a shortcut set to Box64 runs `mousetest_x64` with no FEX process;
   one with no setting runs it under FEX; a FEX shortcut whose program is on shared storage shows the refusal.
 
-### Not done
+### Steam games
 
-- Steam games (unchanged: the container's emulator, set when the Steam session starts).
+The group is shown for Steam game shortcuts too. A Steam game is started by the Steam client, which may already be running with
+the environment of another session, so the shortcut does not rely on its own session's environment: `LinuxSession.writeSteamEmulatorEnv`
+leaves `~/.skynet/steam-emulator/<appId>.env` (the BOX64_/FEX_/SKY_X86_/SKY_FEX_ variables of the shortcut's emulator setup) and
+`skynet-launcher.sh`, which starts every game, sources the file of `$SteamAppId`. A game started from inside Steam's own interface (not from a
+shortcut) has no file and runs under the session's emulator. Checked on the device: a Steam game shortcut set to Box64 in a FEX container
+writes the Box64 variables; Tomb Raider (32-bit) still runs on FEX through the Box64 + FEX route and reaches its main menu.
+
+### Not done
 - A Box64 container with a FEX shortcut was not tried separately (the container used for the check was a FEX one); the code path is
   the same copy-with-extras.

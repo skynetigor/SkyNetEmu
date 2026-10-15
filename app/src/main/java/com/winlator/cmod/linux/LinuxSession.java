@@ -417,8 +417,10 @@ public final class LinuxSession {
         argv.add("/usr/bin/env");
         argv.add("-i");
         String programGuestPath = programGuestPath(guestCommand);
-        argv.addAll(guestEnv(context, rt, imageFsRoot, container,
-                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath));
+        List<String> guestEnv = guestEnv(context, rt, imageFsRoot, container,
+                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath);
+        argv.addAll(guestEnv);
+        writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
 
         EnvVars host = new EnvVars();
@@ -428,6 +430,35 @@ public final class LinuxSession {
         host.put("LD_LIBRARY_PATH", hostDir.getPath());
 
         return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
+    }
+
+    /** The variables that make up the x86 emulator of a session: the launcher of a Steam game applies the ones of its own game. */
+    private static boolean isEmulatorVariable(String name) {
+        return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
+                || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB");
+    }
+
+    /**
+     * A Steam game is started by the Steam client, which may already be running (another session of the container started it) with the
+     * environment of that session. So a shortcut of a Steam game leaves the emulator's variables for its game in
+     * ~/.skynet/steam-emulator/&lt;appId&gt;.env, and the stand-in launcher (skynet-launcher.sh), which starts every game, applies them. This is
+     * what lets each Steam game have its own emulator (see {@link LinuxEmulatorSetup}).
+     */
+    private static void writeSteamEmulatorEnv(File home, String[] guestCommand, List<String> guestEnv) {
+        String appId = null;
+        for (int i = 0; i + 1 < guestCommand.length; i++) {
+            if (STEAM_MARKER.equals(guestCommand[i])) appId = guestCommand[i + 1];
+        }
+        if (appId == null || !appId.matches("\\d+")) return;
+        StringBuilder text = new StringBuilder();
+        for (String entry : guestEnv) {
+            int eq = entry.indexOf('=');
+            if (eq <= 0 || !isEmulatorVariable(entry.substring(0, eq))) continue;
+            text.append("export ").append(entry, 0, eq).append("='").append(entry.substring(eq + 1).replace("'", "'\\''")).append("'\n");
+        }
+        File dir = new File(home, ".skynet/steam-emulator");
+        dir.mkdirs();
+        FileUtils.writeString(new File(dir, appId + ".env"), text.toString());
     }
 
     /** The program a session starts, as the guest sees its path (the argument after "bannerlator-run"); null if none. */
@@ -523,7 +554,10 @@ public final class LinuxSession {
                 env.put("FEX_ROOTFS", rootfsList.get(0).dir.getPath());
                 env.put("FEX_SILENTLOG", "1");
                 String thunks32 = LinuxFex.prepareFor32Bit(container, fexBuilds.get(0), rootfsList.get(0));
-                if (thunks32 != null) env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+                if (thunks32 != null) {
+                    env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+                    if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) env.put("SKY_FEX_GL32", "1");
+                }
             }
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
             File launcher = stageAsset(context, "skynet-launcher.sh");
@@ -584,12 +618,18 @@ public final class LinuxSession {
                 // The Steam client starts a game through Valve's FEX tool, which needs what proot cannot give (see the Box64
                 // branch above): the stand-in runs the game's command, and libskyshim hands an x86 program to FEX.
                 String fexBinary = LinuxEmulator.binary(emulator).getPath();
+                // The launcher looks in the root filesystem for the libraries a 32-bit game's runtime would add (see skynet-launcher.sh).
+                LinuxRootfs.Installed rootfs = LinuxRootfs.resolve(context, container);
+                if (rootfs != null) env.put("FEX_ROOTFS", rootfs.dir.getPath());
                 env.put("SKY_X86_EMULATOR", fexBinary);
                 env.put("SKY_X86_32_EMULATOR", fexBinary);
                 File launcher = stageAsset(context, "skynet-launcher.sh");
                 if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
                 String thunks32 = LinuxFex.writeThunkConfig32(container, emulator);
-                if (thunks32 != null) env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+                if (thunks32 != null) {
+                    env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+                    if (LinuxFex.gl32Enabled(container, emulator)) env.put("SKY_FEX_GL32", "1");
+                }
             }
         }
 

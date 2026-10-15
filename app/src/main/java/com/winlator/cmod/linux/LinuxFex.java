@@ -120,21 +120,27 @@ final class LinuxFex {
     /** What a 32-bit program's thunk selection is kept in (as the program sees the file; FEX reads it from FEX_THUNKCONFIG). */
     private static final String THUNK_CONFIG_32 = "/root/" + CONFIG_DIR + "/ThunkConfig32.json";
 
+    /** Whether a 32-bit game of this container draws with the OpenGL thunk (opt-in, see {@link #EXTRA_GL_32}). */
+    static boolean gl32Enabled(Container container, LinuxEmulator.Installed emulator) {
+        return "1".equals(container.getExtra(EXTRA_GL_32)) && !"0".equals(container.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS))
+                && thunks32Available(emulator);
+    }
+
     /**
-     * Makes a 32-bit program draw with the OpenGL thunk: its OpenGL calls go to the runtime's own Mesa (Zink on Turnip) instead of
-     * the root filesystem's software renderer. The selection is a file of its own, which the launcher hands to FEX for a
-     * 32-bit program only (FEX_THUNKCONFIG): the container's own selection, made for 64-bit programs, stays as it is (with the
-     * OpenGL thunk on, a 64-bit game's start hung).
+     * The thunk selection of a 32-bit program, in a file of its own that the launcher hands to FEX for a 32-bit program only
+     * (FEX_THUNKCONFIG). The container's own selection is made for 64-bit programs: its Vulkan thunk has no 32-bit guest side, and with
+     * the OpenGL thunk on a 64-bit game's start hung. A 32-bit program gets every thunk off, the OpenGL one on when {@link #gl32Enabled}:
+     * its OpenGL calls then go to the runtime's own Mesa (Zink on Turnip) instead of the root filesystem's software renderer.
      *
-     * @return the file as the program sees it, or null when the package has no 32-bit thunks or the container turned thunks off
+     * @return the file as the program sees it, or null when the package has no 32-bit thunks
      */
     static String writeThunkConfig32(Container container, LinuxEmulator.Installed emulator) {
-        if (!"1".equals(container.getExtra(EXTRA_GL_32)) || "0".equals(container.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS))
-                || !thunks32Available(emulator)) return null;
+        if (!thunks32Available(emulator)) return null;
         File configDir = new File(container.getLinuxHomeDir(), CONFIG_DIR);
         if (!configDir.isDirectory() && !configDir.mkdirs()) return null;
+        String gl = gl32Enabled(container, emulator) ? "1" : "0";
         if (!FileUtils.writeString(new File(configDir, "ThunkConfig32.json"),
-                "{ \"ThunksDB\": { \"Vulkan\": 0, \"GL\": 1, \"drm\": 0, \"asound\": 0, \"WaylandClient\": 0, \"cuda\": 0 } }\n")) return null;
+                "{ \"ThunksDB\": { \"Vulkan\": 0, \"GL\": " + gl + ", \"drm\": 0, \"asound\": 0, \"WaylandClient\": 0, \"cuda\": 0 } }\n")) return null;
         FileUtils.copy(new File(emulator.dir, "share/fex-emu/ThunksDB.json"), new File(configDir, "ThunksDB.json"));
         return THUNK_CONFIG_32;
     }

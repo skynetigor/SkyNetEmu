@@ -32,6 +32,9 @@ while [ "${#cmd[@]}" -gt 0 ]; do
         *) break ;;
     esac
 done
+# The emulator of this game: the shortcut that started it left the variables (LinuxSession.writeSteamEmulatorEnv); the Steam client
+# may be running with the ones of another game's session.
+[ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.env" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.env"
 if [ -n "$scout" ]; then
     game_dir="$(dirname "${cmd[0]}")"
     libs=""
@@ -65,12 +68,13 @@ fi
 # the Steam runtime's overlay libraries are not there; Steam's own preload would only produce warnings
 unset LD_PRELOAD
 # the client draws in software; the game gets the container's OpenGL driver (Zink on Turnip) back
-# (A 32-bit game has no Vulkan thunk, but with the OpenGL one (SKY_FEX_THUNKCONFIG32) its OpenGL is the runtime's own Mesa, so it
-# gets Zink too, and FEX the thunk selection for it. Without the thunk it keeps the software OpenGL of the root filesystem.)
+# (A 32-bit game gets its own thunk selection (SKY_FEX_THUNKCONFIG32: none of the 64-bit guests' thunks). With the OpenGL one on
+# (SKY_FEX_GL32) its OpenGL is the runtime's own Mesa, so it gets Zink too. Without it the game keeps the software OpenGL of the
+# root filesystem.)
 if [ -n "$scout" ] && [ -n "$SKY_FEX_THUNKCONFIG32" ]; then
     export FEX_THUNKCONFIG="$SKY_FEX_THUNKCONFIG32"
 fi
-if [ "$SKY_GAME_GL" = zink ] && { [ -z "$scout" ] || [ -n "$SKY_FEX_THUNKCONFIG32" ]; }; then
+if [ "$SKY_GAME_GL" = zink ] && { [ -z "$scout" ] || [ "$SKY_FEX_GL32" = 1 ]; }; then
     export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
     unset LIBGL_ALWAYS_SOFTWARE
 fi
