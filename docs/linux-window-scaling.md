@@ -11,7 +11,7 @@ shortcut or container (`graphicsFilterMode`) works on the window's own resolutio
 window being drawn as their source.
 
 **Which window.** `VulkanXServerView.pickGameWindow`: the biggest mapped window directly under the root that is at least 100x100,
-is not override-redirect (menus, tooltips) and does not cover the X screen already (not the FPS window). A full-screen window
+is not override-redirect (menus, tooltips), is not a window of the Steam client (named "Steam", "Steam - ...", "Steam Big Picture...") and does not cover the X screen already (not the FPS window). A full-screen window
 beneath the game (the Steam client in the Steam container) is passed over. The list of windows is copied in one step: it is changed
 by the X server's thread, and walking it from the render thread's pool crashed the app (`ConcurrentModificationException`). Picked again when a window is mapped, unmapped, destroyed or changes its geometry; when
 there is none, or the game is full size, the screen is shown as before.

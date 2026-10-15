@@ -331,6 +331,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         for (Window child : children) {
             if (child == null || !child.isMappedTopLevel() || child.id == fpsWindowId || child.attributes.isOverrideRedirect()) continue;
             if (child.getWidth() < 100 || child.getHeight() < 100) continue;
+            // The Steam client's own windows (its update and login windows) are not the game: they stay as they are.
+            String name = child.getName();
+            if (name.equals("Steam") || name.startsWith("Steam - ") || name.startsWith("Steam Big Picture")) continue;
             if (child.getWidth() >= screenW && child.getHeight() >= screenH) continue;
             if (best == null || (long) child.getWidth() * child.getHeight() >= (long) best.getWidth() * best.getHeight()) best = child;
         }
