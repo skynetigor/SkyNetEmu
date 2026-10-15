@@ -496,8 +496,13 @@ public final class LinuxSession {
             java.util.List<LinuxRootfs.Installed> rootfsList = LinuxRootfs.list(context);
             if (!fexBuilds.isEmpty() && !rootfsList.isEmpty()) {
                 env.put("SKY_X86_32_EMULATOR", LinuxEmulator.binary(fexBuilds.get(0)).getPath());
+                // FEX reads its root filesystem and thunks from the configuration LinuxFex writes (FEX_ROOTFS stays for the
+                // programs run by hand). A 32-bit game's OpenGL goes through the thunk to the runtime's Mesa; the launcher gives
+                // it Zink and the thunk selection (SKY_FEX_THUNKCONFIG32).
                 env.put("FEX_ROOTFS", rootfsList.get(0).dir.getPath());
                 env.put("FEX_SILENTLOG", "1");
+                String thunks32 = LinuxFex.prepareFor32Bit(container, fexBuilds.get(0), rootfsList.get(0));
+                if (thunks32 != null) env.put("SKY_FEX_THUNKCONFIG32", thunks32);
             }
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
             File launcher = stageAsset(context, "skynet-launcher.sh");
@@ -554,6 +559,17 @@ public final class LinuxSession {
             // root filesystem is reported when the program is started (programCommand).
             String problem = LinuxFex.prepare(context, container, emulator, env);
             if (problem != null) Log.w(TAG, problem);
+            else {
+                // The Steam client starts a game through Valve's FEX tool, which needs what proot cannot give (see the Box64
+                // branch above): the stand-in runs the game's command, and libskyshim hands an x86 program to FEX.
+                String fexBinary = LinuxEmulator.binary(emulator).getPath();
+                env.put("SKY_X86_EMULATOR", fexBinary);
+                env.put("SKY_X86_32_EMULATOR", fexBinary);
+                File launcher = stageAsset(context, "skynet-launcher.sh");
+                if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
+                String thunks32 = LinuxFex.writeThunkConfig32(container, emulator);
+                if (thunks32 != null) env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+            }
         }
 
         // Native libraries the emulated program's wrapped libraries need that the runtime does not ship: the

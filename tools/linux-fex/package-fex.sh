@@ -14,7 +14,10 @@
 #   lib/fex-emu/HostThunks/      the aarch64 side of the GPU thunks (Vulkan, OpenGL, ...)
 #   share/fex-emu/GuestThunks/   their x86-64 side, laid over the root filesystem's libraries
 #   share/fex-emu/ThunksDB.json  where each thunk is laid over
-# Left out: FEXConfig (Qt), FEXRootFSFetcher, FEXBash, FEXGetConfig, the 32-bit thunks (32-bit programs are not run).
+#   lib/fex-emu/HostThunks_32/, share/fex-emu/GuestThunks_32/   the same for 32-bit programs (FEX finds them by the "_32"
+#                                added to the folders above): OpenGL and EGL only, which is what lets a 32-bit OpenGL game draw
+#                                on the runtime's own Mesa. (The Vulkan thunk has no 32-bit guest side.)
+# Left out: FEXConfig (Qt), FEXRootFSFetcher, FEXBash, FEXGetConfig.
 #
 # Needs: curl, ar, zstd, tar. Prints the registry entry for linux.json.
 set -e
@@ -37,6 +40,8 @@ mkdir -p "$WORK/$NAME/bin" "$WORK/$NAME/lib/fex-emu" "$WORK/$NAME/share/fex-emu"
 cp "$D/bin/FEX" "$D/bin/FEXServer" "$WORK/$NAME/bin/"
 cp -R "$D/lib/aarch64-linux-gnu/fex-emu/HostThunks" "$WORK/$NAME/lib/fex-emu/HostThunks"
 cp -R "$D/share/fex-emu/GuestThunks" "$WORK/$NAME/share/fex-emu/GuestThunks"
+cp -R "$D/lib/aarch64-linux-gnu/fex-emu/HostThunks_32" "$WORK/$NAME/lib/fex-emu/HostThunks_32"
+cp -R "$D/share/fex-emu/GuestThunks_32" "$WORK/$NAME/share/fex-emu/GuestThunks_32"
 cp "$D/share/fex-emu/ThunksDB.json" "$WORK/$NAME/share/fex-emu/"
 cp "$D/share/doc/fex-emu-armv8.4/copyright" "$WORK/$NAME/share/doc/fex-emu-copyright"
 chmod 755 "$WORK/$NAME/bin/"*

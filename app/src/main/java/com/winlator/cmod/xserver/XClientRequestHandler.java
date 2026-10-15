@@ -40,6 +40,7 @@ public class XClientRequestHandler implements RequestHandler {
     public static volatile boolean trace = false;
 
     /** Log where key events go (logcat tag XKeys); a file named .xkeys in a Linux container's home turns it on. */
+    private static int requestErrorsLogged;
     public static volatile boolean keyTrace = false;
 
     /** Count and time every request, and log a summary every few seconds (logcat tag XStats); cheap enough to leave on. */
@@ -626,6 +627,10 @@ public class XClientRequestHandler implements RequestHandler {
             }
         }
         catch (XRequestError e) {
+            if (keyTrace && requestErrorsLogged++ < 300) {
+                Log.d("XErrors", "request error: opcode=" + (opcode & 0xff) + " data=" + (requestData & 0xff) + " code=" + (e.getCode() & 0xff)
+                        + " value=" + e.getData() + " client=" + client.resourceIDBase + " seq=" + client.getSequenceNumber());
+            }
             client.skipRequest();
             e.sendError(client, opcode);
         }

@@ -100,6 +100,69 @@ final class LinuxFex {
         return null;
     }
 
+    /**
+     * The 32-bit thunks of a package: FEX takes them from the folders of the 64-bit ones with "_32" added. Only OpenGL and EGL
+     * have a 32-bit guest side (the Vulkan thunk's is not built), which is what a 32-bit OpenGL game needs.
+     */
+    static boolean thunks32Available(LinuxEmulator.Installed emulator) {
+        return new File(emulator.dir, "share/fex-emu/ThunksDB.json").isFile()
+                && new File(emulator.dir, "lib/fex-emu/HostThunks_32/libGL-host.so").isFile()
+                && new File(emulator.dir, "share/fex-emu/GuestThunks_32/libGL-guest.so").isFile();
+    }
+
+    /**
+     * Container extra: "1" lets a 32-bit game draw with the OpenGL thunk (experimental). Off, it runs on the root filesystem's software
+     * OpenGL, which is slow but works. A small OpenGL program draws on the GPU this way; Tomb Raider (2013) stops at a GLXBadFBConfig
+     * error that its host-side libGL raises, not yet understood.
+     */
+    public static final String EXTRA_GL_32 = "linuxFexGl32";
+
+    /** What a 32-bit program's thunk selection is kept in (as the program sees the file; FEX reads it from FEX_THUNKCONFIG). */
+    private static final String THUNK_CONFIG_32 = "/root/" + CONFIG_DIR + "/ThunkConfig32.json";
+
+    /**
+     * Makes a 32-bit program draw with the OpenGL thunk: its OpenGL calls go to the runtime's own Mesa (Zink on Turnip) instead of
+     * the root filesystem's software renderer. The selection is a file of its own, which the launcher hands to FEX for a
+     * 32-bit program only (FEX_THUNKCONFIG): the container's own selection, made for 64-bit programs, stays as it is (with the
+     * OpenGL thunk on, a 64-bit game's start hung).
+     *
+     * @return the file as the program sees it, or null when the package has no 32-bit thunks or the container turned thunks off
+     */
+    static String writeThunkConfig32(Container container, LinuxEmulator.Installed emulator) {
+        if (!"1".equals(container.getExtra(EXTRA_GL_32)) || "0".equals(container.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS))
+                || !thunks32Available(emulator)) return null;
+        File configDir = new File(container.getLinuxHomeDir(), CONFIG_DIR);
+        if (!configDir.isDirectory() && !configDir.mkdirs()) return null;
+        if (!FileUtils.writeString(new File(configDir, "ThunkConfig32.json"),
+                "{ \"ThunksDB\": { \"Vulkan\": 0, \"GL\": 1, \"drm\": 0, \"asound\": 0, \"WaylandClient\": 0, \"cuda\": 0 } }\n")) return null;
+        FileUtils.copy(new File(emulator.dir, "share/fex-emu/ThunksDB.json"), new File(configDir, "ThunksDB.json"));
+        return THUNK_CONFIG_32;
+    }
+
+    /**
+     * FEX as the second emulator of a Box64 container: it runs only the 32-bit programs Box64 cannot (see libskyshim). Writes the
+     * configuration for them: the root filesystem and the thunk folders; the selection is {@link #writeThunkConfig32}'s.
+     *
+     * @return the 32-bit thunk selection (see above), or null
+     */
+    static String prepareFor32Bit(Container container, LinuxEmulator.Installed emulator, LinuxRootfs.Installed rootfs) {
+        File configDir = new File(container.getLinuxHomeDir(), CONFIG_DIR);
+        if (!configDir.isDirectory() && !configDir.mkdirs()) return null;
+        String thunks = writeThunkConfig32(container, emulator);
+        StringBuilder config = new StringBuilder("{\n  \"Config\": {\n");
+        appendOption(config, "RootFS", rootfs.dir.getPath());
+        if (thunks != null) {
+            appendOption(config, "ThunkHostLibs", new File(emulator.dir, "lib/fex-emu/HostThunks").getPath());
+            appendOption(config, "ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
+        }
+        int last = config.lastIndexOf(",\n");
+        if (last >= 0 && last == config.length() - 2) config.setLength(last);
+        config.append("\n  }");
+        if (thunks != null) config.append(",\n  \"ThunksDB\": { \"Vulkan\": 0, \"GL\": 0, \"drm\": 0, \"asound\": 0, \"WaylandClient\": 0, \"cuda\": 0 }");
+        config.append("\n}\n");
+        return FileUtils.writeString(new File(configDir, "Config.json"), config.toString()) ? thunks : null;
+    }
+
     /** One option of the file's Config block; a repeated name is how FEX's JSON holds a list ("Env" more than once). */
     private static void appendOption(StringBuilder out, String name, String value) {
         out.append("    \"").append(name).append("\": \"").append(escape(value)).append("\",\n");

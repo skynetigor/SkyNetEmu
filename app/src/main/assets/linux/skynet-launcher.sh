@@ -65,9 +65,12 @@ fi
 # the Steam runtime's overlay libraries are not there; Steam's own preload would only produce warnings
 unset LD_PRELOAD
 # the client draws in software; the game gets the container's OpenGL driver (Zink on Turnip) back
-# (A 32-bit game has no Vulkan behind Zink: FEX's thunks are built for 64-bit guests only. It keeps the software OpenGL of the
-# root filesystem it runs in.)
-if [ "$SKY_GAME_GL" = zink ] && [ -z "$scout" ]; then
+# (A 32-bit game has no Vulkan thunk, but with the OpenGL one (SKY_FEX_THUNKCONFIG32) its OpenGL is the runtime's own Mesa, so it
+# gets Zink too, and FEX the thunk selection for it. Without the thunk it keeps the software OpenGL of the root filesystem.)
+if [ -n "$scout" ] && [ -n "$SKY_FEX_THUNKCONFIG32" ]; then
+    export FEX_THUNKCONFIG="$SKY_FEX_THUNKCONFIG32"
+fi
+if [ "$SKY_GAME_GL" = zink ] && { [ -z "$scout" ] || [ -n "$SKY_FEX_THUNKCONFIG32" ]; }; then
     export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
     unset LIBGL_ALWAYS_SOFTWARE
 fi
