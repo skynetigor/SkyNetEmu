@@ -208,7 +208,11 @@ public class WindowManager extends XResourceManager {
 
         if (isInputOutput) {
             visual = visual == null ? parent.getContent().visual : visual;
-            if (depth != visual.depth) throw new BadMatch();
+            // The screen has one visual, of depth 32 (its alpha byte is not used). A client that wants a window without alpha asks
+            // for depth 24: Chromium's offscreen GLX window (Feral's Shadow of the Tomb Raider) gets BadMatch otherwise and its
+            // GPU process cannot start. The depth-24 pixmap format is already advertised; the window takes the 32-bit visual.
+            boolean noAlpha = depth == 24 && visual.depth == 32;
+            if (depth != visual.depth && !noAlpha) throw new BadMatch();
         }
 
         Drawable drawable = null;

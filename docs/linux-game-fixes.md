@@ -70,5 +70,11 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 - **Fix:** `libskyshim_x64.so` (already preloaded under Box64) exports both on top of `dlopen`/`dlsym`.
   **Source:** the same fix for Life is Strange: https://blog.hofstede.it/reviving-life-is-strange-before-the-storm-on-modern-linux-with-a-glibc-shim/
 - **Result:** the game starts, draws through Vulkan on the Adreno (HUD: Vulkan, 60 FPS) and shows the Feral logo.
-- **Open:** it stays at that logo for minutes. The game's embedded CEF (single-process) logs `gles2_command_buffer_stub: Failed to
-  create default offscreen surface` (no GL for CEF). `-nolauncher` (a string in the binary) does not stop CEF from starting.
+- **Also fixed on the way:** the game's first `CreateWindow` asked for depth 24 and got `BadMatch` (the screen has one visual, depth 32).
+  `WindowManager.createWindow` now accepts depth 24 on that visual. Found with `.xkeys` (logcat tag `XErrors`).
+- **Open:** the game stays at the Feral logo for minutes (Vulkan swapchain alive, 47-60 FPS, CPU 20-30%, Feral's HTML UI loaded and
+  fetching its remote resources). The CEF line `gles2_command_buffer_stub: Failed to create default offscreen surface` is probably
+  harmless: CEF never dlopens libGL/libEGL/libosmesa (Box64's log shows no attempt), so it has no GL and falls back to software.
+  Tried without effect: `-nolauncher` (CEF still starts), `--disable-gpu --disable-gpu-compositing` as game arguments (the game
+  exits right after SDL init: it rejects unknown arguments, like Tomb Raider 2013 with `-windowed`).
+  Next: find out what the game waits for (its HTML UI has a startup video and a loading overlay: `cache/GameFeralUI/emergency.js`).
