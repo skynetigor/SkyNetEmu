@@ -96,6 +96,18 @@ def currentBranch = providers.exec {
     workingDir = rootDir
     ignoreExitValue = true
 }.standardOutput.asText.map { it.trim() }
+// The commit the build is made from, so an installed build can be told apart ("c8f9078", "c8f9078-dirty" with local changes).
+def gitCommit = providers.exec {
+    commandLine 'git', 'rev-parse', '--short=7', 'HEAD'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+def gitDirty = providers.exec {
+    commandLine 'git', 'status', '--porcelain', '--untracked-files=no'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim().isEmpty() ? '' : '-dirty' }
+def buildCommit = gitCommit.zip(gitDirty) { c, d -> (c.isEmpty() ? 'unknown' : c) + d }
 def debugComponentsBranch = providers.provider {
     String branch = currentBranch.get()
     if (branch.isEmpty() || branch == 'HEAD') return 'main'
@@ -170,6 +182,8 @@ android {
             manifestPlaceholders = [appLabel: "SkyNetEmu"]
         }
         release {
+            // "2.0.0-stable+c8f9078": the version the app shows (Settings, About) and the apk's file name carry the name and the commit.
+            versionNameSuffix "-stable+${buildCommit.get()}"
             buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
             minifyEnabled false
             signingConfig signingConfigs.debug
