@@ -94,6 +94,16 @@ leaves `~/.skynet/steam-emulator/<appId>.env` (the BOX64_/FEX_/SKY_X86_/SKY_FEX_
 shortcut) has no file and runs under the session's emulator. Checked on the device: a Steam game shortcut set to Box64 in a FEX container
 writes the Box64 variables; Tomb Raider (32-bit) still runs on FEX through the Box64 + FEX route and reaches its main menu.
 
+### Launch options of a Steam game shortcut
+
+The shortcut's "Launch options" (written like Steam's: `NAME=value wrapper %command% args`) are available for Steam games too.
+`LinuxSession.writeSteamLaunchOptions` leaves them in `~/.skynet/steam-emulator/<appId>.launch` (variables as `export`, the wrapper and
+the arguments as the arrays `sky_wrap` and `sky_args`) and `skynet-launcher.sh` applies them to the game's command: the wrapper before it, the
+arguments after it, after whatever Steam itself put there (the options set in Steam's own properties for the game). They reach a game that
+Steam starts through the launcher, which means one that needs an x86 emulator; a native ARM64 game is started by Steam itself. Checked on the
+device with Tomb Raider (2013): `SKY_TEST=hello taskset -c 4-7 %command% -windowed` gave `run: taskset -c 4-7 .../TombRaider.sh -vulkan -windowed`
+and the variable in the game's environment (this particular game then exited: it did not like the arguments; with only the variable it ran).
+
 ### Not done
 - A Box64 container with a FEX shortcut was not tried separately (the container used for the check was a FEX one); the code path is
   the same copy-with-extras.

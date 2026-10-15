@@ -280,10 +280,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 )
             }
         },
-        // A Steam game started through the client has launch options of its own (in the game's properties in Steam).
-        if (throughSteam) null else EditorCategory("launch", "Launch options", options.ifBlank { "None" }, false) {
+        // A Steam game has launch options in Steam too (the game's properties); these are applied by the launcher that starts the game, after Steam's.
+        EditorCategory("launch", "Launch options", options.ifBlank { "None" }, false) {
             SettingsCard { SettingText("Launch options (NAME=value %command% -windowed)", options, minLines = 2) { options = it } }
             Text(
+                (if (throughSteam) "Applied when Steam starts the game, on top of the options set in Steam. They reach a game that needs an x86 emulator; " +
+                    "a game that runs natively is started by Steam itself. " else "") +
                 "Like Steam's: variables before %command%, the program's arguments after it " +
                     "(MANGOHUD=1 BOX64_LOG=1 %command% -windowed -width 1280). A wrapper may stand between them " +
                     "(taskset -c 4-7 %command%). Without %command%, leading NAME=value words are variables and the " +

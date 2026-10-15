@@ -129,6 +129,7 @@ public final class LinuxSession {
                         LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own));
             }
             // A Steam game starts the client without its window unless the shortcut asks for the whole client.
+            writeSteamLaunchOptions(container, appId, own);
             return steamCommand(appId, !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL)), false);
         }
         LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
@@ -430,6 +431,31 @@ public final class LinuxSession {
         host.put("LD_LIBRARY_PATH", hostDir.getPath());
 
         return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
+    }
+
+    private static String shellWord(String word) {
+        return "'" + word.replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * The launch options of a shortcut of a Steam game (the ones in the shortcut's settings, written like Steam's), in
+     * ~/.skynet/steam-emulator/&lt;appId&gt;.launch for the stand-in launcher, which starts the game and applies them: the variables are
+     * exported, the wrapper goes before the game's command and the arguments after it (Steam's own launch options for the game, set in
+     * Steam, are already in that command). A game that needs no emulator is not started by the launcher: they do not reach it.
+     */
+    private static void writeSteamLaunchOptions(Container container, String appId, LinuxLaunchOptions options) {
+        StringBuilder text = new StringBuilder("unset sky_wrap sky_args\n");
+        for (Map.Entry<String, String> entry : options.env.entrySet()) {
+            text.append("export ").append(entry.getKey()).append('=').append(shellWord(entry.getValue())).append('\n');
+        }
+        text.append("sky_wrap=(");
+        for (String word : options.wrapper) text.append(shellWord(word)).append(' ');
+        text.append(")\nsky_args=(");
+        for (String word : options.args) text.append(shellWord(word)).append(' ');
+        text.append(")\n");
+        File dir = new File(container.getLinuxHomeDir(), ".skynet/steam-emulator");
+        dir.mkdirs();
+        FileUtils.writeString(new File(dir, appId + ".launch"), text.toString());
     }
 
     /** The variables that make up the x86 emulator of a session: the launcher of a Steam game applies the ones of its own game. */

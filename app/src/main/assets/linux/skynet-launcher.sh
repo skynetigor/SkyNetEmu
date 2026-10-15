@@ -60,6 +60,11 @@ if [ -f "$steam_root/linux32/steamclient.so" ]; then
     mkdir -p "$HOME/.steam"
     ln -sfn "$steam_root/linux32" "$HOME/.steam/sdk32"
 fi
+# The shortcut's launch options for this game (LinuxSession.writeSteamLaunchOptions): variables, a wrapper before the command, arguments after.
+sky_wrap=(); sky_args=()
+[ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.launch" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.launch"
+[ "${#sky_wrap[@]}" -gt 0 ] && cmd=("${sky_wrap[@]}" "${cmd[@]}")
+[ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
 {
     echo "== $(date) skynet-launcher"
     echo "args: $*"
