@@ -1,6 +1,6 @@
 # Linux containers: Box64 / FEX chosen per shortcut (plan)
 
-Status: plan, nothing implemented. Goal: one Linux container is enough; the x86 emulator (and its settings) can be
+Status: **implemented** (see "What was built" at the end). Goal: one Linux container is enough; the x86 emulator (and its settings) can be
 overridden by a shortcut, "Container default" being the default.
 
 ## What is already global
@@ -62,3 +62,31 @@ emulator rows are hidden for Steam game shortcuts.
 - "Container default" shortcuts behave as before; the Steam client and the debug shell are unchanged.
 - The refusals: emulator removed, FEX without rootfs, FEX with a program on shared storage.
 - Two shortcuts of one container with different emulators, started one after another and at the same time.
+
+## What was built
+
+- `Container.copyWithExtras` (a shallow copy with the extras laid over, never saved) and `LinuxEmulatorSetup.of(container, shortcut)`:
+  the container the session is built for. It is the container itself when the shortcut sets nothing, otherwise a copy with the
+  shortcut's `linuxEmulator`, `linuxEmulatorId`, `linuxEmulatorPreset`, `linuxRootfsId`, `linuxFexPreset`, `linuxFexThunks`;
+  choosing another emulator drops the container's build and preset (they name builds of the other one). The existing
+  `choice/resolve`, `guestEnv` and `LinuxFex` code is unchanged: it simply gets this container. Used by `XServerDisplayActivity`
+  (the launcher component and `programCommand`) and by the desktop's launcher scripts (`LinuxDesktop.prepareLaunchers`).
+- The shortcut editor has an "x86 emulator" group (not for Steam games): emulator (container default / Box64 / FEX), build, and
+  for FEX the root filesystem, preset and thunk switch; for Box64 the preset.
+- `LinuxSession.directCommand`: a program that FEX would run from shared storage is refused with a message (storage is noexec);
+  a 32-bit program goes to FEX (any installed build and root filesystem) instead of being refused.
+
+### The open questions, answered
+
+- A shortcut starts its own activity and its own proot session, so there is no reuse across shortcuts; two shortcuts of one
+  container with different emulators are two independent sessions. (The desktop session is one more: the container's emulator.)
+- `Config.json` of FEX is written at every session start (`LinuxFex.prepare` / `prepareFor32Bit`); two sessions at the same time
+  share the container's home and would overwrite each other's file. Not tried; a known risk.
+- Verified on the device (Z Fold8 Ultra), with a FEX container: a shortcut set to Box64 runs `mousetest_x64` with no FEX process;
+  one with no setting runs it under FEX; a FEX shortcut whose program is on shared storage shows the refusal.
+
+### Not done
+
+- Steam games (unchanged: the container's emulator, set when the Steam session starts).
+- A Box64 container with a FEX shortcut was not tried separately (the container used for the check was a FEX one); the code path is
+  the same copy-with-extras.

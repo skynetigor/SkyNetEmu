@@ -1,6 +1,7 @@
 package com.winlator.cmod.linux;
 
 import android.content.Context;
+import android.os.Environment;
 import android.os.Process;
 import android.util.Log;
 
@@ -147,6 +148,7 @@ public final class LinuxSession {
     /** A program of the guest, run with these launch options through the container's emulator when it is an x86-64 one. */
     private static String[] directCommand(Context context, Container container, String path, LinuxLaunchOptions options) {
         String emulatorPath = "";
+        boolean runsOnFex = false;
         int machine = elfMachine(hostFile(context, container, path));
         if (machine == 62) {
             String choice = LinuxEmulator.choice(container);
@@ -161,9 +163,28 @@ public final class LinuxSession {
                 return refusal(LinuxFex.NEEDS_ROOTFS);
             }
             emulatorPath = LinuxEmulator.binary(emulator).getPath();
+            runsOnFex = emulator.emulator.equals(LinuxEmulator.FEX);
         }
         else if (machine == 3) {
-            return refusal("This is a 32-bit x86 program. Only x86-64 programs are supported for now.");
+            // Box64 cannot run a 32-bit program; FEX can, with a root filesystem that has the 32-bit libraries.
+            LinuxEmulator.Installed fex = LinuxEmulator.resolve(context, container);
+            if (fex == null || !fex.emulator.equals(LinuxEmulator.FEX)) {
+                java.util.List<LinuxEmulator.Installed> builds = LinuxEmulator.list(context, LinuxEmulator.FEX);
+                fex = builds.isEmpty() ? null : builds.get(0);
+            }
+            if (fex == null) {
+                return refusal("This is a 32-bit x86 program. Install FEX and an x86-64 root filesystem (Components, Linux Emulator) to run it.");
+            }
+            if (LinuxRootfs.resolve(context, container) == null && LinuxRootfs.list(context).isEmpty()) return refusal(LinuxFex.NEEDS_ROOTFS);
+            emulatorPath = LinuxEmulator.binary(fex).getPath();
+            runsOnFex = true;
+        }
+        File program = hostFile(context, container, path);
+        if (runsOnFex && program != null
+                && program.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
+            // FEX maps a program and its libraries as executable, which shared storage (mounted noexec) refuses.
+            return refusal("FEX cannot run a program from shared storage. Copy the program into the container (add it with \"Program only\" "
+                    + "or \"Whole game\"), or choose Box64 for this shortcut.");
         }
         // $1 the program, $2 the emulator (empty for a native program), $3 and $4 how many variables and wrapper words
         // follow, then those, then the program's arguments. The variables go through env so they reach the emulator and,

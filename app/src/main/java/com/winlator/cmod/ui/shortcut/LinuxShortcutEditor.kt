@@ -29,12 +29,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.container.Shortcut
+import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxLaunchOptions
+import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.lsfg.LsfgManager
 import com.winlator.cmod.ui.settings.EditorCategory
@@ -78,6 +81,18 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var profileVersion by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_VERSION)) }
     var noSteam by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_NO_STEAM)) }
     var gameRoot by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_ROOT)) }
+    // The x86 emulator: empty follows the container. The names are the container's, so the session code is shared.
+    var emulatorChoice by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR)) }
+    var emulatorId by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_ID)) }
+    var emulatorPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_PRESET)) }
+    var rootfsId by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_ROOTFS)) }
+    var fexPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)) }
+    var fexThunks by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS)) }
+    val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
+    val fexBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.FEX) }
+    val rootfsList = remember { LinuxRootfs.list(context) }
+    val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
+    val fexPresets = remember { FEXCorePresetManager.getPresets(context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // The registry's games: what is on hand at once, then what the network has.
     var games by remember { mutableStateOf<List<GameProfileCatalog.IndexEntry>>(emptyList()) }
     var profile by remember { mutableStateOf<GameProfile?>(null) }
@@ -109,12 +124,20 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val throughSteam = shortcut.isSteamGame && effective?.runsWithoutSteam() != true
     fun profileExtra(key: String, label: (String) -> String): String? = effective?.extras?.get(key)?.let(label)
 
-    val emulator = remember {
-        when (LinuxEmulator.choice(container)) {
-            LinuxEmulator.NONE -> "none (ARM64 programs only)"
-            else -> LinuxEmulator.resolve(context, container)?.name
-                ?: "${LinuxEmulator.choice(container)} (not installed)"
-        }
+    // What the program runs under: the container's emulator, or the shortcut's own.
+    val containerEmulatorName = when (LinuxEmulator.choice(container)) {
+        LinuxEmulator.NONE -> "none (ARM64 programs only)"
+        else -> LinuxEmulator.resolve(context, container)?.name ?: "${LinuxEmulator.choice(container)} (not installed)"
+    }
+    val effectiveChoice = emulatorChoice.ifEmpty { LinuxEmulator.choice(container) }
+    val emulator = if (emulatorChoice.isEmpty()) containerEmulatorName else {
+        val builds = if (emulatorChoice == LinuxEmulator.FEX) fexBuilds else boxBuilds
+        (builds.firstOrNull { it.id == emulatorId } ?: builds.firstOrNull())?.name ?: "$emulatorChoice (not installed)"
+    }
+    val emulatorProblem = when {
+        effectiveChoice == LinuxEmulator.NONE -> false
+        effectiveChoice == LinuxEmulator.FEX -> fexBuilds.isEmpty() || rootfsList.isEmpty()
+        else -> boxBuilds.isEmpty()
     }
     val hasDll = remember { LsfgManager.hasDll(context) }
     val sizeValid = size.isEmpty() || isValidScreenSize(size.trim())
@@ -142,6 +165,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(GameProfiles.EXTRA_VERSION, profileVersion.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_NO_STEAM, noSteam.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_ROOT, gameRoot.trim().ifEmpty { null })
+        shortcut.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulatorChoice.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulator.EXTRA_ID, emulatorId.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulator.EXTRA_PRESET, emulatorPreset.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulator.EXTRA_ROOTFS, rootfsId.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, fexThunks.ifEmpty { null })
         shortcut.saveData()
         onClose()
     }
@@ -388,6 +417,95 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 "To start a game the Steam client needs neither its window nor the web helper that draws it, which takes " +
                     "most of its memory. The minimal start works once you have signed in with \"Remember me\"; until then the " +
                     "whole client opens so that you can.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        // The Steam client runs its games itself: its session has one emulator, the container's.
+        if (shortcut.isSteamGame) null else EditorCategory(
+            "emulation", "x86 emulator",
+            if (emulatorChoice.isEmpty()) "Container default · $containerEmulatorName" else emulator,
+            emulatorProblem
+        ) {
+            SettingsCard {
+                SettingMappedChoice(
+                    "x86 emulator",
+                    emulatorChoice,
+                    linkedMapOf(
+                        "" to "Container default ($containerEmulatorName)",
+                        LinuxEmulator.BOX64 to "Box64",
+                        LinuxEmulator.FEX to "FEX"
+                    )
+                ) {
+                    // The builds and presets of one emulator mean nothing to the other.
+                    emulatorChoice = it
+                    emulatorId = ""
+                    emulatorPreset = ""
+                }
+                if (effectiveChoice == LinuxEmulator.BOX64 || effectiveChoice == LinuxEmulator.FEX) {
+                    val fex = effectiveChoice == LinuxEmulator.FEX
+                    val builds = if (fex) fexBuilds else boxBuilds
+                    SettingsDivider()
+                    if (builds.isEmpty()) {
+                        Text(
+                            "No ${if (fex) "FEX" else "Box64"} build is installed.",
+                            modifier = Modifier.padding(14.dp),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        SettingMappedChoice(
+                            "${if (fex) "FEX" else "Box64"} build",
+                            emulatorId,
+                            LinkedHashMap<String, String>().apply {
+                                put("", "Default" + if (emulatorChoice.isEmpty() || emulatorChoice == LinuxEmulator.choice(container)) " (the container's)" else "")
+                                builds.forEach { put(it.id, it.name) }
+                            }
+                        ) { emulatorId = it }
+                    }
+                    SettingsDivider()
+                    if (fex) {
+                        if (rootfsList.isEmpty()) {
+                            Text(
+                                "No x86-64 root filesystem is installed. FEX needs one.",
+                                modifier = Modifier.padding(14.dp),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        } else {
+                            SettingMappedChoice(
+                                "x86-64 root filesystem",
+                                rootfsId,
+                                LinkedHashMap<String, String>().apply {
+                                    put("", "Container default")
+                                    rootfsList.forEach { put(it.id, it.name) }
+                                }
+                            ) { rootfsId = it }
+                        }
+                        SettingsDivider()
+                        SettingMappedChoice(
+                            "FEX preset",
+                            fexPreset,
+                            LinkedHashMap<String, String>().apply { put("", "Container default"); putAll(fexPresets) }
+                        ) { fexPreset = it }
+                        SettingsDivider()
+                        SettingMappedChoice(
+                            "Use the runtime's Vulkan (FEX thunk)",
+                            fexThunks,
+                            linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                        ) { fexThunks = it }
+                    } else {
+                        SettingMappedChoice(
+                            "Box64 preset",
+                            emulatorPreset,
+                            LinkedHashMap<String, String>().apply { put("", "Container default"); putAll(boxPresets) }
+                        ) { emulatorPreset = it }
+                    }
+                }
+            }
+            Text(
+                if (effectiveChoice == LinuxEmulator.FEX)
+                    "FEX runs a program and its libraries as executable code, which shared storage (/storage/...) does not allow: the " +
+                        "program has to be inside the container (add it with \"Program only\" or \"Whole game\"). 32-bit programs run on FEX only."
+                else "Box64 reads the program where it is, including on shared storage. A 32-bit program is started by FEX when it is installed.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

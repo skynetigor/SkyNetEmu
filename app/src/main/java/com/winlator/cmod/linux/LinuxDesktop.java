@@ -113,7 +113,7 @@ public final class LinuxDesktop {
                 String slug = file.getName().substring(0, file.getName().length() - ".desktop".length()).replaceAll("[^A-Za-z0-9._-]", "_");
                 StringBuilder script = new StringBuilder("#!/bin/bash\nmkdir -p \"$HOME/.skynet\"\nexec >>\"$HOME/.skynet/launch.log\" 2>&1\n"
                         + "echo \"== $(date) " + slug + "\"\nexec");
-                for (String word : LinuxSession.programCommand(context, container, shortcut)) script.append(" '").append(word.replace("'", "'\\''")).append('\'');
+                for (String word : LinuxSession.programCommand(context, LinuxEmulatorSetup.of(container, shortcut), shortcut)) script.append(" '").append(word.replace("'", "'\\''")).append('\'');
                 File launch = new File(scripts, slug + ".sh");
                 com.winlator.cmod.core.FileUtils.writeString(launch, script.append('\n').toString());
                 com.winlator.cmod.core.FileUtils.chmod(launch, 493);

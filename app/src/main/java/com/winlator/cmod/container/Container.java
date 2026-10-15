@@ -20,7 +20,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.util.Iterator;
 
-public class Container {
+public class Container implements Cloneable {
     public enum XrControllerMapping {
         BUTTON_A, BUTTON_B, BUTTON_X, BUTTON_Y, BUTTON_GRIP, BUTTON_TRIGGER,
         THUMBSTICK_UP, THUMBSTICK_DOWN, THUMBSTICK_LEFT, THUMBSTICK_RIGHT
@@ -396,6 +396,25 @@ public class Container {
 
     public void setRootDir(File rootDir) {
         this.rootDir = rootDir;
+    }
+
+    /**
+     * A copy of this container whose extras have these values laid over them (an empty value removes the extra). The copy is for
+     * a session that follows what a shortcut sets, such as the x86 emulator; it is never saved, and the container is not touched.
+     */
+    public Container copyWithExtras(java.util.Map<String, String> overrides) {
+        try {
+            Container copy = (Container) super.clone();
+            copy.extraData = extraData == null ? new JSONObject() : new JSONObject(extraData.toString());
+            for (java.util.Map.Entry<String, String> entry : overrides.entrySet()) {
+                if (entry.getValue() == null || entry.getValue().isEmpty()) copy.extraData.remove(entry.getKey());
+                else copy.extraData.put(entry.getKey(), entry.getValue());
+            }
+            return copy;
+        }
+        catch (Exception e) {
+            return this;
+        }
     }
 
     public void setExtraData(JSONObject extraData) {

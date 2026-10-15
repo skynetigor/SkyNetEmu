@@ -1531,10 +1531,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
+        // The x86 emulator of the program: the container's, or the one its shortcut sets (the desktop has none: it is the container's).
+        Container linuxContainer = desktopSession ? container : com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut);
         if (desktopSession) com.winlator.cmod.linux.LinuxDesktop.prepareLaunchers(this, container);
         String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command(this, com.winlator.cmod.linux.LinuxDesktop.scaleFor(xServer.screenInfo.width))
-                : LinuxSession.programCommand(this, container, shortcut);
-        LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
+                : LinuxSession.programCommand(this, linuxContainer, shortcut);
+        LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(linuxContainer, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.
         launcher.setTerminationCallback((status) -> runOnUiThread(
