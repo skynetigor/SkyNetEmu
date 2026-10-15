@@ -107,3 +107,12 @@ and the variable in the game's environment (this particular game then exited: it
 ### Not done
 - A Box64 container with a FEX shortcut was not tried separately (the container used for the check was a FEX one); the code path is
   the same copy-with-extras.
+
+## Graphics settings on a shortcut
+
+The shortcut editor also sets the Turnip driver, the OpenGL driver (Zink or software), the Vulkan output (native or CPU copy), the
+keyboard button and the automatic keyboard, next to the settings it already had (resolution, scaling incl. the game window,
+upscaler, TU_DEBUG=sysmem, 32-bit GPU, GPU vendor, emulator and its presets, frame generation, touch mode). Empty follows the
+container. The driver, OpenGL and output extras are in `LinuxEmulatorSetup.EXTRAS`, so the session is built from the container with
+them laid over; the activity reads the output and keyboard ones through `linuxSetting`. The HUD mode is not per shortcut (a Wine
+shortcut's HUD choice writes through to its container); the FPS limiter keeps its own shortcut store.

@@ -20,7 +20,8 @@ public final class LinuxEmulatorSetup {
     public static final String[] EXTRAS = {
             LinuxEmulator.EXTRA_EMULATOR, LinuxEmulator.EXTRA_ID, LinuxEmulator.EXTRA_PRESET, LinuxEmulator.EXTRA_ROOTFS,
             LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS, LinuxFex.EXTRA_GL_32,
-            LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM
+            LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM,
+            LinuxDriverManager.EXTRA_DRIVER, LinuxSession.EXTRA_GL_DRIVER, LinuxSession.EXTRA_VULKAN_PRESENT
     };
 
     private LinuxEmulatorSetup() {}

@@ -673,7 +673,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
             // Only "native" output talks DRI3 (a client hands over dma-bufs); the default draws on the CPU, which Mesa
             // picks by itself when the extension is missing.
-            if (!"native".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT))) {
+            if (!"native".equals(linuxSetting(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT))) {
                 xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
             }
         }
@@ -1497,6 +1497,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /** Starts the X server, audio and the Linux program (the desktop, or the shortcut's program) under proot. */
+    /** A Linux setting: the shortcut's own when it sets one, otherwise the container's. */
+    private String linuxSetting(String name) {
+        String own = shortcut != null ? shortcut.getExtra(name) : "";
+        return !own.isEmpty() ? own : container.getExtra(name);
+    }
+
     private void setupLinuxEnvironment() {
         String rootPath = imageFs.getRootDir().getPath();
         FileUtils.clear(imageFs.getTmpDir());
@@ -1572,7 +1578,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // The Vulkan renderer loads a bionic driver prepared for Wine containers, so Linux sessions use EGL.
         // "Native" Vulkan output hands frames over as dma-bufs, which only the Vulkan renderer can import.
         boolean linuxNativeOutput = linuxSession && container != null
-                && "native".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
+                && "native".equals(linuxSetting(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
         boolean useEGL = !useDisplayX && ((linuxSession && !linuxNativeOutput) || (shortcut != null ? shortcut.getRendererNative()
                 : (container != null && container.getRendererNative())));
 
@@ -2513,7 +2519,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
             return;
         }
-        if (!"0".equals(container.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
+        if (!"0".equals(linuxSetting(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
             android.widget.ImageButton button = new android.widget.ImageButton(this);
             button.setImageResource(android.R.drawable.ic_menu_edit);
             android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
@@ -2530,7 +2536,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             button.setOnClickListener(v -> AppUtils.showKeyboard(this));
             rootView.addView(button, params);
         }
-        if (!"0".equals(container.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD))) {
+        if (!"0".equals(linuxSetting(LinuxSession.EXTRA_AUTO_KEYBOARD))) {
             touchpadView.setFingerUpCallback(() -> {
                 // The program changes the cursor when the pointer arrives over a field, and a slow one takes a while: look
                 // again a few times after the tap. The keyboard opens when a text cursor is seen. It is never closed from

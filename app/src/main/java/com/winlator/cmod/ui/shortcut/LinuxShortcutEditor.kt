@@ -35,6 +35,7 @@ import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
+import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxEmulatorSetup
 import com.winlator.cmod.linux.LinuxFex
@@ -93,6 +94,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var fexGl32 by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_32)) }
     var tuSysmem by remember { mutableStateOf(shortcut.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM)) }
     var glVendor by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_VENDOR)) }
+    var driverId by remember { mutableStateOf(shortcut.getExtra(LinuxDriverManager.EXTRA_DRIVER)) }
+    var glDriver by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_GL_DRIVER)) }
+    var vulkanPresent by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT)) }
+    var keyboardButton by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON)) }
+    var autoKeyboard by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD)) }
+    val drivers = remember { LinuxDriverManager.list(context) }
     val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
     val fexBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.FEX) }
     val rootfsList = remember { LinuxRootfs.list(context) }
@@ -179,6 +186,11 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxFex.EXTRA_GL_32, fexGl32.ifEmpty { null })
         shortcut.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor.ifEmpty { null })
         shortcut.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, tuSysmem.ifEmpty { null })
+        shortcut.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId.ifEmpty { null })
+        shortcut.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver.ifEmpty { null })
+        shortcut.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, vulkanPresent.ifEmpty { null })
+        shortcut.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, keyboardButton.ifEmpty { null })
+        shortcut.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, autoKeyboard.ifEmpty { null })
         shortcut.saveData()
         onClose()
     }
@@ -359,6 +371,39 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     tuSysmem,
                     linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
                 ) { tuSysmem = it }
+                SettingsDivider()
+                val containerDriver = container.getExtra(LinuxDriverManager.EXTRA_DRIVER).let { id ->
+                    drivers.firstOrNull { it.id == id }?.label() ?: id.ifEmpty { "runtime default" }
+                }
+                SettingMappedChoice(
+                    "Turnip driver",
+                    driverId,
+                    LinkedHashMap<String, String>().apply {
+                        put("", "Container default ($containerDriver)")
+                        drivers.forEach { put(it.id, it.label()) }
+                        if (driverId.isNotEmpty() && driverId !in this) put(driverId, "$driverId (not installed)")
+                    }
+                ) { driverId = it }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "OpenGL driver",
+                    glDriver,
+                    linkedMapOf(
+                        "" to "Container default (${if (container.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "Zink on Turnip" else "software"})",
+                        "zink" to "Zink on Turnip (OpenGL 4.6 over Vulkan, accelerated)",
+                        "software" to "Software (llvmpipe, CPU)"
+                    )
+                ) { glDriver = it }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "Vulkan output",
+                    vulkanPresent,
+                    linkedMapOf(
+                        "" to "Container default (${if (container.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT) == "native") "native" else "CPU copy"})",
+                        "native" to "Native (dma-buf, needed for upscalers and frame generation)",
+                        "sw" to "Software (CPU copy, experimental)"
+                    )
+                ) { vulkanPresent = it }
             }
         },
         EditorCategory("framegen", "Frame generation", frameGenerationSummary, false) {
@@ -413,6 +458,18 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                         "0" to "Touchpad: a finger moves the pointer"
                     )
                 ) { touch = it }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "Keyboard button on the screen",
+                    keyboardButton,
+                    linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                ) { keyboardButton = it }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "Open the keyboard when a text field is tapped",
+                    autoKeyboard,
+                    linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                ) { autoKeyboard = it }
             }
         },
         if (!throughSteam) null else EditorCategory(
