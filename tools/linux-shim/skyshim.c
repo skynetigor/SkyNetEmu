@@ -637,3 +637,11 @@ int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t 
     return spawn_wrapped(real, 1, pid, file, actions, attr, argv, envp);
 }
 #endif /* __aarch64__ */
+
+#ifdef __x86_64__
+/* Feral's Linux games (Shadow of the Tomb Raider) were linked against glibc's private loader entry points, which glibc 2.34
+ * folded into libdl/libc and dropped: "undefined symbol: __libc_dlopen_mode, version GLIBC_PRIVATE". The same functions on
+ * the public dlopen and dlsym (the fix described for Life is Strange: blog.hofstede.it/reviving-life-is-strange-...). */
+void *__libc_dlopen_mode(const char *name, int mode) { return dlopen(name, mode); }
+void *__libc_dlsym(void *handle, const char *symbol) { return dlsym(handle, symbol); }
+#endif

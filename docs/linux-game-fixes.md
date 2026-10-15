@@ -62,3 +62,13 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 
 - Window title changes made the terminal ignore the keyboard: same GrabServer bug.
 - `GetGeometry` on an InputOnly window answered `BadDrawable`; fixed in `WindowRequests`.
+
+## Feral game (Shadow of the Tomb Raider): `undefined symbol: __libc_dlopen_mode, version GLIBC_PRIVATE`
+
+- **Symptom:** `ShadowOfTheTombRaider` exits at once under Box64 with that symbol lookup error (also `__libc_dlsym`).
+- **Cause:** the binary imports glibc's private loader entry points, which glibc 2.34 folded into libc and removed.
+- **Fix:** `libskyshim_x64.so` (already preloaded under Box64) exports both on top of `dlopen`/`dlsym`.
+  **Source:** the same fix for Life is Strange: https://blog.hofstede.it/reviving-life-is-strange-before-the-storm-on-modern-linux-with-a-glibc-shim/
+- **Result:** the game starts, draws through Vulkan on the Adreno (HUD: Vulkan, 60 FPS) and shows the Feral logo.
+- **Open:** it stays at that logo for minutes. The game's embedded CEF (single-process) logs `gles2_command_buffer_stub: Failed to
+  create default offscreen surface` (no GL for CEF). `-nolauncher` (a string in the binary) does not stop CEF from starting.
