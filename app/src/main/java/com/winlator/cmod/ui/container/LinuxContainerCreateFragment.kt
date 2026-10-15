@@ -75,6 +75,7 @@ import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.fexcore.FEXCorePreset
 import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRuntimeCatalog
@@ -389,6 +390,7 @@ private fun LinuxContainerEditorBody(
     var keyboardButton by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON) != "0") }
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
+    var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
     var glDriver by remember {
         // OpenGL 4.6 on the Adreno through Zink (over Turnip) works; new containers use it, and one without a choice keeps llvmpipe.
         mutableStateOf(
@@ -483,6 +485,7 @@ private fun LinuxContainerEditorBody(
         container.putExtra(LinuxEmulator.EXTRA_ROOTFS, if (emulator == LinuxEmulator.FEX) (rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.firstOrNull())?.id ?: "" else "")
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
+        container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, if (keyboardButton) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, if (autoKeyboard) "1" else "0")
@@ -675,6 +678,8 @@ private fun LinuxContainerEditorBody(
                     SettingMappedChoice("FEX preset", fexPreset, fexPresets) { fexPreset = it }
                     SettingsDivider()
                     SettingToggle("Use the runtime's Vulkan (FEX thunk)", fexThunks) { fexThunks = it }
+                    SettingsDivider()
+                    SettingToggle("32-bit games on the GPU (OpenGL thunk)", fexGl32) { fexGl32 = it }
                 }
             }
         },

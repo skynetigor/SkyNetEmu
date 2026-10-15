@@ -41,16 +41,28 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
   that breaks Mesa. **Fix:** set `FEX_ROOTFS` in the FEX branch too. Found with `LD_DEBUG=libs` (the library came from `/root/.skynet/lib32`).
 - **Source:** found by experiment (web search for it found nothing: the FEX issues on 32-bit thunks are about something else).
 
-## OPEN: Tomb Raider on the GPU (FEX OpenGL thunk)
+## Tomb Raider (32-bit) on the GPU: FEX OpenGL thunk, `GLXBadFBConfig`
 
-- **Symptom:** `X Error of failed request: GLXBadFBConfig, Major opcode 151 (GLX)`, serial 83, on the host side, right
-  after `glXCreateContext`; then SIGSEGV. The server logs no GLX error (`XErrors`); the message is raised by the host's
-  libGL.
-- **What works:** small 32-bit test programs (`glXChooseVisual`/`glXChooseFBConfig` + `glXCreateContextAttribsARB`) draw
-  with Zink on Turnip through `HostThunks_32/libGL-host.so`.
-- **Next:** search for FEX 32-bit GL thunk issues (`FEX-Emu/FEX`, "libGL" "32-bit" thunk, `glXCreateContext`), Feral/SDL2
-  specifics; a host-side `LD_PRELOAD` interposer on the `glX*` calls showed the game uses `glXCreateContext`.
-- Default stays the root filesystem's software OpenGL (container extra `linuxFexGl32` is off).
+- **Symptom:** with the OpenGL thunk on (`linuxFexGl32`), `X Error of failed request: GLXBadFBConfig, Major opcode 151 (GLX)` right
+  after `glXCreateContext`, exit status 1 (the launcher now logs it). The server logs no GLX error: the host's libGL raises it.
+  Small test programs that used `glXCreateContextAttribsARB` drew fine, so the thunk itself was not the problem.
+- **Cause:** Mesa raises GLXBadFBConfig when it cannot create the context. The container's `envVars` carry
+  `MESA_GL_VERSION_OVERRIDE=3.3`, and for Mesa a version of 3.2 or more means a **core** profile; a compatibility one needs the
+  `COMPAT` suffix. A game that makes its context with the old `glXCreateContext` (Feral's Tomb Raider does) asks for a compatibility
+  profile, and Zink offers only a core one under that override.
+- **Fix:** for a 32-bit game on the OpenGL thunk the launcher sets `MESA_GL_VERSION_OVERRIDE=4.6COMPAT` and
+  `MESA_GLSL_VERSION_OVERRIDE=460` (before the shortcut's launch options, which may override them). The thunk is now on by
+  default for 32-bit games (`linuxFexGl32` = "0" turns it off; per container and per shortcut in the editors).
+- **Sources:** Mesa's environment variables (profile follows the version, `COMPAT` suffix:
+  https://docs.mesa3d.org/envvars.html); the same error on Zink with the same cure for another game
+  (https://gitlab.freedesktop.org/mesa/mesa/-/issues/2495) and under Wine
+  (https://forum.winehq.org/viewtopic.php?t=34889, `MESA_GL_VERSION_OVERRIDE=4.5`). Nothing FEX-specific was found.
+- **Checked on the device (2026-10-15):** FEX 2610, Mesa 26 Zink on Turnip a8xx, Adreno 840. Before: thunk on, override 3.3 ->
+  `GLXBadFBConfig`, `exit: 1`. After: no error; the game's threads show Zink's `WSI swapchain` and no `llvmpipe-N`; the Adreno
+  busy percentage is 75-79 % (`/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage`), 47 FPS in the main menu with no dithering of
+  the software path. When the thunk was off (or its extra was only on the shortcut, which was ignored then) the game's threads
+  were `llvmpipe-0..7` and the GPU stood at 0 %.
+- **Not checked:** other 32-bit games; the game itself past its menu.
 
 ## X server: GrabServer / UngrabServer sent a reply
 

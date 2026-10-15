@@ -22,7 +22,7 @@ import java.util.Map;
  * that way. The file also names the thunk libraries, which forward the guest's Vulkan and OpenGL calls to the
  * runtime's own libraries instead of emulating a driver.
  */
-final class LinuxFex {
+public final class LinuxFex {
     private static final String CONFIG_DIR = ".config/fex-emu";
     static final String NEEDS_ROOTFS = "FEX needs an x86-64 root filesystem. Install one in Components, Linux Root "
             + "Filesystem, and choose it in the container's settings.";
@@ -111,9 +111,10 @@ final class LinuxFex {
     }
 
     /**
-     * Container extra: "1" lets a 32-bit game draw with the OpenGL thunk (experimental). Off, it runs on the root filesystem's software
-     * OpenGL, which is slow but works. A small OpenGL program draws on the GPU this way; Tomb Raider (2013) stops at a GLXBadFBConfig
-     * error that its host-side libGL raises, not yet understood.
+     * Container (or shortcut) extra: "0" keeps a 32-bit game on the root filesystem's software OpenGL (slow, but it needs nothing from
+     * the host); anything else, which is the default, has it draw with the OpenGL thunk on the GPU (Zink on Turnip). The launcher gives
+     * such a game MESA_GL_VERSION_OVERRIDE=4.6COMPAT: a game that makes its context with glXCreateContext asks for a compatibility
+     * profile, and the container's usual override (3.3) is a core one, which fails as GLXBadFBConfig (Tomb Raider 2013).
      */
     public static final String EXTRA_GL_32 = "linuxFexGl32";
 
@@ -122,7 +123,7 @@ final class LinuxFex {
 
     /** Whether a 32-bit game of this container draws with the OpenGL thunk (opt-in, see {@link #EXTRA_GL_32}). */
     static boolean gl32Enabled(Container container, LinuxEmulator.Installed emulator) {
-        return "1".equals(container.getExtra(EXTRA_GL_32)) && !"0".equals(container.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS))
+        return !"0".equals(container.getExtra(EXTRA_GL_32)) && !"0".equals(container.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS))
                 && thunks32Available(emulator);
     }
 

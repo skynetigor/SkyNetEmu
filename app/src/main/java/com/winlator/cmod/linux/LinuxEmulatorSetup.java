@@ -16,7 +16,7 @@ public final class LinuxEmulatorSetup {
     /** The shortcut extras that belong to the emulator. */
     public static final String[] EXTRAS = {
             LinuxEmulator.EXTRA_EMULATOR, LinuxEmulator.EXTRA_ID, LinuxEmulator.EXTRA_PRESET, LinuxEmulator.EXTRA_ROOTFS,
-            LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS
+            LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS, LinuxFex.EXTRA_GL_32
     };
 
     private LinuxEmulatorSetup() {}

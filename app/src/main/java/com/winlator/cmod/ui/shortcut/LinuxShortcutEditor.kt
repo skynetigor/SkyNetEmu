@@ -36,6 +36,7 @@ import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxLaunchOptions
 import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxSession
@@ -88,6 +89,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var rootfsId by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_ROOTFS)) }
     var fexPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)) }
     var fexThunks by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS)) }
+    var fexGl32 by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_32)) }
     val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
     val fexBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.FEX) }
     val rootfsList = remember { LinuxRootfs.list(context) }
@@ -171,6 +173,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxEmulator.EXTRA_ROOTFS, rootfsId.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, fexThunks.ifEmpty { null })
+        shortcut.putExtra(LinuxFex.EXTRA_GL_32, fexGl32.ifEmpty { null })
         shortcut.saveData()
         onClose()
     }
@@ -495,6 +498,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                             fexThunks,
                             linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
                         ) { fexThunks = it }
+                        SettingsDivider()
+                        SettingMappedChoice(
+                            "32-bit games on the GPU (OpenGL thunk)",
+                            fexGl32,
+                            linkedMapOf("" to "Container default", "1" to "On", "0" to "Off (software OpenGL)")
+                        ) { fexGl32 = it }
                     } else {
                         SettingMappedChoice(
                             "Box64 preset",

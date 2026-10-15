@@ -75,6 +75,11 @@ if [ -f "$steam_root/linux32/steamclient.so" ]; then
     mkdir -p "$HOME/.steam"
     ln -sfn "$steam_root/linux32" "$HOME/.steam/sdk32"
 fi
+# A 32-bit game on the OpenGL thunk: its glXCreateContext asks for a compatibility profile, which the container's usual
+# MESA_GL_VERSION_OVERRIDE (3.3, a core one) refuses as GLXBadFBConfig. Set before the launch options, which may override it.
+if [ "$game32" = 1 ] && [ "$SKY_FEX_GL32" = 1 ]; then
+    export MESA_GL_VERSION_OVERRIDE=4.6COMPAT MESA_GLSL_VERSION_OVERRIDE=460
+fi
 # The shortcut's launch options for this game (LinuxSession.writeSteamLaunchOptions): variables, a wrapper before the command, arguments after.
 sky_wrap=(); sky_args=()
 [ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.launch" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.launch"
