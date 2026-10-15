@@ -150,3 +150,18 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 - **Measured, but not controlled:** in the first test the menu ran at 57 FPS with it against 35-47 without; in a later pair of runs
   the scenes differed (a cutscene, the menu, a loading screen) and the numbers (52 -> 92 without, 103 -> 0 with) say nothing.
   Whether it is faster, and what it costs in power, is **not established**.
+
+## 32-bit games on the GPU: not only those Steam starts
+
+- **Gap found:** the GPU path of a 32-bit game (the thunk selection `FEX_THUNKCONFIG`, `MESA_GL_VERSION_OVERRIDE=4.6COMPAT`, the NVIDIA
+  strings through `DRIRC_CONFIGDIR`) was set only by `skynet-launcher.sh`, which only a game that Steam starts goes through. A 32-bit
+  program started from a shortcut directly (`LinuxSession.directCommand`) still drew on the software OpenGL.
+- **Fix:** the Mesa part is one file, `skynet-gl32.sh` (`sky_gl32_mesa_env`), sourced by the launcher and by the shortcut's wrapper;
+  the wrapper applies it (with the thunk selection) to a program that is a 32-bit ELF run through an emulator. The session passes its
+  path as `SKY_FEX_GL32_SCRIPT`.
+- **Checked on the device (2026-10-15):** a 32-bit test ELF started from a shortcut sees `FEX_THUNKCONFIG`, `4.6COMPAT`, `460`,
+  `DRIRC_CONFIGDIR` and `GALLIUM_DRIVER=zink` (it writes them to a file; `sizeof(long)` = 4); Tomb Raider through Steam still draws on
+  the GPU (GPU 78 %, 70 FPS in its menu, no `GLXBadFBConfig`).
+- **Not covered:** a shortcut to a `.sh` that starts the 32-bit binary later (the wrapper tests the file it starts); a 32-bit Vulkan
+  game (the Vulkan thunk has no 32-bit guest side); a game that needs another vendor than the three choices. Only Tomb Raider (2013)
+  has been played; the other 32-bit games are untested.

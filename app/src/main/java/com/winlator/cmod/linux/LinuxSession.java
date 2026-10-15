@@ -195,6 +195,11 @@ public final class LinuxSession {
                 "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" || exit 1; "
                         + "prog=\"$1\"; emu=\"$2\"; nenv=\"$3\"; nwrap=\"$4\"; shift 4; "
                         + "envs=(\"${@:1:$nenv}\"); shift \"$nenv\"; wrap=(\"${@:1:$nwrap}\"); shift \"$nwrap\"; "
+                        // A 32-bit program on FEX with the OpenGL thunk: its thunk selection and Mesa's version and vendor (as the launcher
+                        // does for a game Steam starts).
+                        + "if [ -n \"$emu\" ] && [ -n \"$SKY_FEX_THUNKCONFIG32\" ] && [ -f \"$SKY_FEX_GL32_SCRIPT\" ] && "
+                        + "[ \"$(od -An -tx1 -j4 -N1 \"$prog\" 2>/dev/null | tr -d ' \\n')\" = 01 ]; then "
+                        + "export FEX_THUNKCONFIG=\"$SKY_FEX_THUNKCONFIG32\"; . \"$SKY_FEX_GL32_SCRIPT\"; sky_gl32_mesa_env; fi; "
                         + "case \"$prog\" in *.sh) exec env \"${envs[@]}\" \"${wrap[@]}\" bash \"$prog\" \"$@\";; "
                         + "*) if [ -n \"$emu\" ]; then exec env \"${envs[@]}\" \"${wrap[@]}\" \"$emu\" \"$prog\" \"$@\"; "
                         + "else exec env \"${envs[@]}\" \"${wrap[@]}\" \"$prog\" \"$@\"; fi;; esac",
@@ -459,6 +464,12 @@ public final class LinuxSession {
     }
 
     /** The variables that make up the x86 emulator of a session: the launcher of a Steam game applies the ones of its own game. */
+    /** The script with the environment of a 32-bit game on the OpenGL thunk (skynet-gl32.sh), for the launcher and the shortcut's wrapper. */
+    private static void putGl32Script(Context context, Map<String, String> env) {
+        File script = stageAsset(context, "skynet-gl32.sh");
+        if (script != null) env.put("SKY_FEX_GL32_SCRIPT", script.getPath());
+    }
+
     private static boolean isEmulatorVariable(String name) {
         return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
                 || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB") || name.equals("TU_DEBUG");
@@ -588,7 +599,7 @@ public final class LinuxSession {
                 String thunks32 = LinuxFex.prepareFor32Bit(context, container, fexBuilds.get(0), rootfsList.get(0));
                 if (thunks32 != null) {
                     env.put("SKY_FEX_THUNKCONFIG32", thunks32);
-                    if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); }
+                    if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); putGl32Script(context, env); }
                 }
             }
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
@@ -660,7 +671,7 @@ public final class LinuxSession {
                 String thunks32 = LinuxFex.writeThunkConfig32(container, emulator);
                 if (thunks32 != null) {
                     env.put("SKY_FEX_THUNKCONFIG32", thunks32);
-                    if (LinuxFex.gl32Enabled(container, emulator)) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); }
+                    if (LinuxFex.gl32Enabled(container, emulator)) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); putGl32Script(context, env); }
                 }
             }
         }
