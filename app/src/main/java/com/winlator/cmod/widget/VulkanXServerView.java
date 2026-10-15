@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.view.Surface;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
@@ -313,17 +314,27 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setOnGameZoomChanged(Runnable listener) { onGameZoomChanged = listener; }
 
     /**
-     * The window to scale up: the biggest mapped window directly under the root that does not cover the X screen already (a game
-     * in a window smaller than the container; its launcher before it). Null when there is none: the screen is shown as it is.
+     * The window to scale up: the biggest mapped window directly under the root that is not a menu or tooltip (override-redirect)
+     * and does not cover the X screen already. A full-screen window under the game (the Steam client) is passed over; when the
+     * only windows are full-screen ones, or none, the screen is shown as it is.
      */
     private int[] pickGameWindow() {
         final int screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
+        Window[] children;
+        try {
+            // The list is changed by the X server's thread: copy it in one step instead of walking it.
+            children = xServer.windowManager.rootWindow.getChildren().toArray(new Window[0]);
+        } catch (RuntimeException e) {
+            return gameZoomRect;
+        }
         Window best = null;
-        for (Window child : xServer.windowManager.rootWindow.getChildren()) {
-            if (!child.isMappedTopLevel() || child.id == fpsWindowId) continue;
+        for (Window child : children) {
+            if (child == null || !child.isMappedTopLevel() || child.id == fpsWindowId || child.attributes.isOverrideRedirect()) continue;
+            if (child.getWidth() < 100 || child.getHeight() < 100) continue;
+            if (child.getWidth() >= screenW && child.getHeight() >= screenH) continue;
             if (best == null || (long) child.getWidth() * child.getHeight() >= (long) best.getWidth() * best.getHeight()) best = child;
         }
-        if (best == null || (best.getWidth() >= screenW && best.getHeight() >= screenH)) return null;
+        if (best == null) return null;
         return new int[]{best.getX(), best.getY(), best.getWidth(), best.getHeight()};
     }
 
