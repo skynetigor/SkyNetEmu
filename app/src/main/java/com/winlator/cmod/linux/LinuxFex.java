@@ -119,6 +119,20 @@ public final class LinuxFex {
      */
     public static final String EXTRA_GL_32 = "linuxFexGl32";
 
+    /**
+     * Container (or shortcut) extra: the GPU a 32-bit game on the OpenGL thunk is told it draws on: "nvidia" (the default), "amd", or
+     * "mesa" for the real strings (Mesa / zink / Adreno). Feral's ports (Tomb Raider 2013) pick their workarounds and their
+     * defaults by the vendor in GL_VENDOR / GL_RENDERER: reported as an unknown card, the game ran at its lowest settings and drew
+     * black patches on lit surfaces; reported as an NVIDIA card it draws as intended.
+     */
+    public static final String EXTRA_GL_VENDOR = "linuxGlVendor";
+
+    /** The vendor choice of a container ("nvidia", "amd" or "mesa"). */
+    static String glVendor(Container container) {
+        String value = container.getExtra(EXTRA_GL_VENDOR);
+        return "amd".equals(value) || "mesa".equals(value) ? value : "nvidia";
+    }
+
     /** What a 32-bit program's thunk selection is kept in (as the program sees the file; FEX reads it from FEX_THUNKCONFIG). */
     private static final String THUNK_CONFIG_32 = "/root/" + CONFIG_DIR + "/ThunkConfig32.json";
 

@@ -116,3 +116,24 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
   three seconds (the scene had stood still for minutes). **Not checked:** the buttons, the right stick and the triggers one by
   one, a real controller, other 32-bit games; an old binary that calls `__xstat` rather than `stat` is not hooked.
 - **Source:** found by experiment (reading `skyshim.c` and `FakeInputWriter`).
+
+## 32-bit Tomb Raider on the GPU: black patches on lit surfaces, "cartoon" look
+
+- **Symptom:** on the GPU (Zink on Turnip) the game ran, but lit surfaces had hard black patches with stair-stepped edges (Lara's
+  skin and clothes, rocks, beams), the menus were hatched, and the game looked flat. The same game in a Proton / Wine container
+  on the same Turnip is fine, so the cause is in the OpenGL path, not the driver.
+- **Evidence:** the game's preferences showed everything at the lowest setting (shadows, SSAO, reflections, post-processing,
+  DOF, LOD off) and vendor workaround switches (`UseAMDGatherWorkaround`, `UseAMDTempVariablesWorkaround`, ...): Feral's ports choose
+  these by GL_VENDOR / GL_RENDERER, which here read "Mesa / zink / Adreno". With the strings changed to an NVIDIA card the picture
+  was right (shadows, torch light, no patches) and the game picked heavier defaults at once (at TextureQuality auto it ran out of
+  the 32-bit address space: `Out of memory`, exit 134, until the textures were set by hand).
+- **Not the cause (tried):** `TU_DEBUG=sysmem` (patches stayed; the menu ran faster), a lower `MESA_GL_VERSION_OVERRIDE`
+  (`3.3COMPAT`: the game needs 4.x, `GLXBadFBConfig`), shadows on (patches stayed in the game itself, the menu got better).
+- **Fix:** for a 32-bit game on the OpenGL thunk the launcher writes a driconf file with `force_gl_vendor` / `force_gl_renderer`
+  (NVIDIA by default; "amd" and "mesa" = the real strings are choices) and points `DRIRC_CONFIGDIR` at it for that process only.
+  Container and shortcut extra `linuxGlVendor`, in both editors.
+- **Source:** Mesa's driconf options (`force_gl_vendor`, `force_gl_renderer`) and `DRIRC_CONFIGDIR`
+  (https://docs.mesa3d.org/envvars.html); the cause was found by experiment, no source describes this game on Zink.
+- **Checked on the device (2026-10-15):** with the launcher alone (no `~/.drirc`, the game's own preferences untouched) the game
+  draws as intended at 60 FPS, GPU 79 %. **Not checked:** the TextureQuality auto path on the product build over a long session
+  (32-bit address space), other Feral or 32-bit games, the "amd" choice.

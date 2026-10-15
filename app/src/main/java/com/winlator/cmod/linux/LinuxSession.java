@@ -582,7 +582,7 @@ public final class LinuxSession {
                 String thunks32 = LinuxFex.prepareFor32Bit(context, container, fexBuilds.get(0), rootfsList.get(0));
                 if (thunks32 != null) {
                     env.put("SKY_FEX_THUNKCONFIG32", thunks32);
-                    if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) env.put("SKY_FEX_GL32", "1");
+                    if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); }
                 }
             }
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
@@ -654,7 +654,7 @@ public final class LinuxSession {
                 String thunks32 = LinuxFex.writeThunkConfig32(container, emulator);
                 if (thunks32 != null) {
                     env.put("SKY_FEX_THUNKCONFIG32", thunks32);
-                    if (LinuxFex.gl32Enabled(container, emulator)) env.put("SKY_FEX_GL32", "1");
+                    if (LinuxFex.gl32Enabled(container, emulator)) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); }
                 }
             }
         }

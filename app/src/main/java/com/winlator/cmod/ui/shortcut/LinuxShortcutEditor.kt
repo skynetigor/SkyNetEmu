@@ -90,6 +90,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var fexPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)) }
     var fexThunks by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS)) }
     var fexGl32 by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_32)) }
+    var glVendor by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_VENDOR)) }
     val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
     val fexBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.FEX) }
     val rootfsList = remember { LinuxRootfs.list(context) }
@@ -174,6 +175,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, fexThunks.ifEmpty { null })
         shortcut.putExtra(LinuxFex.EXTRA_GL_32, fexGl32.ifEmpty { null })
+        shortcut.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor.ifEmpty { null })
         shortcut.saveData()
         onClose()
     }
@@ -504,6 +506,12 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                             fexGl32,
                             linkedMapOf("" to "Container default", "1" to "On", "0" to "Off (software OpenGL)")
                         ) { fexGl32 = it }
+                        SettingsDivider()
+                        SettingMappedChoice(
+                            "GPU a 32-bit game is told it has",
+                            glVendor,
+                            linkedMapOf("" to "Container default", "nvidia" to "NVIDIA", "amd" to "AMD", "mesa" to "As it is (Mesa / zink)")
+                        ) { glVendor = it }
                     } else {
                         SettingMappedChoice(
                             "Box64 preset",
