@@ -113,6 +113,15 @@ public class TouchpadView extends View {
     }
 
     private void updateXform(int outerWidth, int outerHeight, int innerWidth, int innerHeight) {
+        int[] zoomRect = xServer.getXServerView() != null ? xServer.getXServerView().getGameZoomRect() : null;
+        if (zoomRect != null && outerWidth > 0 && outerHeight > 0) {
+            // The game window is shown scaled up to the view (VulkanXServerView.updateTransform): the touch lands in its pixels.
+            float s = Math.min((float) outerWidth / zoomRect[2], (float) outerHeight / zoomRect[3]);
+            XForm.makeTranslation(xform, -(outerWidth - zoomRect[2] * s) * 0.5f, -(outerHeight - zoomRect[3] * s) * 0.5f);
+            XForm.scale(xform, 1.0f / s, 1.0f / s);
+            XForm.translate(xform, zoomRect[0], zoomRect[1]);
+            return;
+        }
         ViewTransformation viewTransformation = new ViewTransformation();
         viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight);
 

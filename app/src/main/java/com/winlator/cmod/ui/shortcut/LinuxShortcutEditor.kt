@@ -326,8 +326,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "Scaling",
                     fit,
                     linkedMapOf(
-                        "" to (profileExtra(FIT) { "Game profile default (${if (it == "1") "fit" else "1:1"})" } ?: "Container default ($containerFit)"),
+                        "" to (profileExtra(FIT) { "Game profile default (${when (it) { "1" -> "fit"; "2" -> "game window"; else -> "1:1" }})" } ?: "Container default ($containerFit)"),
                         "1" to "Fit to screen (keep proportions)",
+                        "2" to "Scale the game window to the screen (a game smaller than the container)",
                         "0" to "Original size (1:1)"
                     )
                 ) { fit = it }

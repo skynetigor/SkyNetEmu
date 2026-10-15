@@ -414,6 +414,7 @@ private fun LinuxContainerEditorBody(
     }
     // Scaled to fit the window with the proportions kept; unchecked, the screen is drawn 1:1 in the middle.
     var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: true) }
+    var scaleWindow by remember { mutableStateOf(editing?.getExtra("scaleGameWindow") == "1") }
     var upscaler by remember {
         mutableStateOf(editing?.getExtra("graphicsFilterMode")?.takeIf { m -> UPSCALER_MODES.any { it.first == m } } ?: "0")
     }
@@ -469,6 +470,7 @@ private fun LinuxContainerEditorBody(
             else cpuSelected.indices.filter { cpuSelected[it] }.joinToString(",")
         )
         container.setFullscreenStretched(stretched)
+        container.putExtra("scaleGameWindow", if (scaleWindow) "1" else "")
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
@@ -693,6 +695,9 @@ private fun LinuxContainerEditorBody(
                 )
                 SettingsDivider()
                 SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
+                SettingsDivider()
+                // For a container larger than the game: the game's own window is scaled up, so the upscaler works on its resolution.
+                SettingToggle("Scale the game window to the screen (a game smaller than the container)", scaleWindow) { scaleWindow = it }
                 SettingsDivider()
                 // The picture is scaled by the Vulkan renderer, which "native" output uses; the CPU-copy output draws with EGL.
                 SettingMappedChoice(

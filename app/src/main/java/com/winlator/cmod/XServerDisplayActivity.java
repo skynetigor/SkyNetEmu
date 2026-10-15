@@ -1694,13 +1694,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         boolean shouldStretch = false;
+        // "2": scale the game's own window to the screen (a game smaller than a native-size container), with the upscaler.
+        boolean zoomGameWindow = false;
 
         if (shortcut != null && shortcutFullscreenStretched != null) {
 
-            shouldStretch = shortcutFullscreenStretched.equals("1");
+            zoomGameWindow = shortcutFullscreenStretched.equals("2");
+            shouldStretch = shortcutFullscreenStretched.equals("1") || zoomGameWindow;
         } else if (container != null && container.isFullscreenStretched()) {
 
             shouldStretch = true;
+            zoomGameWindow = linuxSession && "1".equals(container.getExtra("scaleGameWindow"));
+        }
+
+        if (zoomGameWindow) {
+            renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
+            renderer.setGameWindowZoom(true);
         }
 
         if (shouldStretch) {

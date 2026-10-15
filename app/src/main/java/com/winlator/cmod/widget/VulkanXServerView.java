@@ -45,6 +45,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
 
     private boolean fullscreen = false;
+    private volatile boolean gameWindowZoom = false;
+    private volatile int[] gameZoomRect;
+    private volatile Runnable onGameZoomChanged;
     private float magnifierZoom = 1.0f;
     private boolean screenOffsetYRelativeToCursor = false;
     public int surfaceWidth;
@@ -297,8 +300,64 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public void onResume() {}
 
+    @Override
+    public void setGameWindowZoom(boolean on) {
+        gameWindowZoom = on;
+        queueEvent(this::refreshGameZoom);
+    }
+
+    @Override
+    public int[] getGameZoomRect() { return gameWindowZoom ? gameZoomRect : null; }
+
+    @Override
+    public void setOnGameZoomChanged(Runnable listener) { onGameZoomChanged = listener; }
+
+    /**
+     * The window to scale up: the biggest mapped window directly under the root that does not cover the X screen already (a game
+     * in a window smaller than the container; its launcher before it). Null when there is none: the screen is shown as it is.
+     */
+    private int[] pickGameWindow() {
+        final int screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
+        Window best = null;
+        for (Window child : xServer.windowManager.rootWindow.getChildren()) {
+            if (!child.isMappedTopLevel() || child.id == fpsWindowId) continue;
+            if (best == null || (long) child.getWidth() * child.getHeight() >= (long) best.getWidth() * best.getHeight()) best = child;
+        }
+        if (best == null || (best.getWidth() >= screenW && best.getHeight() >= screenH)) return null;
+        return new int[]{best.getX(), best.getY(), best.getWidth(), best.getHeight()};
+    }
+
+    /** Picks the window again after the windows changed (on the render thread) and redraws if it, or its place, is another. */
+    private void refreshGameZoom() {
+        if (!gameWindowZoom && gameZoomRect == null) return;
+        int[] rect = gameWindowZoom ? pickGameWindow() : null;
+        synchronized (lock) {
+            if (java.util.Arrays.equals(rect, gameZoomRect)) return;
+            gameZoomRect = rect;
+            updateTransform();
+        }
+        Runnable listener = onGameZoomChanged;
+        if (listener != null) listener.run();
+    }
+
     private void updateTransform() {
         if (nativeHandle == 0) return;
+        final int[] zoomRect = gameWindowZoom ? gameZoomRect : null;
+        if (zoomRect != null && surfaceWidth > 0 && surfaceHeight > 0) {
+            viewTransformation.update(surfaceWidth, surfaceHeight,
+                xServer.screenInfo.width, xServer.screenInfo.height);
+            // The window's rectangle is mapped onto the view, aspect kept, and everything else is cut off by the scissor.
+            final float screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
+            final float s = Math.min((float) surfaceWidth / zoomRect[2], (float) surfaceHeight / zoomRect[3]);
+            final float destW = zoomRect[2] * s, destH = zoomRect[3] * s;
+            final float x0 = (surfaceWidth - destW) * 0.5f, y0 = (surfaceHeight - destH) * 0.5f;
+            final float sx = s * screenW / surfaceWidth, sy = s * screenH / surfaceHeight;
+            final float ox = x0 * screenW / surfaceWidth - zoomRect[0] * sx;
+            final float oy = y0 * screenH / surfaceHeight - zoomRect[1] * sy;
+            nativeSetTransformAndScissor(nativeHandle, ox, oy, sx, sy, true,
+                (int) x0, (int) y0, (int) Math.ceil(destW), (int) Math.ceil(destH));
+            return;
+        }
         final float zoom = magnifierZoom;
         final float ptrX = xServer.pointer.getX();
         final float ptrY = xServer.pointer.getY();
@@ -394,6 +453,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onDestroyWindow(Window window) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         compositeRedirectedWindows.remove(window.id);
         queueEvent(() -> {
@@ -405,6 +465,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onMapWindow(Window window) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -416,6 +477,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUnmapWindow(Window window) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -457,6 +519,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUpdateWindowGeometry(Window window, boolean resized) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         final long contentId = did(window.getContent());
         final int x = window.getX(), y = window.getY(), w = window.getWidth(), h = window.getHeight();
