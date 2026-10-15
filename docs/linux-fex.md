@@ -66,3 +66,14 @@ Installed by hand into the app's folders (the registry has no entries yet), in a
 * Whether the game gets to a picture and how fast it is next to Box64: not run past the Lua start-up, because the
   copy of the whole game folder was not done on the device. The first run has no code cache either.
 * Whether the guest's OpenGL (llvmpipe of the root filesystem or the runtime's, through the thunk) can be made to work.
+
+## Adding a 32-bit program as a game
+
+A 32-bit x86 ELF is a Linux program (`ExecutableKind.LINUX_X86`, `isLinux()` is true): "Add game" no longer takes it for a Windows one and
+offers no Wine. It shows "Standard Linux, x86 32-bit", the Linux configs of the registry, and "An environment you already have", which lists
+only the Linux containers that can run the program (`LinuxProgramSupport.refusal`: an x86-64 program needs an installed x86 emulator and, on
+FEX, a root filesystem; a 32-bit one needs FEX and a root filesystem; an ARM64 program or a script needs nothing). A container that cannot is
+left out; when none can, the tile says so and a tap shows why for each. The same check refuses the program when it is added by any of the
+ways, with a sentence naming what is missing. Checked on the device (2026-10-15) with a 32-bit ELF in Download: the file manager lists it
+with the Linux icon and offers "Add this game"; the screen offers no Windows environment; the list holds the two Linux containers that fit.
+Not checked: that the standard Linux container is made and the program started from it (needs FEX and the root filesystem installed).

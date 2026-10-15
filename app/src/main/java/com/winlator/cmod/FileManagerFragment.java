@@ -1069,7 +1069,7 @@ public class FileManagerFragment extends Fragment {
         return kind;
     }
 
-    /** A Windows program, or a Linux one that a Linux container can run (a 32-bit x86 one is listed too, to be refused when picked). */
+    /** A Windows program, or a Linux one (x86-64, 32-bit x86, ARM64, a script). */
     private boolean isExecutable(File f) {
         com.winlator.cmod.core.ExecutableKind kind = kindOf(f);
         // Linux programs are only for "Add game"; the file manager of a Wine container knows Windows programs only.
@@ -1087,10 +1087,6 @@ public class FileManagerFragment extends Fragment {
                 });
             }
             popup.getMenu().add("Add this game").setOnMenuItemClickListener(item -> {
-                if (kindOf(file) == com.winlator.cmod.core.ExecutableKind.LINUX_X86) {
-                    Toast.makeText(getContext(), "32-bit x86 Linux programs cannot run in a Linux container.", Toast.LENGTH_LONG).show();
-                    return true;
-                }
                 if (pickingGame() && requireActivity() instanceof MainActivity) {
                     ((MainActivity) requireActivity()).onGamePicked(file);
                 } else {

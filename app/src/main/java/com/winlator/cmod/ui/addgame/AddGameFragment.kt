@@ -68,6 +68,7 @@ import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxProgramInstaller
+import com.winlator.cmod.linux.LinuxProgramSupport
 import com.winlator.cmod.telemetry.ErrorReporter
 import com.winlator.cmod.telemetry.Telemetry
 import com.winlator.cmod.ui.onboarding.TileCard
@@ -195,10 +196,12 @@ class AddGameFragment : Fragment() {
         }
         if (kind.isLinux) {
             val box64 = StandardLinuxContainer.usesBox64(kind)
+            val x86 = kind == ExecutableKind.LINUX_X86
             tiles.add(Tile(
                 Icons.Outlined.Terminal,
-                if (box64) "Standard Linux, x86_64" else "Standard Linux, ARM64",
-                if (box64) "The app's default Linux settings: the Linux runtime and Turnip driver, the program run through Box64."
+                if (x86) "Standard Linux, x86 32-bit" else if (box64) "Standard Linux, x86_64" else "Standard Linux, ARM64",
+                if (x86) "The app's default Linux settings: the Linux runtime and Turnip driver, the 32-bit program run through FEX (it needs FEX and an x86-64 root filesystem installed)."
+                else if (box64) "The app's default Linux settings: the Linux runtime and Turnip driver, the program run through Box64."
                 else "The app's default Linux settings: the Linux runtime and Turnip driver, the ARM64 program run as it is.",
                 if (found == null) "A good start for a program the list does not know." else "Not tuned for this game.", 2
             ) { choose(Pick.StandardLinux()) })
@@ -217,10 +220,17 @@ class AddGameFragment : Fragment() {
             tiles.add(Tile(Icons.Outlined.SportsEsports, "Settings of another game",
                 "Takes the settings made for another game from the list, for a game that is similar.", "Pick one from the list.", 2) { pickOther(others) })
         }
+        // Only the containers of the file's platform that can run it (a Linux one: the emulator, the root filesystem it needs).
         val mine = manager.containers.filter { it.isLinux == kind.isLinux }
         if (mine.isNotEmpty()) {
+            val refusals = if (kind.isLinux) mine.associateWith { LinuxProgramSupport.refusal(context, it, kind) } else emptyMap()
+            val fits = mine.filter { refusals[it] == null }
+            val why = mine.mapNotNull { c -> refusals[c]?.let { "${c.name}: $it" } }.joinToString("\n")
             tiles.add(Tile(Icons.Outlined.Folder, "An environment you already have",
-                "Puts the game into one of your ${if (kind.isLinux) "Linux" else "Windows"} containers and leaves it as it is.", "Pick one from your list.", 2) { pickExisting(mine) })
+                "Puts the game into one of your ${if (kind.isLinux) "Linux" else "Windows"} containers that can run it, and leaves it as it is.",
+                if (fits.isEmpty()) "None of your containers can run this program yet." else "Pick one from your list (${fits.size} of ${mine.size} fit).", 2) {
+                if (fits.isEmpty()) Toast.makeText(requireContext(), why, Toast.LENGTH_LONG).show() else pickExisting(fits)
+            })
         }
         tiles.add(Tile(Icons.Outlined.Download, "Import a .wcfg file",
             "Makes an environment from a profile exported on another device or shared by someone.", "You have a profile file.", 2) {
@@ -281,8 +291,9 @@ class AddGameFragment : Fragment() {
      */
     private fun addLinuxProgram(context: android.content.Context, container: Container, name: String, game: GameMatcher.Result?,
                                 extras: MutableMap<String, String?>): File? {
-        if (container.isLinux && LinuxEmulator.choice(container) == LinuxEmulator.NONE && kind != ExecutableKind.LINUX_ARM64) {
-            phase = Phase.Failed("This container has no x86 emulator, so it cannot run this x86-64 program. Choose a container with Box64 or FEX.")
+        val refusal = LinuxProgramSupport.refusal(context, container, kind)
+        if (container.isLinux && refusal != null) {
+            phase = Phase.Failed("This container cannot run this program: $refusal.")
             return null
         }
         var guest = exe.absolutePath

@@ -18,12 +18,12 @@ public enum ExecutableKind {
     LINUX_X64,
     LINUX_ARM64,
     LINUX_SCRIPT,
-    /** A 32-bit x86 Linux program, which no Linux container can run. */
+    /** A 32-bit x86 Linux program: it runs on FEX, with an x86-64 root filesystem that has the 32-bit libraries (Box64 cannot). */
     LINUX_X86,
     NONE;
 
     public boolean isLinux() {
-        return this == LINUX_X64 || this == LINUX_ARM64 || this == LINUX_SCRIPT;
+        return this == LINUX_X64 || this == LINUX_ARM64 || this == LINUX_SCRIPT || this == LINUX_X86;
     }
 
     public static ExecutableKind of(File file) {
