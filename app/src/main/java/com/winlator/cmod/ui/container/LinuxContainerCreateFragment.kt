@@ -401,7 +401,7 @@ private fun LinuxContainerEditorBody(
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var tuSysmem by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM) == "1") }
-    var noProot by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT) == "1") }
+    var noProot by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT) != "0") }
     var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
     var glVendor by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_VENDOR)?.ifEmpty { null } ?: "nvidia") }
     var glDriver by remember {
@@ -504,7 +504,7 @@ private fun LinuxContainerEditorBody(
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
         container.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, if (tuSysmem) "1" else "")
-        container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (noProot) "1" else "")
+        container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (noProot) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor)
         container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
@@ -635,7 +635,7 @@ private fun LinuxContainerEditorBody(
                         runtimes.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
                     ) { chosenRuntimeId = it }
                 }
-                SettingToggle("Run without proot (experimental, loads faster)", noProot) { noProot = it }
+                SettingToggle("Run without proot (loads faster)", noProot) { noProot = it }
             }
         },
         EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {

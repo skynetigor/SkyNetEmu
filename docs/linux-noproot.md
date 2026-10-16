@@ -1,4 +1,4 @@
-# Linux session without proot
+# Linux session without proot (the default)
 
 The Linux container runs its programs (Box64, FEX, Steam) in a glibc runtime. By default that is done under proot, which stops the program at every system call that
 names a path and translates it from outside: about 100 us for a `stat` or an `open` (the call itself: about 1 us). A game that opens thousands of files while loading pays for all of them.
@@ -16,7 +16,8 @@ names a path and translates it from outside: about 100 us for a `stat` or an `op
 - a socket path (`sockaddr_un`) that gets longer than 107 bytes once translated is reached through `/proc/self/fd/<folder>/<name>`;
 - `/sys` answers EACCES where a PC answers ENOENT (`/sys/class/power_supply/BAT0`): hooks turn one into the other.
 
-Enable it per container with the switch "Run without proot" (Container settings > Runtime), which sets the extra `linuxNoProot=1`, or for every container with the file `Winlator/linux-noproot` on the shared storage. Without it, nothing changes.
+It is the default. The switch "Run without proot" (Container settings > Runtime) sets the extra `linuxNoProot` ("1" on, "0" under proot); the file `Winlator/linux-proot` on the shared storage keeps every container under proot.
+When the patched loader cannot be made for a runtime, the session falls back to proot by itself.
 
 Measured on BeamNG.drive 0.39 (Steam, Box64, the Steam card of the library; three runs each, tap on Play to the main menu): about 18 s without proot, about 23 s under proot
 (on the game's own clock: 14.8 s against 19.5 s). Not yet tried: the Steam client, FEX games, programs that read `/proc/self/exe`-relative paths in unusual ways.

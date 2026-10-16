@@ -444,12 +444,12 @@ public final class LinuxSession {
         return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
     }
 
-    /** Container extra: "1" starts the session without proot (see {@link #noProotLaunch}); a file Winlator/linux-noproot does the same for every container (to try it). */
+    /** Container extra: "0" keeps the session under proot, anything else starts it without (see {@link #noProotLaunch}); a file Winlator/linux-proot on the shared storage keeps every container under proot. */
     public static final String EXTRA_NO_PROOT = "linuxNoProot";
 
     private static boolean noProot(Container container) {
-        if ("1".equals(container.getExtra(EXTRA_NO_PROOT))) return true;
-        return new File(Environment.getExternalStorageDirectory(), "Winlator/linux-noproot").exists();
+        if ("0".equals(container.getExtra(EXTRA_NO_PROOT))) return false;
+        return !new File(Environment.getExternalStorageDirectory(), "Winlator/linux-proot").exists();
     }
 
     /**
