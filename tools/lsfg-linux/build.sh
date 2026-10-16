@@ -16,6 +16,9 @@
 # The result goes to app/src/main/assets/lsfg_vk/linux-arm64/liblsfg-vk.so, which LsfgManager.prepareLinuxLaunch installs.
 # Bump LINUX_RUNTIME_VERSION in LsfgManager when it changes.
 #
+# patches/: fixes of our own applied to the sources before the build (see the header of each file). Bump LINUX_RUNTIME_VERSION in
+# LsfgManager when the binary changes: the app installs the layer again when it differs.
+#
 # The binary has only been checked as an ELF (aarch64, needs libc.so.6 only, exports layer_vkGetInstanceProcAddr and
 # layer_vkGetDeviceProcAddr, GLIBC <= 2.34). It was not run on a device when it was built.
 set -e
@@ -32,6 +35,11 @@ git clone --depth 1 --branch "$TAG" --recurse-submodules --shallow-submodules \
     https://github.com/GameNative/lsfg-vk-android "$WORK/src"
 # volk wants the Vulkan headers; the version the first build used came with NDK r29 (1.3.275).
 git clone --depth 1 --branch v1.3.275 https://github.com/KhronosGroup/Vulkan-Headers "$WORK/vkheaders"
+
+# Our own fixes (tools/lsfg-linux/patches), on the upstream sources, before anything is renamed.
+for patch in "$(pwd)"/patches/*.patch; do
+    git -C "$WORK/src" apply "$patch"
+done
 
 # The single-device path is the code under __ANDROID__: give it a macro of its own.
 grep -rl "__ANDROID__" "$WORK/src/src" "$WORK/src/include" "$WORK/src/framegen" | xargs perl -pi -e 's/__ANDROID__/LSFGVK_SINGLE_DEVICE/g'

@@ -1,0 +1,36 @@
+Never ask the Vulkan layer chain for entry points with a null instance (lsfg-vk Linux build, framegen/src/core/instance.cpp).
+
+volkInitializeCustom() loads the global entry points (vkCreateInstance, ...) through the handler it is given, asking for them with
+a null instance. The handler is the layer chain below lsfg-vk (Mesa's device-select layer on the phone), which reads its instance
+table through that null instance and crashes with SIGSEGV at address 0x18. It showed as a crash of the game when frame generation
+was started or changed while the game runs: an "Off" start (multiplier 1), switching Off -> 2x/3x/4x, and a swapchain recreation
+after a change (the module is initialised again each time). An adopted instance needs only the instance level entry points, which
+are asked for with the real instance, so the handler answers a null instance itself.
+
+--- a/framegen/src/core/instance.cpp	2026-10-16 16:22:21
++++ b/framegen/src/core/instance.cpp	2026-10-16 16:22:21
+@@ -48,8 +48,23 @@
+     );
+ }
+ 
++namespace {
++    PFN_vkGetInstanceProcAddr externalGipa = nullptr;
++
++    // volkInitializeCustom asks for the global entry points (vkCreateInstance, ...) with a null instance. The layer
++    // below a layer (Mesa's device-select) reads its instance table through that null instance and crashes
++    // (SIGSEGV, address 0x18). An adopted instance needs none of the global entry points: only the instance level
++    // ones, which are asked for with the real instance.
++    PFN_vkVoidFunction instanceOnlyGipa(VkInstance instance, const char* name) {
++        if (instance == VK_NULL_HANDLE)
++            return nullptr;
++        return externalGipa(instance, name);
++    }
++}
++
+ Instance::Instance(PFN_vkGetInstanceProcAddr gipa, VkInstance external) {
+-    volkInitializeCustom(gipa);
++    externalGipa = gipa;
++    volkInitializeCustom(instanceOnlyGipa);
+     volkLoadInstance(external);
+ 
+     // non-owning: the caller controls the instance lifetime

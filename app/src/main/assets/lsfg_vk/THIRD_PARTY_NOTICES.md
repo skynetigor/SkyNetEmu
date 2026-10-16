@@ -172,9 +172,10 @@ The same lsfg-vk-android source (tag `v1.0.4-android`, commit
 `ea1e3f9cf1196cfda7d75fadfdd51616b388e021`) built for **aarch64 glibc**, the Arch Linux ARM runtime of the Linux
 containers, instead of the Android toolchain. Cross compiled with zig 0.17.0 (`aarch64-linux-gnu.2.35`, libc++ linked
 in statically), cmake 4.4.4, Vulkan-Headers 1.3.275, stripped. Recipe: `tools/lsfg-linux/build.sh`.
-SHA-256 of the shipped file: `0fedd60653c105efe8bff97302eba8933ec8fded6af0f8795968cfa64771f9d9`.
+SHA-256 of the shipped file: `41561fafe6f289ac03c6b9dfc550b17c64e03de0b19f3522cc2325ffc3cc9089`.
 
-Modification: the sources are built with the fork's Android code path (frame generation on the game's own device
+Modifications: (1) a patch of ours (`tools/lsfg-linux/patches/0001-*.patch`, MIT like the rest) stops the framegen module from asking the layer
+chain for global entry points with a null instance, which crashed Mesa's device-select layer. (2) The sources are built with the fork's Android code path (frame generation on the game's own device
 and queue, synchronised with a wait-idle), because Turnip on KGSL cannot export the OPAQUE_FD semaphores the
 stock desktop path shares between two devices. That code sits under `#ifdef __ANDROID__`; `build.sh` renames the
 macro to `LSFGVK_SINGLE_DEVICE` in the source tree and supplies `tools/lsfg-linux/shim` for the two Android
