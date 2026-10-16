@@ -430,7 +430,7 @@ public final class LinuxSession {
         writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
 
-        if (noProot(container) && !runsOnFex(context, container, programGuestPath)) {
+        if (noProot(container) && !runsOnFex(context, container, programGuestPath) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
             Launch direct = noProotLaunch(context, rt, home, argv, guestEnv, guestCommand);
             if (direct != null) return direct;
         }
@@ -451,6 +451,11 @@ public final class LinuxSession {
      * Whether the program is run by FEX: the container's emulator is FEX, or the program is a 32-bit x86 one (Box64 cannot run it, FEX does). FEX makes its
      * system calls itself, without the libc functions libskypath hooks, so the paths the guest names (/tmp/.X11-unix, the home folder) are not translated: the
      * game cannot find the X server. Such a session stays under proot until libskypath covers FEX.
+     */
+    /**
+     * The Steam client (what starts with STEAM_MARKER) stays under proot too: its links (~/.steam/steam and the others) point at guest paths
+     * (/root/.local/share/Steam), which proot translates and the kernel cannot follow, and its start script makes /storage/emulated/0 with
+     * mkdir -p, which the phone answers "permission denied" where proot answers "exists".
      */
     private static boolean runsOnFex(Context context, Container container, String programGuestPath) {
         if (LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) return true;

@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
@@ -674,4 +675,28 @@ int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t 
  * the public dlopen and dlsym (the fix described for Life is Strange: blog.hofstede.it/reviving-life-is-strange-...). */
 void *__libc_dlopen_mode(const char *name, int mode) { return dlopen(name, mode); }
 void *__libc_dlsym(void *handle, const char *symbol) { return dlsym(handle, symbol); }
+
+/* Under FEX in a session on the phone the kernel's robust futex calls answer ENOSYS (the app's seccomp filter does not allow them), and Feral's
+ * games (tier0) ask for the thread's robust list head and stop with "Fatal error: futex robust_list not initialized by pthreads" when they get
+ * ENOSYS. glibc registers its list with an inline system call that never reaches here; this keeps a list per thread for the program's own
+ * calls to syscall(), and answers set_robust_list (273) and get_robust_list (274). */
+/* glibc keeps the list in its thread structure (struct pthread, at 0x2e0 in the root filesystem's glibc 2.39, found in start_thread's own call) and
+ * registers it with the inline system call. get_robust_list answers with that very list, as the kernel would, so the program's check passes. */
+#define ROBUST_HEAD_OFFSET 0x2e0
+
+long syscall(long number, ...) {
+    static long (*real)(long, ...);
+    if (!real) real = (long (*)(long, ...))dlsym(RTLD_NEXT, "syscall");
+    va_list ap;
+    va_start(ap, number);
+    long a0 = va_arg(ap, long), a1 = va_arg(ap, long), a2 = va_arg(ap, long), a3 = va_arg(ap, long), a4 = va_arg(ap, long), a5 = va_arg(ap, long);
+    va_end(ap);
+    if (number == 273) return 0;
+    if (number == 274 && (a0 == 0 || a0 == real(SYS_gettid))) {
+        *(void **)a1 = (char *)pthread_self() + ROBUST_HEAD_OFFSET;
+        *(size_t *)a2 = 24;
+        return 0;
+    }
+    return real(number, a0, a1, a2, a3, a4, a5);
+}
 #endif

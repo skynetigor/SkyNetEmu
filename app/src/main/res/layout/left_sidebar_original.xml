@@ -660,17 +660,6 @@
                     android:textColor="#FFFFFF"
                     android:textSize="15sp" />
                 <Switch
-                    android:id="@+id/SWShowHiddenCursor"
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/sidebar_card"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:text="Show hidden cursor"
-                    android:textColor="#FFFFFF"
-                    android:textSize="15sp" />
-                <Switch
                     android:id="@+id/SWRelativeMouse"
                     android:layout_width="match_parent"
                     android:layout_height="56dp"

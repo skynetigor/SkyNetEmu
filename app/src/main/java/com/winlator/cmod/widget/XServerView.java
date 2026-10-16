@@ -118,17 +118,6 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
         nativeSetCursorVisible(cursorVisible);
     }
 
-    @Override
-    public void refreshCursors() {
-        bindCursors(xServer.windowManager.rootWindow);
-    }
-
-    private void bindCursors(Window window) {
-        Cursor cursor = window.attributes.getCursor();
-        if (cursor != null) nativeBindCursor(window.id, cursor.id, cursor.isVisible());
-        for (Window child : window.getChildren()) bindCursors(child);
-    }
-
     public void setScreenOffsetYRelativeToCursor(boolean screenOffsetYRelativeToCursor) {
         this.screenOffsetYRelativeToCursor = screenOffsetYRelativeToCursor;
         nativeSetScreenOffsetYRelativeToCursor(screenOffsetYRelativeToCursor);

@@ -1867,22 +1867,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
-        // Some programs (a game's launcher) hide the pointer with an empty cursor; the switch draws it anyway. Kept in the shortcut.
-        Switch swShowHiddenCursor = findViewById(R.id.SWShowHiddenCursor);
-        boolean showHidden = shortcut != null && "1".equals(shortcut.getExtra("showHiddenCursor"));
-        com.winlator.cmod.xserver.Cursor.setShowHidden(showHidden);
-        if (swShowHiddenCursor != null) {
-            swShowHiddenCursor.setChecked(showHidden);
-            swShowHiddenCursor.setOnCheckedChangeListener((btn, checked) -> {
-                com.winlator.cmod.xserver.Cursor.setShowHidden(checked);
-                if (xServerView != null) xServerView.refreshCursors();
-                if (shortcut != null) {
-                    shortcut.putExtra("showHiddenCursor", checked ? "1" : "0");
-                    shortcut.saveData();
-                }
-            });
-        }
-
         Switch swRelativeMouse = findViewById(R.id.SWRelativeMouse);
         if (swRelativeMouse != null) {
             swRelativeMouse.setChecked(isRelativeMouseMovement);
