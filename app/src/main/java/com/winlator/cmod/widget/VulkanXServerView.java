@@ -706,6 +706,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     public boolean isCursorVisible() { return cursorVisible; }
 
+    @Override
+    public void refreshCursors() {
+        synchronized (lock) {
+            if (nativeHandle != 0) sendCursorToNative(lastCursor);
+        }
+    }
+
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {
         this.driverPath = driverPath;
         this.driverLibraryName = libraryName;

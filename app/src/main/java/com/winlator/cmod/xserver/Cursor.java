@@ -7,6 +7,12 @@ public class Cursor extends XResource {
     public final Drawable sourceImage;
     public final Drawable maskImage;
     private boolean visible = true;
+    /** A program hides the pointer by giving its window an empty cursor; this draws that window's pointer anyway (the sidebar's "Show hidden cursor"). */
+    private static volatile boolean showHidden = false;
+
+    public static void setShowHidden(boolean show) {
+        showHidden = show;
+    }
 
     public Cursor(int id, int hotSpotX, int hotSpotY, Drawable cursorImage, Drawable sourceImage, Drawable maskImage) {
         super(id);
@@ -18,7 +24,7 @@ public class Cursor extends XResource {
     }
 
     public boolean isVisible() {
-        return visible;
+        return visible || showHidden;
     }
 
     public void setVisible(boolean visible) {

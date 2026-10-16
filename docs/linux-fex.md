@@ -61,6 +61,30 @@ Installed by hand into the app's folders (the registry has no entries yet), in a
   3. *With the OpenGL thunk on, the start hung* (every thread asleep behind eight llvmpipe worker threads, no output).
      With it off the game went on. The thunk setting is therefore Vulkan only.
 
+## Measured (2026-10-16, Z Fold8 Ultra, BeamNG 0.39 on the Steam container, under proot)
+
+Same game, same map, 640x360 so the GPU is not the limit, one run after the other:
+
+| | FPS |
+| --- | --- |
+| FEX, preset Intermediate (TSO on) | 67-70 |
+| FEX, preset Performance (TSO off) | 115-145 |
+| Box64 (Performance; its default is no strong memory model either) | about 68, with the truck driving, so not the same scene |
+
+At 2560x1440 the GPU is the limit (98 %) and FEX and Box64 both give 35-38 FPS. **TSO, the emulation of x86's memory ordering, costs FEX
+about half of its speed in this game**; Box64 does not emulate it by default, so a FEX preset without TSO is what matches Box64. A game that
+needs the ordering (a threaded one that misbehaves) wants Intermediate or Compatibility.
+
+* Under proot a FEX game keeps proot's thread at 30-36 % of one core for the whole run (every path system call, twice, because FEX looks in the
+  root filesystem first); loading a level took 40 s on most starts and 129 s on one.
+* FEX's disk cache (`DiskCache`, FEX 2609+, `linuxFexDiskCache=1` here): it did not make BeamNG load or run faster, took 355 MB, and one start with
+  a warm cache stopped at the loading screen with every thread asleep. Off by default.
+* **FEX without proot does not work yet.** FEX makes its guest system calls itself (inline `svc`; `NeedsSeccomp` did not change what the kernel
+  saw), so libskypath, which translates paths in libc, never sees them: the game's `connect("/tmp/.X11-unix/X198")` reached the kernel
+  untranslated and BeamNG stopped with "x11 not available". A session that runs FEX, or a 32-bit program (always FEX), therefore stays under
+  proot (`LinuxSession.runsOnFex`). Ways forward: a FEX build that sends its system calls through libc, or x86 shims that translate the socket
+  and home paths inside the guest.
+
 ## What is not known
 
 * Whether the game gets to a picture and how fast it is next to Box64: not run past the Lua start-up, because the

@@ -29,10 +29,30 @@ public final class LinuxFex {
 
     private LinuxFex() {}
 
-    /** The preset used when a container names none: the one FEXCore's own Wine containers start with. */
+    /**
+     * Container extra: "2" when the container's preset was chosen on the settings screen of this version. Before it the screen filled in
+     * Intermediate for everyone, so an Intermediate without this mark is the old default and not a choice.
+     */
+    public static final String EXTRA_PRESET_VERSION = "linuxFexPresetVersion";
+
+    /**
+     * The preset used when a container names none: Performance, which runs without TSO (the emulation of x86's memory ordering). On the
+     * device BeamNG runs about twice as fast with it as with Intermediate, and Box64 does not emulate the ordering by default either.
+     */
     static String presetId(Container container) {
         String id = container.getExtra(LinuxEmulator.EXTRA_FEX_PRESET);
-        return id.isEmpty() ? FEXCorePreset.INTERMEDIATE : id;
+        if (id.isEmpty()) return FEXCorePreset.PERFORMANCE;
+        if (FEXCorePreset.INTERMEDIATE.equals(id) && !"2".equals(container.getExtra(EXTRA_PRESET_VERSION))) return FEXCorePreset.PERFORMANCE;
+        return id;
+    }
+
+    /** Adds the container's preset (FEX_TSOENABLED and the others) to the session's environment. */
+    static void applyPreset(Context context, Container container, Map<String, String> env) {
+        EnvVars preset = FEXCorePresetManager.getEnvVars(context, presetId(container));
+        for (String pair : preset.toStringArray()) {
+            int index = pair.indexOf('=');
+            if (index > 0) env.put(pair.substring(0, index), pair.substring(index + 1));
+        }
     }
 
     /** GPU thunks are on unless the container turned them off, and only when the package carries them. */
@@ -57,6 +77,7 @@ public final class LinuxFex {
         boolean thunks = thunksEnabled(container, emulator);
         StringBuilder config = new StringBuilder("{\n  \"Config\": {\n");
         appendOption(config, "RootFS", rootfs.dir.getPath());
+        appendDiskCache(config, container);
         if (thunks) {
             appendOption(config, "ThunkHostLibs", new File(emulator.dir, "lib/fex-emu/HostThunks").getPath());
             appendOption(config, "ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
@@ -93,11 +114,7 @@ public final class LinuxFex {
         // place for them. The container's own variables are applied after this, so FEX_SILENTLOG=0 there brings them back.
         env.put("FEX_SILENTLOG", "1");
 
-        EnvVars preset = FEXCorePresetManager.getEnvVars(context, presetId(container));
-        for (String pair : preset.toStringArray()) {
-            int index = pair.indexOf('=');
-            if (index > 0) env.put(pair.substring(0, index), pair.substring(index + 1));
-        }
+        applyPreset(context, container, env);
         return null;
     }
 
@@ -173,6 +190,7 @@ public final class LinuxFex {
         String thunks = writeThunkConfig32(container, emulator);
         StringBuilder config = new StringBuilder("{\n  \"Config\": {\n");
         appendOption(config, "RootFS", rootfs.dir.getPath());
+        appendDiskCache(config, container);
         if (thunks != null) {
             appendOption(config, "ThunkHostLibs", new File(emulator.dir, "lib/fex-emu/HostThunks").getPath());
             appendOption(config, "ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
@@ -186,6 +204,18 @@ public final class LinuxFex {
         if (thunks != null) config.append(",\n  \"ThunksDB\": { \"Vulkan\": 0, \"GL\": 0, \"drm\": 0, \"asound\": 0, \"WaylandClient\": 0, \"cuda\": 0 }");
         config.append("\n}\n");
         return FileUtils.writeString(new File(configDir, "Config.json"), config.toString()) ? thunks : null;
+    }
+
+    /**
+     * Container (or shortcut) extra: "1" turns on FEX's disk cache of translated code (FEX 2609 and later; experimental): the code FEX has translated
+     * is kept in $HOME/.cache/fex-emu (the container's home) and the next start of the same program does not translate it again. Off by default:
+     * on the device (BeamNG 0.39) it did not make the game load faster or run faster, took 355 MB for one game, and one start with a warm cache
+     * stopped at the loading screen with every thread asleep.
+     */
+    public static final String EXTRA_DISK_CACHE = "linuxFexDiskCache";
+
+    private static void appendDiskCache(StringBuilder config, Container container) {
+        if ("1".equals(container.getExtra(EXTRA_DISK_CACHE))) appendOption(config, "DiskCache", "1");
     }
 
     /** One option of the file's Config block; a repeated name is how FEX's JSON holds a list ("Env" more than once). */

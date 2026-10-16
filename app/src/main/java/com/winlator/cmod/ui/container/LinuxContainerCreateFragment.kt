@@ -393,7 +393,7 @@ private fun LinuxContainerEditorBody(
     // FEX only: the root filesystem it runs in, its own preset, and whether the guest's Vulkan/OpenGL go to the runtime's.
     var rootfsId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ROOTFS) ?: "") }
     var fexPreset by remember {
-        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() } ?: FEXCorePreset.INTERMEDIATE)
+        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() }?.let { if (it == FEXCorePreset.INTERMEDIATE && editing?.getExtra(LinuxFex.EXTRA_PRESET_VERSION) != "2") FEXCorePreset.PERFORMANCE else it } ?: FEXCorePreset.PERFORMANCE)
     }
     // Input: a finger acts where it touches, a button opens the keyboard, and a tap on a text field opens it by itself.
     var touchscreen by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_TOUCHSCREEN) != "0") }
@@ -502,6 +502,7 @@ private fun LinuxContainerEditorBody(
         // Until the user picks one, the first installed root filesystem is used.
         container.putExtra(LinuxEmulator.EXTRA_ROOTFS, if (emulator == LinuxEmulator.FEX) (rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.firstOrNull())?.id ?: "" else "")
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
+        container.putExtra(LinuxFex.EXTRA_PRESET_VERSION, "2")
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
         container.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, if (tuSysmem) "1" else "")
         container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (noProot) "1" else "0")

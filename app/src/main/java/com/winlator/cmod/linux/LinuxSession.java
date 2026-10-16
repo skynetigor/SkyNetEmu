@@ -430,7 +430,7 @@ public final class LinuxSession {
         writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
 
-        if (noProot(container)) {
+        if (noProot(container) && !runsOnFex(context, container, programGuestPath)) {
             Launch direct = noProotLaunch(context, rt, home, argv, guestEnv, guestCommand);
             if (direct != null) return direct;
         }
@@ -446,6 +446,16 @@ public final class LinuxSession {
 
     /** Container extra: "0" keeps the session under proot, anything else starts it without (see {@link #noProotLaunch}); a file Winlator/linux-proot on the shared storage keeps every container under proot. */
     public static final String EXTRA_NO_PROOT = "linuxNoProot";
+
+    /**
+     * Whether the program is run by FEX: the container's emulator is FEX, or the program is a 32-bit x86 one (Box64 cannot run it, FEX does). FEX makes its
+     * system calls itself, without the libc functions libskypath hooks, so the paths the guest names (/tmp/.X11-unix, the home folder) are not translated: the
+     * game cannot find the X server. Such a session stays under proot until libskypath covers FEX.
+     */
+    private static boolean runsOnFex(Context context, Container container, String programGuestPath) {
+        if (LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) return true;
+        return programGuestPath != null && elfMachine(hostFile(context, container, programGuestPath)) == 3;
+    }
 
     private static boolean noProot(Container container) {
         if ("0".equals(container.getExtra(EXTRA_NO_PROOT))) return false;
@@ -743,6 +753,7 @@ public final class LinuxSession {
                 // it Zink and the thunk selection (SKY_FEX_THUNKCONFIG32).
                 env.put("FEX_ROOTFS", rootfsList.get(0).dir.getPath());
                 env.put("FEX_SILENTLOG", "1");
+                LinuxFex.applyPreset(context, container, env);
                 String thunks32 = LinuxFex.prepareFor32Bit(context, container, fexBuilds.get(0), rootfsList.get(0));
                 if (thunks32 != null) {
                     env.put("SKY_FEX_THUNKCONFIG32", thunks32);

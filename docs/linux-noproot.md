@@ -19,6 +19,8 @@ names a path and translates it from outside: about 100 us for a `stat` or an `op
 It is the default. The switch "Run without proot" (Container settings > Runtime) sets the extra `linuxNoProot` ("1" on, "0" under proot); the file `Winlator/linux-proot` on the shared storage keeps every container under proot.
 When the patched loader cannot be made for a runtime, the session falls back to proot by itself.
 
+A session that runs FEX (the container's emulator is FEX, or the program is a 32-bit x86 one) stays under proot: see [linux-fex.md](linux-fex.md).
+
 Measured on BeamNG.drive 0.39 (Steam, Box64, the Steam card of the library; three runs each, tap on Play to the main menu): about 18 s without proot, about 23 s under proot
 (on the game's own clock: 14.8 s against 19.5 s). Not yet tried: the Steam client, FEX games, programs that read `/proc/self/exe`-relative paths in unusual ways.
 Rebuild the library with `tools/linux-shim/build.sh` and copy `libskypath.so` to `app/src/main/assets/linux/`.

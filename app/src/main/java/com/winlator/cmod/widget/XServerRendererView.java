@@ -42,6 +42,8 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract boolean isFullscreen();
 
     public abstract void setCursorVisible(boolean visible);
+    /** Draws the pointers of the windows again (after {@link com.winlator.cmod.xserver.Cursor#setShowHidden}). */
+    public void refreshCursors() {}
     public abstract void setScreenOffsetYRelativeToCursor(boolean relative);
     public abstract void setMagnifierZoom(float zoom);
     public abstract float getMagnifierZoom();
