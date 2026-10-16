@@ -44,8 +44,14 @@ public final class SteamContainer {
         public final String driver;
         public final String glDriver;
         public final String vulkanPresent;
+        /** FEX and the x86-64 root filesystem that run a game's 32-bit code (Box64 cannot): ids of the catalog. */
+        public final String fex;
+        public final String rootfs;
 
-        Defaults(String runtime, String emulator, String emulatorPreset, String driver, String glDriver, String vulkanPresent) {
+        Defaults(String runtime, String emulator, String emulatorPreset, String driver, String glDriver, String vulkanPresent,
+                 String fex, String rootfs) {
+            this.fex = fex;
+            this.rootfs = rootfs;
             this.runtime = runtime;
             this.emulator = emulator;
             this.emulatorPreset = emulatorPreset;
@@ -86,7 +92,8 @@ public final class SteamContainer {
 
     /** The configuration of a new Steam container: the registry's "steam" block, or the built-in one when it cannot be read. */
     public static Defaults defaults(Context context, boolean allowNetwork) {
-        Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native");
+        Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native",
+                "fex-2610", "rootfs-ubuntu-24-04-2026-08-11");
         String text = RegistryCache.get(context, "linux.json", RegistryCache.TTL_INDEX, allowNetwork);
         if (text == null) return builtIn;
         try {
@@ -96,7 +103,8 @@ public final class SteamContainer {
                     id(steam, "runtime", builtIn.runtime), id(steam, "emulator", builtIn.emulator),
                     steam.optString("emulatorPreset", builtIn.emulatorPreset), id(steam, "driver", builtIn.driver),
                     steam.optString("glDriver", builtIn.glDriver).equals("software") ? "software" : "zink",
-                    steam.optString("vulkanPresent", builtIn.vulkanPresent).equals("sw") ? "sw" : "native");
+                    steam.optString("vulkanPresent", builtIn.vulkanPresent).equals("sw") ? "sw" : "native",
+                    id(steam, "fex", builtIn.fex), id(steam, "rootfs", builtIn.rootfs));
         }
         catch (JSONException e) {
             Log.w(TAG, "Bad steam block in linux.json", e);
@@ -119,6 +127,11 @@ public final class SteamContainer {
 
     private static boolean driverReady(Context context, Defaults defaults) {
         return LinuxDriverManager.isInstalled(context, defaults.driver) || !LinuxDriverManager.list(context).isEmpty();
+    }
+
+    /** FEX and an x86-64 root filesystem are installed: what a 32-bit game (Tomb Raider, 2013) runs on. */
+    public static boolean thirtyTwoBitReady(Context context) {
+        return com.winlator.cmod.linux.FexComponents.complete(context);
     }
 
     /** Everything Steam needs is installed (cheap: looks at the disk only). */
@@ -150,6 +163,10 @@ public final class SteamContainer {
             if (entry == null) return failed("The Turnip driver is not in the catalog. Check the connection.");
             install.add(entry);
         }
+        // 32-bit games need FEX and a root filesystem with the 32-bit libraries. A catalog that cannot be read does not stop Steam,
+        // only these two are left out (the 64-bit games do not need them).
+        List<LinuxRuntimeCatalog.Entry> fex = com.winlator.cmod.linux.FexComponents.missing(context, defaults.fex, defaults.rootfs);
+        if (fex != null) install.addAll(fex);
         long download = 0, largest = 0;
         for (LinuxRuntimeCatalog.Entry entry : install) {
             download += entry.size;
@@ -170,9 +187,13 @@ public final class SteamContainer {
     }
 
     private static List<LinuxRuntimeCatalog.Entry> boxOnly(List<LinuxRuntimeCatalog.Entry> entries) {
+        return onlyEmulator(entries, LinuxEmulator.BOX64);
+    }
+
+    private static List<LinuxRuntimeCatalog.Entry> onlyEmulator(List<LinuxRuntimeCatalog.Entry> entries, String emulator) {
         List<LinuxRuntimeCatalog.Entry> result = new ArrayList<>();
         if (entries == null) return result;
-        for (LinuxRuntimeCatalog.Entry entry : entries) if (LinuxEmulator.BOX64.equals(entry.emulator)) result.add(entry);
+        for (LinuxRuntimeCatalog.Entry entry : entries) if (emulator.equals(entry.emulator)) result.add(entry);
         return result;
     }
 

@@ -83,9 +83,52 @@ public final class LinuxRuntimeCatalog {
     private static final String SKYNET_CATALOG_URL =
             com.winlator.cmod.contents.ContentsManager.COMPONENTS_BASE + "linux.json";
 
+    private static volatile android.content.Context appContext;
+
+    /** Gives the catalog the app's context, to read the catalog that ships in the app (see {@link #skynetCatalog}). */
+    public static void init(android.content.Context context) {
+        appContext = context.getApplicationContext();
+    }
+
+    /**
+     * The published catalog, with what the app's own copy (assets/registry/linux.json) has that the published one does not: a build
+     * the published catalog has not caught up with (FEX, the root filesystem) is still installable. A published entry wins over
+     * the app's by the same id. Null when the published catalog cannot be read (the connection is down, whatever the app has).
+     */
+    private static String skynetCatalog() {
+        String remote = Downloader.downloadString(SKYNET_CATALOG_URL);
+        if (remote == null) return null;
+        android.content.Context context = appContext;
+        if (context == null) return remote;
+        try (java.io.InputStream in = context.getAssets().open("registry/linux.json")) {
+            JSONObject merged = new JSONObject(remote);
+            JSONObject bundled = new JSONObject(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+            for (String key : new String[]{"emulators", "drivers", "rootfs"}) {
+                JSONArray extra = bundled.optJSONArray(key);
+                if (extra == null) continue;
+                JSONArray have = merged.optJSONArray(key);
+                if (have == null) {
+                    have = new JSONArray();
+                    merged.put(key, have);
+                }
+                java.util.Set<String> ids = new java.util.HashSet<>();
+                for (int i = 0; i < have.length(); i++) ids.add(have.getJSONObject(i).optString("id"));
+                for (int i = 0; i < extra.length(); i++) {
+                    JSONObject item = extra.getJSONObject(i);
+                    if (ids.add(item.optString("id"))) have.put(item);
+                }
+            }
+            return merged.toString();
+        }
+        catch (Exception e) {
+            Log.w(TAG, "Cannot merge the catalog of the app", e);
+            return remote;
+        }
+    }
+
     /** Blocking. The x86 emulators that can be installed; null when the catalog cannot be read. */
     public static List<Entry> fetchEmulators() {
-        String json = Downloader.downloadString(SKYNET_CATALOG_URL);
+        String json = skynetCatalog();
         if (json == null) return null;
         try {
             List<Entry> entries = new ArrayList<>();
@@ -113,7 +156,7 @@ public final class LinuxRuntimeCatalog {
 
     /** Blocking. The x86-64 root filesystems FEX can run in; null when the catalog cannot be read. */
     public static List<Entry> fetchRootfs() {
-        String json = Downloader.downloadString(SKYNET_CATALOG_URL);
+        String json = skynetCatalog();
         if (json == null) return null;
         try {
             List<Entry> entries = new ArrayList<>();
@@ -138,7 +181,7 @@ public final class LinuxRuntimeCatalog {
 
     /** Blocking. The Linux Vulkan drivers (Turnip zips) that can be downloaded; null when the catalog cannot be read. */
     public static List<Entry> fetchDrivers() {
-        String json = Downloader.downloadString(SKYNET_CATALOG_URL);
+        String json = skynetCatalog();
         if (json == null) return null;
         try {
             List<Entry> entries = new ArrayList<>();
@@ -163,7 +206,7 @@ public final class LinuxRuntimeCatalog {
 
     /** Blocking. The desktops (XFCE) that can be installed into the runtimes; null when the catalog cannot be read. */
     public static List<Entry> fetchDesktops() {
-        String json = Downloader.downloadString(SKYNET_CATALOG_URL);
+        String json = skynetCatalog();
         if (json == null) return null;
         try {
             List<Entry> entries = new ArrayList<>();

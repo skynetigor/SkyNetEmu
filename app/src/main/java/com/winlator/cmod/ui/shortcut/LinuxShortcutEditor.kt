@@ -46,6 +46,7 @@ import com.winlator.cmod.lsfg.LsfgManager
 import com.winlator.cmod.ui.settings.EditorCategory
 import com.winlator.cmod.ui.settings.RailEditor
 import com.winlator.cmod.ui.settings.SettingText
+import com.winlator.cmod.ui.container.FexDownloadPrompt
 import com.winlator.cmod.ui.container.ResolutionSetting
 import com.winlator.cmod.ui.container.isValidScreenSize
 import com.winlator.cmod.ui.container.UPSCALER_MODES
@@ -101,8 +102,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var autoKeyboard by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD)) }
     val drivers = remember { LinuxDriverManager.list(context) }
     val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
-    val fexBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.FEX) }
-    val rootfsList = remember { LinuxRootfs.list(context) }
+    // Read again when FEX has been downloaded from this screen.
+    var fexInstallTick by remember { mutableStateOf(0) }
+    val fexBuilds = remember(fexInstallTick) { LinuxEmulator.list(context, LinuxEmulator.FEX) }
+    val rootfsList = remember(fexInstallTick) { LinuxRootfs.list(context) }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // The registry's games: what is on hand at once, then what the network has.
@@ -521,8 +524,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     val builds = if (fex) fexBuilds else boxBuilds
                     SettingsDivider()
                     if (builds.isEmpty()) {
-                        Text(
-                            "No ${if (fex) "FEX" else "Box64"} build is installed.",
+                        // FEX comes with the root filesystem it runs in: one button downloads whatever is missing.
+                        if (fex) FexDownloadPrompt(onInstalled = { fexInstallTick++ })
+                        else Text(
+                            "No Box64 build is installed.",
                             modifier = Modifier.padding(14.dp),
                             color = MaterialTheme.colorScheme.error
                         )
@@ -539,11 +544,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     SettingsDivider()
                     if (fex) {
                         if (rootfsList.isEmpty()) {
-                            Text(
-                                "No x86-64 root filesystem is installed. FEX needs one.",
-                                modifier = Modifier.padding(14.dp),
-                                color = MaterialTheme.colorScheme.error
-                            )
+                            // With no FEX build either, the prompt above already offers both.
+                            if (fexBuilds.isNotEmpty()) FexDownloadPrompt(onInstalled = { fexInstallTick++ })
                         } else {
                             SettingMappedChoice(
                                 "x86-64 root filesystem",

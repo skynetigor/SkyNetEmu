@@ -126,4 +126,6 @@ trap 'kill -TERM "$game" 2>/dev/null' TERM INT
 wait "$game"; status=$?
 [ "$status" -gt 128 ] && kill -0 "$game" 2>/dev/null && { wait "$game"; status=$?; }
 echo "exit: $status ($(date +%T))" >> "$log"
+# 127 for a program that is there: a 32-bit game whose emulator (FEX) or root filesystem is not installed.
+[ "$status" = 127 ] && [ -z "$SKY_X86_32_EMULATOR" ] && echo "hint: a 32-bit game needs FEX and an x86-64 root filesystem; Settings > Steam > 32-bit games downloads them" >> "$log"
 exit "$status"

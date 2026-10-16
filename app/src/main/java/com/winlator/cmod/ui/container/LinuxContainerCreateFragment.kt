@@ -234,11 +234,10 @@ private fun SteamSettingsScreen(
     var planTick by remember { mutableIntStateOf(0) }
 
     // What is still to be downloaded: the catalogs are read off the main thread, again after a download ended or on "try again".
+    // With the container there already, what is left is FEX and the root filesystem for 32-bit games.
     LaunchedEffect(container == null, refreshTick, install.finishedTick, planTick) {
-        if (container == null) {
-            plan = null
-            plan = withContext(Dispatchers.IO) { SteamContainer.plan(context) }
-        }
+        plan = null
+        plan = withContext(Dispatchers.IO) { SteamContainer.plan(context) }
     }
     // The container appears when the last component is in.
     LaunchedEffect(install.finishedTick) {
@@ -290,15 +289,24 @@ private fun SteamComponentsCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                return@Column
+                // What is still missing is FEX and the root filesystem: without them a 32-bit game (Tomb Raider, 2013) cannot start.
+                if (plan == null || plan.error != null || plan.install.isEmpty()) return@Column
+                Text("32-bit games", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Games with 32-bit code (Tomb Raider, 2013) run on FEX with an x86-64 root filesystem. Download them to play those games.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text("Steam needs a few components", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "The Linux runtime, Box64 (it runs the games' x86-64 code) and the Turnip graphics driver. The settings below are Steam's own; " +
-                    "they can be changed once everything is installed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            else {
+                Text("Steam needs a few components", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "The Linux runtime, Box64 (it runs the games' x86-64 code), the Turnip graphics driver, and FEX with a root filesystem " +
+                        "for 32-bit games. The settings below are Steam's own; they can be changed once everything is installed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (plan == null) {
                 Text("Checking what has to be downloaded…")
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -353,6 +361,7 @@ private fun entryInstalled(context: android.content.Context, entry: LinuxRuntime
     com.winlator.cmod.linux.LinuxPackages.KIND_RUNTIME -> LinuxRuntime.isInstalled(context, entry.id)
     com.winlator.cmod.linux.LinuxPackages.KIND_EMULATOR -> LinuxEmulator.isInstalled(context, entry.id)
     com.winlator.cmod.linux.LinuxPackages.KIND_DRIVER -> LinuxDriverManager.isInstalled(context, entry.id)
+    com.winlator.cmod.linux.LinuxPackages.KIND_ROOTFS -> com.winlator.cmod.linux.LinuxRootfs.isInstalled(context, entry.id)
     else -> false
 }
 
@@ -437,8 +446,10 @@ private fun LinuxContainerEditorBody(
     val runtimes = remember(refreshTick, install.finishedTick) { LinuxRuntime.listInstalled(context) }
     val drivers = remember(refreshTick) { LinuxDriverManager.list(context) }
     val boxBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
-    val fexBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.FEX) }
-    val rootfsList = remember(refreshTick) { LinuxRootfs.list(context) }
+    // Read again when FEX has been downloaded from this screen.
+    var fexInstallTick by remember { mutableIntStateOf(0) }
+    val fexBuilds = remember(refreshTick, fexInstallTick) { LinuxEmulator.list(context, LinuxEmulator.FEX) }
+    val rootfsList = remember(refreshTick, fexInstallTick) { LinuxRootfs.list(context) }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // Until the user picks one, the first installed runtime is used.
@@ -650,11 +661,8 @@ private fun LinuxContainerEditorBody(
                 if (emulator == LinuxEmulator.FEX) {
                     SettingsDivider()
                     if (fexBuilds.isEmpty()) {
-                        Text(
-                            "No FEX build is installed. Install one in Components → Linux Emulator.",
-                            modifier = Modifier.padding(14.dp),
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        // FEX comes with the root filesystem it runs in: one button downloads whatever is missing.
+                        FexDownloadPrompt(onInstalled = { fexInstallTick++ })
                     } else {
                         val shown = fexBuilds.firstOrNull { it.id == emulatorId } ?: fexBuilds.first()
                         SettingMappedChoice(
@@ -665,12 +673,9 @@ private fun LinuxContainerEditorBody(
                     }
                     SettingsDivider()
                     if (rootfsList.isEmpty()) {
-                        // FEX runs programs in an x86-64 userland of its own; without one it cannot start.
-                        Text(
-                            "No x86-64 root filesystem is installed. FEX needs one: install it in Components → Linux Root Filesystem.",
-                            modifier = Modifier.padding(14.dp),
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        // FEX runs programs in an x86-64 userland of its own; without one it cannot start. With no FEX build either,
+                        // the prompt above already offers both.
+                        if (fexBuilds.isNotEmpty()) FexDownloadPrompt(onInstalled = { fexInstallTick++ })
                     } else {
                         val shownRootfs = rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.first()
                         SettingMappedChoice(

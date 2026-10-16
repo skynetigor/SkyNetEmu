@@ -311,6 +311,7 @@ public final class LinuxSession {
 
     public static Launch build(Context context, ImageFs imageFs, Container container,
                                LinuxRuntime.Installed runtime, String[] guestCommand) {
+        if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) LinuxSteamGames.registerSharedLibrary(container);
         File rt = LinuxRuntime.rootDir(context, runtime.id);
         File hostDir = new File(rt, HOST_DIR);
         File proot = new File(hostDir, "proot");
@@ -590,6 +591,7 @@ public final class LinuxSession {
             java.util.List<LinuxEmulator.Installed> fexBuilds = LinuxEmulator.list(context, LinuxEmulator.FEX);
             java.util.List<LinuxRootfs.Installed> rootfsList = LinuxRootfs.list(context);
             if (!fexBuilds.isEmpty() && !rootfsList.isEmpty()) {
+                FexComponents.ensureThunks32(context, fexBuilds.get(0));
                 env.put("SKY_X86_32_EMULATOR", LinuxEmulator.binary(fexBuilds.get(0)).getPath());
                 // FEX reads its root filesystem and thunks from the configuration LinuxFex writes (FEX_ROOTFS stays for the
                 // programs run by hand). A 32-bit game's OpenGL goes through the thunk to the runtime's Mesa; the launcher gives
@@ -655,6 +657,7 @@ public final class LinuxSession {
         else if (emulator != null && emulator.emulator.equals(LinuxEmulator.FEX)) {
             // FEX runs the program in an x86-64 root filesystem of its own, so nothing of Box64's applies. A missing
             // root filesystem is reported when the program is started (programCommand).
+            FexComponents.ensureThunks32(context, emulator);
             String problem = LinuxFex.prepare(context, container, emulator, env);
             if (problem != null) Log.w(TAG, problem);
             else {
