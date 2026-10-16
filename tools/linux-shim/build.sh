@@ -6,6 +6,9 @@ cd "$(dirname "$0")"
 ZIG=${ZIG:-zig}
 $ZIG cc -target aarch64-linux-gnu.2.35 -shared -fPIC -O2 -Wall -o libskyshim.so skyshim.c -ldl
 ls -l libskyshim.so
+# Path translation and program starting for a session without proot (LinuxSession.noProotLaunch).
+$ZIG cc -target aarch64-linux-gnu.2.35 -shared -fPIC -O2 -Wall -Wno-unused-function -o libskypath.so skypath.c -ldl
+ls -l libskypath.so
 # x86_64 helpers for Box64; copy all three into app/src/main/assets/linux/
 $ZIG cc -target x86_64-linux-gnu.2.17 -shared -fPIC -O1 -Wall -o libcefnosb_x64.so cefnosb.c -ldl
 ls -l libcefnosb_x64.so

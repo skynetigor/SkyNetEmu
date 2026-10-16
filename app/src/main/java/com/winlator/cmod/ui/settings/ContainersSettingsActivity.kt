@@ -139,7 +139,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
             val edit = intent.getIntExtra(EXTRA_EDIT_CONTAINER, -1)
             if (edit > 0) {
                 editedFromGame = true
-                openFragment(ContainerCreateComposeFragment.forEdit(edit))
+                editContainer(edit)
             }
         }
     }

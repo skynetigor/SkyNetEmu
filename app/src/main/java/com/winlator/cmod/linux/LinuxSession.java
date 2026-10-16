@@ -430,6 +430,11 @@ public final class LinuxSession {
         writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
 
+        if (noProot(container)) {
+            Launch direct = noProotLaunch(context, rt, home, argv, guestEnv, guestCommand);
+            if (direct != null) return direct;
+        }
+
         EnvVars host = new EnvVars();
         host.put("PROOT_LOADER", loader.getPath());
         host.put("PROOT_TMP_DIR", cacheDir.getPath());
@@ -437,6 +442,146 @@ public final class LinuxSession {
         host.put("LD_LIBRARY_PATH", hostDir.getPath());
 
         return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
+    }
+
+    /** Container extra: "1" starts the session without proot (see {@link #noProotLaunch}); a file Winlator/linux-noproot does the same for every container (to try it). */
+    public static final String EXTRA_NO_PROOT = "linuxNoProot";
+
+    private static boolean noProot(Container container) {
+        if ("1".equals(container.getExtra(EXTRA_NO_PROOT))) return true;
+        return new File(Environment.getExternalStorageDirectory(), "Winlator/linux-noproot").exists();
+    }
+
+    /**
+     * The session without proot. proot stops the guest at every system call that names a path and translates it from outside, which
+     * costs about 100 us for a stat or an open (the call itself: about 1 us). Here the first program is started through the runtime's
+     * own loader and libskypath (tools/linux-shim/skypath.c) does the same translation inside the processes, in their libc, from the
+     * table of what proot's -b options bound over the runtime. Programs started later (exec, spawn) go through the loader the same way.
+     *
+     * @param proot the arguments the session would have given proot: its -b options are the table
+     * @return null when libskypath cannot be had (the session then runs under proot)
+     */
+    private static Launch noProotLaunch(Context context, File rt, File home, List<String> proot, List<String> guestEnv, String[] guestCommand) {
+        File skypath = stageAsset(context, "libskypath.so");
+        if (skypath == null || guestCommand.length == 0) return null;
+        if (!new File(rt, "usr/lib/ld-linux-aarch64.so.1").exists()) return null;
+        String libpath = new File(rt, "usr/lib").getPath();
+        String sysfree = sigsysFreeLibc(context, rt);
+        if (sysfree == null) return null;
+        File ldso = new File(sysfree, "ld-linux-aarch64.so.1");
+        libpath = sysfree + ":" + libpath + ":" + new File(rt, "usr/lib/pulseaudio").getPath(); // libpulse finds libpulsecommon through an absolute RUNPATH
+        // The loader's --library-path replaces $LD_LIBRARY_PATH: the guest's own folders come first, then the runtime's.
+        for (String entry : guestEnv) {
+            if (entry.startsWith("LD_LIBRARY_PATH=") && entry.length() > 16) libpath = entry.substring(16) + ":" + libpath;
+        }
+
+        List<String[]> binds = new ArrayList<>();
+        StringBuilder table = new StringBuilder();
+        for (int i = 0; i + 1 < proot.size(); i++) {
+            if (!"-b".equals(proot.get(i))) continue;
+            String spec = proot.get(i + 1);
+            int colon = spec.indexOf(':');
+            String hostPath = colon < 0 ? spec : spec.substring(0, colon);
+            String guestPath = colon < 0 ? spec : spec.substring(colon + 1);
+            binds.add(new String[]{guestPath, hostPath});
+            if (table.length() > 0) table.append('|');
+            table.append(guestPath).append('=').append(hostPath);
+        }
+
+        String program = hostOf(guestCommand[0], binds, rt);
+        EnvVars host = new EnvVars();
+        for (String entry : guestEnv) {
+            int eq = entry.indexOf('=');
+            if (eq > 0) host.put(entry.substring(0, eq), entry.substring(eq + 1));
+        }
+        host.put("SKY_ROOT", rt.getPath());
+        host.put("SKY_PATHMAP", table.toString());
+        host.put("SKY_LIBPATH", libpath);
+        host.put("SKY_LOADER", ldso.getPath());
+        host.put("SKY_SELF", program);
+        // What /etc/ld.so.preload does under proot: that file is looked for on the phone's own file system here.
+        StringBuilder preload = new StringBuilder(skypath.getPath());
+        File session = new File(rt, PRELOAD.substring(1));
+        if (session.exists()) preload.append(':').append(session.getPath());
+        File shim = stageShim(context);
+        if (shim != null) preload.append(':').append(shim.getPath());
+        host.put("LD_PRELOAD", preload.toString());
+
+        // The app's own environment (Android's) is merged into whatever the process is given: env -i clears it, as proot's did.
+        List<String> argv = new ArrayList<>();
+        argv.add("/system/bin/env");
+        argv.add("-i");
+        argv.addAll(java.util.Arrays.asList(host.toStringArray()));
+        argv.add(ldso.getPath());
+        argv.add("--library-path");
+        argv.add(libpath);
+        argv.add("--argv0");
+        argv.add(guestCommand[0]);
+        argv.add(program);
+        for (int i = 1; i < guestCommand.length; i++) argv.add(guestCommand[i]);
+        Log.i(TAG, "Session without proot: " + program);
+        return new Launch(argv.toArray(new String[0]), new String[0], home);
+    }
+
+    /**
+     * Android's seccomp filter for apps kills a process that calls a system call it does not allow with SIGSYS; proot absorbs that signal. Without proot,
+     * libskypath answers such calls itself (a SIGSYS handler), but the loader and libc make two of them before any library is loaded (set_robust_list and
+     * rseq, for the main thread): a copy of both has those calls replaced by "return 0" and "return ENOSYS" (robust futex lists only matter when a thread dies
+     * holding a lock; glibc runs without rseq when the kernel has none). The copies are made once per runtime.
+     *
+     * @return the folder holding the patched libc.so.6, or null when it cannot be made
+     */
+    private static String sigsysFreeLibc(Context context, File rt) {
+        try {
+            File dir = new File(context.getFilesDir(), "linux-shim/libc-v2-" + rt.getName());
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            // The loader makes the call too, for the main thread, before libc is even loaded.
+            for (String name : new String[]{"libc.so.6", "ld-linux-aarch64.so.1"}) {
+                File src = new File(rt, "usr/lib/" + name).getCanonicalFile();
+                File out = new File(dir, name);
+                if (out.isFile() && out.length() == src.length() && out.lastModified() >= src.lastModified()) continue;
+                byte[] d = java.nio.file.Files.readAllBytes(src.toPath());
+                java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(d).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                int patched = 0;
+                for (int off = 0; off + 4 * 12 <= d.length; off += 4) {
+                    int result;
+                    if (b.getInt(off) == 0xD2800C68) result = 0xD2800000; // mov x8, #99 (set_robust_list): mov x0, #0
+                    else if (b.getInt(off) == 0xD28024A8) result = 0x928004A0; // mov x8, #293 (rseq): mov x0, #-ENOSYS, which glibc takes as "no rseq here"
+                    else continue;
+                    for (int k = 1; k <= 10; k++) {
+                        if (b.getInt(off + 4 * k) == 0xD4000001) { // svc #0
+                            b.putInt(off + 4 * k, result);
+                            patched++;
+                            break;
+                        }
+                    }
+                }
+                if (patched == 0) return null;
+                File tmp = new File(dir, name + ".tmp");
+                java.nio.file.Files.write(tmp.toPath(), d);
+                tmp.setExecutable(true, false);
+                if (!tmp.renameTo(out)) return null;
+            }
+            return dir.getPath();
+        }
+        catch (java.io.IOException e) {
+            Log.w(TAG, "Cannot make a libc without set_robust_list: " + e);
+            return null;
+        }
+    }
+
+    /** Where a guest path is on the phone: a bound place, or under the runtime. */
+    private static String hostOf(String guest, List<String[]> binds, File rt) {
+        String best = null;
+        int bestLength = -1;
+        for (String[] bind : binds) {
+            String g = bind[0];
+            if ((guest.equals(g) || guest.startsWith(g.endsWith("/") ? g : g + "/")) && g.length() > bestLength) {
+                best = bind[1] + guest.substring(g.length());
+                bestLength = g.length();
+            }
+        }
+        return best != null ? best : rt.getPath() + guest;
     }
 
     private static String shellWord(String word) {
