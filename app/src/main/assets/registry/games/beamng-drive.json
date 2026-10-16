@@ -1,5 +1,6 @@
 {
  "schema": 1,
+ "revision": 1,
  "id": "beamng-drive",
  "name": "BeamNG.drive",
  "steam": {
@@ -14,7 +15,14 @@
  "linux": {
   "executables": [
    "BinLinux/BeamNG.drive.x64"
-  ]
+  ],
+  "defaults": {
+   "executable": "BinLinux/BeamNG.drive.x64",
+   "noSteam": {
+    "default": true,
+    "arg": "-nosteam"
+   }
+  }
  },
  "defaults": {
   "args": [],

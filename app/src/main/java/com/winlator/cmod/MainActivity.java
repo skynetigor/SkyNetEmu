@@ -101,6 +101,13 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // Coming back to the app asks the registry again (files downloaded in the last 30 s are not downloaded twice).
+        com.winlator.cmod.contents.RegistryCache.refreshInBackground(this);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         ContentsManager.migrateRemoteProfilesUrl(sharedPreferences);
@@ -513,6 +520,42 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 .addToBackStack(null)
                 .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame())
                 .commit();
+    }
+
+    /**
+     * The file manager of {@link #addGame} was given a game's folder: the registry game that has a program in it is found and
+     * its program is the one added. A folder that holds the program of a game for both Windows and Linux asks which one. A folder
+     * no game is recognised in opens the file manager in it, to pick the program.
+     */
+    public void onGameFolderPicked(java.io.File folder) {
+        final android.content.Context appContext = getApplicationContext();
+        new Thread(() -> {
+            com.winlator.cmod.gameprofile.GameMatcher.Result windows = com.winlator.cmod.gameprofile.GameMatcher.matchFolder(
+                    appContext, folder, com.winlator.cmod.gameprofile.GameProfile.Platform.WINDOWS, true);
+            com.winlator.cmod.gameprofile.GameMatcher.Result linux = com.winlator.cmod.gameprofile.GameMatcher.matchFolder(
+                    appContext, folder, com.winlator.cmod.gameprofile.GameProfile.Platform.LINUX, true);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (windows == null && linux == null) {
+                    android.widget.Toast.makeText(this, "No known game in this folder. Pick the game's program.", android.widget.Toast.LENGTH_LONG).show();
+                    getSupportFragmentManager().popBackStack();
+                    getSupportFragmentManager().beginTransaction()
+                            .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                            .addToBackStack(null)
+                            .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame(folder))
+                            .commit();
+                }
+                else if (windows != null && linux != null) {
+                    new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle(windows.game.name)
+                            .setMessage("The folder has the Windows and the Linux version of the game. Which one is it added as?")
+                            .setPositiveButton("Linux", (d, w) -> onGamePicked(linux.executable))
+                            .setNegativeButton("Windows", (d, w) -> onGamePicked(windows.executable))
+                            .show();
+                }
+                else onGamePicked((windows != null ? windows : linux).executable);
+            });
+        }, "GameFolderMatch").start();
     }
 
     /** The file manager of {@link #addGame} found the exe: the file manager is left and the screen for choosing how to run it opens. */

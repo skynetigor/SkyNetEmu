@@ -53,21 +53,23 @@ public class Downloader {
         }
     }
 
+    /** Small text files (the registry): short timeouts, so a dead connection never holds a caller for long. */
     public static String downloadString(String address) {
         try {
             URL url = new URL(address);
             URLConnection connection = url.openConnection();
-            connection.connect();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setUseCaches(false);
 
-            InputStream input = url.openStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-            StringBuilder sb = new StringBuilder();
-            String line = null;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                return sb.toString();
             }
-            reader.close();
-            return sb.toString();
         } catch (Exception e) {
             e.printStackTrace();
             com.winlator.cmod.telemetry.ErrorReporter.reportDownload(address, e);

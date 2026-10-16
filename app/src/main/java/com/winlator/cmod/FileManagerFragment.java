@@ -102,6 +102,13 @@ public class FileManagerFragment extends Fragment {
         return fragment;
     }
 
+    /** As {@link #forNewGame()}, opened in the given folder (the game's own folder, when its program has to be picked). */
+    public static FileManagerFragment forNewGame(File startDir) {
+        FileManagerFragment fragment = forNewGame();
+        if (startDir != null) fragment.getArguments().putString(ARG_START_PATH, startDir.getAbsolutePath());
+        return fragment;
+    }
+
     private boolean pickingGame() {
         return getArguments() != null && getArguments().getBoolean("pick_game", false);
     }
@@ -1078,6 +1085,12 @@ public class FileManagerFragment extends Fragment {
 
     private void showFileOptions(File file, View anchor) {
         PopupMenu popup = new PopupMenu(getContext(), anchor);
+        if (pickingGame() && file.isDirectory() && requireActivity() instanceof MainActivity) {
+            popup.getMenu().add("Add this game folder").setOnMenuItemClickListener(item -> {
+                ((MainActivity) requireActivity()).onGameFolderPicked(file);
+                return true;
+            });
+        }
         if (isExecutable(file)) {
             boolean windows = kindOf(file) == com.winlator.cmod.core.ExecutableKind.WINDOWS;
             if (!pickingGame() && windows) {

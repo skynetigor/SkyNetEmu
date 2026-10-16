@@ -87,9 +87,24 @@ public final class GameProfileCatalog {
 
     public static GameProfile game(Context context, String id, boolean allowNetwork, long ttlMs) {
         if (id == null || !id.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) return null;
-        String text = RegistryCache.get(context, "games/" + id + ".json", ttlMs, allowNetwork);
+        String path = "games/" + id + ".json";
+        String text = RegistryCache.get(context, path, ttlMs, allowNetwork);
+        // The registry may not have caught up with the app yet: a game file that ships in the app wins when its "revision" is
+        // higher than the downloaded one's (a file without one is 0), so a fresh install behaves as this build intends.
+        String bundled = RegistryCache.bundledCopy(context, path);
+        if (bundled != null && (text == null || revision(bundled) > revision(text))) text = bundled;
         if (text == null) return null;
         GameProfile profile = GameProfile.parse(text);
         return profile != null && profile.id.equals(id) ? profile : null;
+    }
+
+    /** The "revision" of a game file (a whole number that grows with each edit), 0 when it has none or the text is not JSON. */
+    static int revision(String text) {
+        try {
+            return new JSONObject(text).optInt("revision", 0);
+        }
+        catch (org.json.JSONException e) {
+            return 0;
+        }
     }
 }
