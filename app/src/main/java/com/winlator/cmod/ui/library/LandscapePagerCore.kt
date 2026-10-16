@@ -166,6 +166,7 @@ internal fun LandscapePagerCore(
                 Column(Modifier.weight(.9f)) {
                     Text(item.name, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(environmentLabel, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodyMedium)
+                    if (item.steam) { Spacer(Modifier.size(7.dp)); SteamBadge() }
                     Spacer(Modifier.size(13.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(

@@ -27,7 +27,9 @@ data class LibraryItem(
     val iconPath: String?,
     val fallbackIcon: Bitmap?,
     val favorite: Boolean,
-    val lastRunAt: Long
+    val lastRunAt: Long,
+    /** A game of the Steam client (or the client itself): the card shows a Steam badge. */
+    val steam: Boolean = false
 )
 
 @Stable

@@ -506,7 +506,8 @@ public class ShortcutsFragment extends Fragment {
                     iconPath,
                     shortcut.icon,
                     "1".equals(shortcut.getExtra("favorite", "0")),
-                    parseLastRunAt(shortcut)
+                    parseLastRunAt(shortcut),
+                    shortcut.isContainerOwned()
             ));
         }
         libraryController.setItems(items);

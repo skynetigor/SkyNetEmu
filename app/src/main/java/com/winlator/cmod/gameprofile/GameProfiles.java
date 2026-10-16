@@ -123,8 +123,9 @@ public final class GameProfiles {
             String dir = game != null && !game.installDir.isEmpty() ? game.installDir : profile.steamInstallDir;
             if (game != null) buildId = game.buildId;
             if (!dir.isEmpty() && !dir.contains("/") && !dir.contains("..")) {
-                rootGuest = STEAM_COMMON_GUEST + dir;
-                rootHost = new File(LinuxSteamGames.steamRoot(container), "steamapps/common/" + dir);
+                // A game installed in the shared library is at the same path for the host and the guest.
+                rootGuest = (game != null ? game.commonGuest() : STEAM_COMMON_GUEST) + dir;
+                rootHost = new File(game != null ? game.library : LinuxSteamGames.steamRoot(container), "steamapps/common/" + dir);
             }
         }
         else {
