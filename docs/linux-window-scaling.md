@@ -14,6 +14,12 @@ window being drawn as their source.
 shortcut or the side panel while the game runs, also scales the game window up (it has nothing to work on while the window sits 1:1
 in a native-size container); switched off, the window goes back to its size unless "Scale the game window" is chosen.
 
+**The Steam container has it on by default.** The Steam container is always native size, so the window of nearly every game is smaller than its
+screen. A new Steam container is made with "Fit to screen" and `scaleGameWindow=1` (`SteamContainer.create`); a Steam container made before
+has no `scaleGameWindow` value and is treated as on (`XServerDisplayActivity`, `steamWindowDefault`). Turning it off in the container's
+settings writes `0`, which wins; a shortcut's own Scaling choice wins over both. Until this was a default, the option had to be set by hand
+(on the device, per shortcut or in the side panel), which is why a fresh install showed the game as a small window.
+
 **Which window.** `VulkanXServerView.pickGameWindow`: the biggest mapped window directly under the root that is at least 100x100,
 is not override-redirect (menus, tooltips), is not a window of the Steam client (named "Steam", "Steam - ...", "Steam Big Picture...") and does not cover the X screen already. A full-screen window
 beneath the game (the Steam client in the Steam container) is passed over. The list of windows is copied in one step: it is changed

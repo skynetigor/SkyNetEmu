@@ -427,8 +427,10 @@ private fun LinuxContainerEditorBody(
         )
     }
     // Scaled to fit the window with the proportions kept; unchecked, the screen is drawn 1:1 in the middle.
-    var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: true) }
-    var scaleWindow by remember { mutableStateOf(editing?.getExtra("scaleGameWindow") == "1") }
+    // The Steam container scales a game's window by default (see XServerDisplayActivity): a container that has no value yet shows it on.
+    val steamScaling = editing != null && SteamContainer.isManaged(editing) && editing.getExtra("scaleGameWindow").isEmpty()
+    var stretched by remember { mutableStateOf(steamScaling || (editing?.isFullscreenStretched ?: true)) }
+    var scaleWindow by remember { mutableStateOf(steamScaling || editing?.getExtra("scaleGameWindow") == "1") }
     var upscaler by remember {
         mutableStateOf(editing?.getExtra("graphicsFilterMode")?.takeIf { m -> UPSCALER_MODES.any { it.first == m } } ?: "0")
     }
@@ -486,7 +488,8 @@ private fun LinuxContainerEditorBody(
             else cpuSelected.indices.filter { cpuSelected[it] }.joinToString(",")
         )
         container.setFullscreenStretched(stretched)
-        container.putExtra("scaleGameWindow", if (scaleWindow) "1" else "")
+        // Off is written as 0 for the Steam container: no value there means "on".
+        container.putExtra("scaleGameWindow", if (scaleWindow) "1" else if (SteamContainer.isManaged(container)) "0" else "")
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)

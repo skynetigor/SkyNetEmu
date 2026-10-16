@@ -1702,6 +1702,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         boolean shouldStretch = false;
+        // The Steam container is always native size, so the window of nearly every game is smaller than its screen: it is scaled to the
+        // screen unless the container says otherwise ("scaleGameWindow" = 0). A container made before this was a default has no value.
+        boolean steamWindowDefault = linuxSession && container != null && com.winlator.cmod.steam.SteamContainer.isManaged(container)
+                && container.getExtra("scaleGameWindow").isEmpty();
         // "2": scale the game's own window to the screen (a game smaller than a native-size container), with the upscaler.
         boolean zoomGameWindow = false;
 
@@ -1709,10 +1713,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             zoomGameWindow = shortcutFullscreenStretched.equals("2");
             shouldStretch = shortcutFullscreenStretched.equals("1") || zoomGameWindow;
-        } else if (container != null && container.isFullscreenStretched()) {
+        } else if (container != null && (container.isFullscreenStretched() || steamWindowDefault)) {
 
             shouldStretch = true;
-            zoomGameWindow = linuxSession && "1".equals(container.getExtra("scaleGameWindow"));
+            zoomGameWindow = linuxSession && ("1".equals(container.getExtra("scaleGameWindow")) || steamWindowDefault);
         }
 
         gameWindowZoomConfigured = zoomGameWindow;

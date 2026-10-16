@@ -245,6 +245,9 @@ public final class SteamContainer {
             container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, "1");
             container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, "1");
             container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, "1");
+            // Native size: a game's own window (Tomb Raider's 1280x720) is smaller than the screen, so it is fitted and scaled to it.
+            container.setFullscreenStretched(true);
+            container.putExtra("scaleGameWindow", "1");
             container.saveData();
             Log.i(TAG, "Created the Steam container " + container.id);
             return container;
