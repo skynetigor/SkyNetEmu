@@ -15,8 +15,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The JSON files of the components repository's registry/ folder (games.json, games/&lt;id&gt;.json, containers/index.json, socs.json), downloaded afresh whenever the
- * network is allowed and one is on hand, and kept for when it is not.
+ * The JSON files of the components repository's registry/ folder (games.json, games/&lt;id&gt;.json, containers/index.json, socs.json)
+ * and its root linux.json catalog, downloaded afresh whenever the network is allowed and one is on hand, and kept for when it is not.
  *
  * One lookup goes: the network (when it is allowed: always asked, never trusted to an old copy), then the copy in memory,
  * the copy on disk and the copy bundled in the app (assets/registry). A download is kept only when it parses as JSON, and is written through a temporary file so a
@@ -88,7 +88,9 @@ public final class RegistryCache {
                 }
             }
             // The network is asked outside the lock: a lookup that never waits (a game starting) must not queue behind a download.
-            String text = Downloader.downloadString(ContentsManager.COMPONENTS_BASE + REMOTE_DIR + relPath);
+            // The Linux catalog is at the repository root; its bundled copy still lives in assets/registry/.
+            String remotePath = "linux.json".equals(relPath) ? relPath : REMOTE_DIR + relPath;
+            String text = Downloader.downloadString(ContentsManager.COMPONENTS_BASE + remotePath);
             if (text != null && isJson(text)) {
                 synchronized (LOCK) {
                     long now = System.currentTimeMillis();
