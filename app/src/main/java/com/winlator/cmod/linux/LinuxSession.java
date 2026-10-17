@@ -304,7 +304,7 @@ public final class LinuxSession {
                 if (tab <= 0) continue;
                 File host = new File(line.substring(0, tab));
                 if (host.exists()) bind(argv, host.getPath(), line.substring(tab + 1));
-                else Log.w(TAG, "The game's data is missing: " + host);
+                else LinuxFail.w(TAG, "The game's data is missing: " + host);
             }
         }
     }
@@ -336,7 +336,7 @@ public final class LinuxSession {
             android.system.Os.symlink("X0", xLink.getPath());
         }
         catch (android.system.ErrnoException e) {
-            Log.w(TAG, "Cannot link the X display", e);
+            LinuxFail.w(TAG, "Cannot link the X display", e);
         }
         writeAccounts(rt, uid);
         writePreload(context, rt);
@@ -369,7 +369,7 @@ public final class LinuxSession {
             new File(inputDir, "event0").createNewFile();
         }
         catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot create the gamepad file", e);
+            LinuxFail.w(TAG, "Cannot create the gamepad file", e);
         }
         bind(argv, inputDir.getPath(), "/dev/input");
         bindIfExists(argv, new File(rt, EMPTY_DIR), "/sys/fs/selinux");
@@ -584,7 +584,7 @@ public final class LinuxSession {
             return dir.getPath();
         }
         catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot make a libc without set_robust_list: " + e);
+            LinuxFail.w(TAG, "Cannot make a libc without set_robust_list: " + e);
             return null;
         }
     }
@@ -711,7 +711,7 @@ public final class LinuxSession {
             env.put("VK_ICD_FILENAMES", icd);
         }
         else {
-            if (!driverId.isEmpty()) Log.w(TAG, "Linux driver " + driverId + " is not installed; using the runtime's");
+            if (!driverId.isEmpty()) LinuxFail.w(TAG, "Linux driver " + driverId + " is not installed; using the runtime's");
             if (new File(rt, "usr/share/vulkan/icd.d/freedreno_icd.json").exists()) {
                 env.put("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/freedreno_icd.json");
             }
@@ -824,7 +824,7 @@ public final class LinuxSession {
             // root filesystem is reported when the program is started (programCommand).
             FexComponents.ensureThunks32(context, emulator);
             String problem = LinuxFex.prepare(context, container, emulator, env);
-            if (problem != null) Log.w(TAG, problem);
+            if (problem != null) LinuxFail.w(TAG, problem);
             else {
                 // The Steam client starts a game through Valve's FEX tool, which needs what proot cannot give (see the Box64
                 // branch above): the stand-in runs the game's command, and libskyshim hands an x86 program to FEX.
@@ -976,7 +976,7 @@ public final class LinuxSession {
             return shim;
         }
         catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot stage " + name, e);
+            LinuxFail.w(TAG, "Cannot stage " + name, e);
             return null;
         }
     }

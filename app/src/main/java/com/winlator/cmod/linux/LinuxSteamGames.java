@@ -237,7 +237,7 @@ public final class LinuxSteamGames {
             if (changed) shortcut.saveData();
         }
         catch (RuntimeException e) {
-            Log.w(TAG, "Cannot set up the shortcut of " + game.name, e);
+            LinuxFail.w(TAG, "Cannot set up the shortcut of " + game.name, e);
         }
     }
 

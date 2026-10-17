@@ -54,6 +54,50 @@ public final class ErrorReporter {
         Telemetry.event("skynet.error", stage, "failure", "skynet.error.stage", stage, "error.type", type, "error.message", message);
     }
 
+    /** A caught throwable, with its stack trace (paths and personal text taken out). {@code extra} are more fields, as for {@link Telemetry#event}. */
+    public static void report(String stage, Throwable error, Object... extra) {
+        if (!Telemetry.isEnabled()) return;
+        Object[] fields = new Object[8 + extra.length];
+        fields[0] = "skynet.error.stage"; fields[1] = stage;
+        fields[2] = "error.type"; fields[3] = error.getClass().getName();
+        fields[4] = "error.message"; fields[5] = Scrub.text(error.getMessage(), 300);
+        fields[6] = "error.stack_trace"; fields[7] = Scrub.stack(error, 30);
+        System.arraycopy(extra, 0, fields, 8, extra.length);
+        Telemetry.event("skynet.error", stage, "failure", fields);
+    }
+
+    private static final java.util.Set<String> SEEN = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    /**
+     * A failure of the Linux side (a session that did not start, a failed install, a missing file): the message, the stack when there is one, and what a
+     * report needs to place it. The same failure is sent once per run.
+     */
+    public static void linux(String tag, String message, Throwable error) {
+        if (!Telemetry.isEnabled()) return;
+        String key = tag + "|" + message;
+        if (!SEEN.add(key) || SEEN.size() > 200) return;
+        String stage = "linux_" + tag;
+        Object[] fields = {
+                "skynet.error.stage", stage,
+                "error.type", error != null ? error.getClass().getName() : "LinuxFailure",
+                "error.message", Scrub.text(message + (error != null && error.getMessage() != null ? ": " + error.getMessage() : ""), 400),
+                "error.stack_trace", error != null ? Scrub.stack(error, 30) : null
+        };
+        Telemetry.event("skynet.error", stage, "failure", fields);
+    }
+
+    /** A Linux program that ended badly: how, after how long, in which setup, and the last lines it printed. */
+    public static void linuxExit(int status, long seconds, String setup, String lastOutput) {
+        if (!Telemetry.isEnabled()) return;
+        Telemetry.event("skynet.error", "linux_program_exit", "failure",
+                "skynet.error.stage", "linux_program_exit",
+                "error.type", status > 128 ? "signal_" + (status - 128) : "exit_" + status,
+                "error.message", Scrub.text(lastOutput.isEmpty() ? "no output" : lastOutput.substring(Math.max(0, lastOutput.length() - 1500)), 1500),
+                "skynet.exit.code", status,
+                "skynet.linux.seconds_running", seconds,
+                "skynet.linux.setup", setup);
+    }
+
     /** A failed download: the server's name and what went wrong, never the path of the file. */
     public static void reportDownload(String address, Exception error) {
         String host = "";
@@ -107,17 +151,45 @@ public final class ErrorReporter {
                 if (!context.getPackageName().equals(exit.getProcessName())) continue;
                 String stage = stageFor(exit.getReason());
                 if (stage == null) continue;
+                String description = Scrub.text(exit.getDescription(), 300);
                 Telemetry.event("skynet.error", stage, "failure",
                         "skynet.error.stage", stage,
                         "error.type", "ApplicationExitInfo",
-                        "error.message", exit.getDescription(),
+                        "error.message", description.isEmpty() ? stage + " status=" + exit.getStatus() : description,
                         "skynet.exit.code", exit.getStatus(),
+                        "skynet.exit.reason", stage,
+                        "skynet.exit.signal", exit.getReason() == ApplicationExitInfo.REASON_SIGNALED || exit.getReason() == ApplicationExitInfo.REASON_CRASH_NATIVE ? exit.getStatus() : null,
+                        "skynet.exit.importance", exit.getImportance(),
+                        "skynet.exit.pss_kb", exit.getPss(),
+                        "error.stack_trace", exit.getReason() == ApplicationExitInfo.REASON_CRASH_NATIVE ? tombstoneText(exit) : null,
                         "skynet.exit.rss_kb", exit.getRss() / 1024,
                         "skynet.error.occurred_at", exit.getTimestamp());
             }
         }
         catch (RuntimeException ignored) {}
         prefs.edit().putLong("telemetry_last_exit_reported", newest == 0 ? System.currentTimeMillis() : newest).apply();
+    }
+
+    /** The readable strings of a native crash's tombstone (the frames with their library names), scrubbed; the file is a protobuf on current Android. */
+    private static String tombstoneText(ApplicationExitInfo exit) {
+        try (java.io.InputStream in = exit.getTraceInputStream()) {
+            if (in == null) return null;
+            byte[] data = in.readNBytes(256 * 1024);
+            StringBuilder out = new StringBuilder();
+            StringBuilder word = new StringBuilder();
+            for (byte b : data) {
+                if (b >= 32 && b < 127) word.append((char) b);
+                else {
+                    if (word.length() >= 6) out.append(word).append('\n');
+                    word.setLength(0);
+                }
+                if (out.length() > 6000) break;
+            }
+            return Scrub.text(out.toString(), 6000);
+        }
+        catch (Exception e) {
+            return null;
+        }
     }
 
     /** What the system's reason means for us; null for exits that are not errors (the app closing itself, the user stopping it) or are reported already. */

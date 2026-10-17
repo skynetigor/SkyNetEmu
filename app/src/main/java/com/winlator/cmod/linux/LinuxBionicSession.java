@@ -151,7 +151,7 @@ public final class LinuxBionicSession {
                     android.system.Os.symlink(noGlLib.getPath(), link.getPath());
                 }
                 catch (android.system.ErrnoException e) {
-                    Log.w(TAG, "Cannot link " + link + ": " + e.getMessage());
+                    LinuxFail.w(TAG, "Cannot link " + link + ": " + e.getMessage());
                 }
             }
         }
@@ -193,7 +193,7 @@ public final class LinuxBionicSession {
                     android.system.Os.symlink(programDir.getName() + "/" + name, link.getPath());
                 }
                 catch (android.system.ErrnoException e) {
-                    Log.w(TAG, "Cannot link " + link + ": " + e.getMessage());
+                    LinuxFail.w(TAG, "Cannot link " + link + ": " + e.getMessage());
                 }
             }
         }

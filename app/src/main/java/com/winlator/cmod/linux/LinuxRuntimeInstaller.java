@@ -134,7 +134,7 @@ public final class LinuxRuntimeInstaller {
             return CANCELLED;
         }
         catch (Exception e) {
-            Log.e(TAG, "Install failed", e);
+            LinuxFail.e(TAG, "Install failed", e);
             return "Install failed: " + e.getMessage();
         }
         finally {
@@ -190,7 +190,7 @@ public final class LinuxRuntimeInstaller {
             return CANCELLED;
         }
         catch (Exception e) {
-            Log.e(TAG, "Desktop install failed", e);
+            LinuxFail.e(TAG, "Desktop install failed", e);
             return "Install failed: " + e.getMessage();
         }
         finally {
@@ -247,7 +247,7 @@ public final class LinuxRuntimeInstaller {
             return CANCELLED;
         }
         catch (Exception e) {
-            Log.e(TAG, "Driver install failed", e);
+            LinuxFail.e(TAG, "Driver install failed", e);
             return "Install failed: " + e.getMessage();
         }
         finally {
@@ -275,7 +275,7 @@ public final class LinuxRuntimeInstaller {
             }
             boolean append = code == 206 && existing > 0;
             if (code != 200 && code != 206) {
-                Log.e(TAG, "Download answered HTTP " + code);
+                LinuxFail.e(TAG, "Download answered HTTP " + code);
                 return false;
             }
             if (!append) existing = 0;
@@ -299,7 +299,7 @@ public final class LinuxRuntimeInstaller {
                 }
             }
             if (entry.size > 0 && done < entry.size) {
-                Log.e(TAG, "Download ended early at " + done + " of " + entry.size);
+                LinuxFail.e(TAG, "Download ended early at " + done + " of " + entry.size);
                 return false;
             }
             return true;
@@ -308,7 +308,7 @@ public final class LinuxRuntimeInstaller {
             throw e;
         }
         catch (IOException e) {
-            Log.e(TAG, "Download interrupted", e);
+            LinuxFail.e(TAG, "Download interrupted", e);
             return false;
         }
         finally {

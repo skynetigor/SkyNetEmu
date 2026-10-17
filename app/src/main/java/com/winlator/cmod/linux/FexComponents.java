@@ -63,7 +63,7 @@ public final class FexComponents {
             copyMissing(context.getAssets(), "linux/fex-thunks32-" + THUNKS32_VERSION, fex.dir);
         }
         catch (java.io.IOException e) {
-            android.util.Log.w("FexComponents", "Cannot add the 32-bit thunks to " + fex.id, e);
+            LinuxFail.w("FexComponents", "Cannot add the 32-bit thunks to " + fex.id, e);
         }
     }
 

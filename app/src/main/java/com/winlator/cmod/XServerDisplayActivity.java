@@ -1482,6 +1482,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
         preloaderDialog.closeOnUiThread();
+        com.winlator.cmod.telemetry.ErrorReporter.linuxExit(status, launcher.secondsRunning(), launcher.setupDescription(), launcher.lastOutput(40));
         String reason = status > 128
                 ? "was stopped by signal " + (status - 128) + (status == 139 ? " (a crash)" : "")
                 : "exited with code " + status;

@@ -82,7 +82,14 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         Context context = environment.getContext();
         ImageFs imageFs = environment.getImageFs();
         waitForXServer(new File(imageFs.getRootDir(), "usr/tmp/.X11-unix/X0"));
-        LinuxSession.Launch launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
+        LinuxSession.Launch launch;
+        try {
+            launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
+        }
+        catch (RuntimeException e) {
+            com.winlator.cmod.telemetry.ErrorReporter.report("linux_session_build", e, "skynet.linux.setup", setupDescription());
+            throw e;
+        }
         // Registering a callback also makes ProcessHelper pipe the output instead of discarding it.
         ProcessHelper.addDebugCallback(outputCallback);
         startedAt = System.currentTimeMillis();
@@ -93,7 +100,10 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
                 }
                 if (terminationCallback != null) terminationCallback.call(status);
             });
-            if (pid == -1) Log.e(TAG, "The Linux session did not start");
+            if (pid == -1) {
+                Log.e(TAG, "The Linux session did not start");
+                com.winlator.cmod.telemetry.ErrorReporter.linux("session_start", "The Linux session did not start (" + setupDescription() + ")", null);
+            }
         }
         applyCpuAffinity();
     }
@@ -160,6 +170,12 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
             }
         }
         return prootStatus;
+    }
+
+    /** What the session runs on, for a report: the emulator, the runtime, and whether it is proot-less / on Android's C library. */
+    public String setupDescription() {
+        return "emulator=" + container.getExtra("linuxEmulator") + " runtime=" + (runtime != null ? runtime.id : "") + " noProot=" + container.getExtra("linuxNoProot")
+                + " bionic=" + container.getExtra("linuxBionic");
     }
 
     /** Seconds since the program was started. */

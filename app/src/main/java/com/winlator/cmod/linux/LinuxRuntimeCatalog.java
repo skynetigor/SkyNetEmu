@@ -64,7 +64,7 @@ public final class LinuxRuntimeCatalog {
             return entries;
         }
         catch (Exception e) {
-            Log.e(TAG, "Bad runtime catalog", e);
+            LinuxFail.e(TAG, "Bad runtime catalog", e);
             return null;
         }
     }
@@ -121,7 +121,7 @@ public final class LinuxRuntimeCatalog {
             return merged.toString();
         }
         catch (Exception e) {
-            Log.w(TAG, "Cannot merge the catalog of the app", e);
+            LinuxFail.w(TAG, "Cannot merge the catalog of the app", e);
             return remote;
         }
     }
@@ -149,7 +149,7 @@ public final class LinuxRuntimeCatalog {
             return entries;
         }
         catch (Exception e) {
-            Log.e(TAG, "Bad Linux catalog", e);
+            LinuxFail.e(TAG, "Bad Linux catalog", e);
             return null;
         }
     }
@@ -174,7 +174,7 @@ public final class LinuxRuntimeCatalog {
             return entries;
         }
         catch (Exception e) {
-            Log.e(TAG, "Bad Linux catalog", e);
+            LinuxFail.e(TAG, "Bad Linux catalog", e);
             return null;
         }
     }
@@ -199,7 +199,7 @@ public final class LinuxRuntimeCatalog {
             return entries;
         }
         catch (Exception e) {
-            Log.e(TAG, "Bad Linux catalog", e);
+            LinuxFail.e(TAG, "Bad Linux catalog", e);
             return null;
         }
     }
@@ -224,7 +224,7 @@ public final class LinuxRuntimeCatalog {
             return entries;
         }
         catch (Exception e) {
-            Log.e(TAG, "Bad Linux catalog", e);
+            LinuxFail.e(TAG, "Bad Linux catalog", e);
             return null;
         }
     }

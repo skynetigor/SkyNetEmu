@@ -136,7 +136,7 @@ public final class LinuxDriverManager {
             }
         }
         catch (IOException e) {
-            Log.e(TAG, "Cannot read the driver zip", e);
+            LinuxFail.e(TAG, "Cannot read the driver zip", e);
             return new Result(null, "Cannot read the zip: " + e.getMessage());
         }
 
@@ -171,7 +171,7 @@ public final class LinuxDriverManager {
             FileUtils.writeString(new File(dir, META), meta.toString());
         }
         catch (Exception e) {
-            Log.e(TAG, "Cannot store the driver", e);
+            LinuxFail.e(TAG, "Cannot store the driver", e);
             FileUtils.delete(dir);
             return new Result(null, "Cannot store the driver: " + e.getMessage());
         }
