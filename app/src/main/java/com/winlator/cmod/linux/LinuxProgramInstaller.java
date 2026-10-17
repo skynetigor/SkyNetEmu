@@ -1,5 +1,6 @@
 package com.winlator.cmod.linux;
 
+import android.content.Context;
 import android.os.Environment;
 
 import com.winlator.cmod.container.Container;
@@ -141,7 +142,7 @@ public final class LinuxProgramInstaller {
     }
 
     /** Writes the shortcut of a program (a path as the container sees it) and returns the .desktop file. */
-    public static File addShortcut(Container container, String name, String guestPath, Map<String, String> extras) {
-        return ContainerManager.addLinuxShortcut(container, ShortcutWriter.freeName(container, name), guestPath, extras);
+    public static File addShortcut(Context context, Container container, String name, String guestPath, Map<String, String> extras) {
+        return ContainerManager.addLinuxShortcut(context, container, ShortcutWriter.freeName(container, name), guestPath, extras);
     }
 }

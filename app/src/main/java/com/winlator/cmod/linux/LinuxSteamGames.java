@@ -197,7 +197,7 @@ public final class LinuxSteamGames {
             }
             String name = game.name;
             if (takenNames.contains(ContainerManager.linuxShortcutFile(container, name).getName())) name = game.name + " (" + game.appId + ")";
-            File file = ContainerManager.addLinuxShortcut(container, name, LinuxSession.STEAM_GAME_PREFIX + game.appId);
+            File file = ContainerManager.addLinuxShortcut(context, container, name, LinuxSession.STEAM_GAME_PREFIX + game.appId);
             takenNames.add(file.getName());
             applyDefaults(context, container, game, file);
         }
@@ -234,7 +234,11 @@ public final class LinuxSteamGames {
                     changed = true;
                 }
             }
-            if (changed) shortcut.saveData();
+            if (changed) {
+                shortcut.saveData();
+                // The profile was found only now: what it recommends is written into the shortcut, as at creation.
+                LinuxShortcutDefaults.applyProfile(context, container, shortcut);
+            }
         }
         catch (RuntimeException e) {
             LinuxFail.w(TAG, "Cannot set up the shortcut of " + game.name, e);

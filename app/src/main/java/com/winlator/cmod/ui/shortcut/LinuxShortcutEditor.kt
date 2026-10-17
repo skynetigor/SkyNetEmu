@@ -42,6 +42,7 @@ import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxLaunchOptions
 import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxSession
+import com.winlator.cmod.linux.LinuxShortcutDefaults
 import com.winlator.cmod.lsfg.LsfgManager
 import com.winlator.cmod.ui.settings.EditorCategory
 import com.winlator.cmod.ui.settings.RailEditor
@@ -64,13 +65,15 @@ private const val SIZE = "screenSize"
 /**
  * The settings of a shortcut that starts a Linux program. A Wine shortcut has a page of Wine, DXVK and drive options
  * that mean nothing here (and read fields a Linux container does not have). They are grouped as in the container's
- * editor. What a shortcut leaves at "Container default" follows its container; anything else is its own and applies to
- * the sessions started from it.
+ * editor. Every setting is the shortcut's own: it starts as a copy of the container's (see
+ * [com.winlator.cmod.linux.LinuxShortcutDefaults]), and changing the container afterwards does not change it.
  */
 @Composable
 internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val context = LocalContext.current
     val container = shortcut.container
+    // A shortcut made before the settings were its own still follows the container: it is given its own copy here, once.
+    remember { LinuxShortcutDefaults.snapshot(context, container, shortcut) }
     var options by remember { mutableStateOf(shortcut.getExtra(LinuxLaunchOptions.EXTRA)) }
     val parsed = remember(options) { LinuxLaunchOptions.parse(options) }
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
@@ -138,17 +141,31 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     }
     // A Steam game that is not started without Steam goes through the client, and so runs at the device's own size.
     val throughSteam = shortcut.isSteamGame && effective?.runsWithoutSteam() != true
-    fun profileExtra(key: String, label: (String) -> String): String? = effective?.extras?.get(key)?.let(label)
-
-    // What the program runs under: the container's emulator, or the shortcut's own.
-    val containerEmulatorName = when (LinuxEmulator.choice(container)) {
-        LinuxEmulator.NONE -> "none (ARM64 programs only)"
-        else -> LinuxEmulator.resolve(context, container)?.name ?: "${LinuxEmulator.choice(container)} (not installed)"
+    // The profile's settings are the shortcut's as soon as one is chosen: they are copied into the fields, not followed.
+    var takeFromProfile by remember { mutableStateOf(false) }
+    LaunchedEffect(effective) {
+        val shown = effective
+        if (takeFromProfile && shown != null) {
+            takeFromProfile = false
+            if (shown.resolution.isNotEmpty()) size = shown.resolution
+            shown.extras.forEach { (key, value) ->
+                if (value.isNullOrEmpty()) return@forEach
+                when (key) {
+                    FIT -> fit = value
+                    UPSCALER -> upscaler = value
+                    "simTouchScreen" -> touch = value
+                    LsfgManager.EXTRA_MULTIPLIER -> multiplier = value
+                    LsfgManager.EXTRA_FLOW_SCALE -> flowScale = value
+                }
+            }
+        }
     }
+
+    // What the program runs under.
     val effectiveChoice = emulatorChoice.ifEmpty { LinuxEmulator.choice(container) }
-    val emulator = if (emulatorChoice.isEmpty()) containerEmulatorName else {
-        val builds = if (emulatorChoice == LinuxEmulator.FEX) fexBuilds else boxBuilds
-        (builds.firstOrNull { it.id == emulatorId } ?: builds.firstOrNull())?.name ?: "$emulatorChoice (not installed)"
+    val emulator = if (effectiveChoice == LinuxEmulator.NONE) "none (ARM64 programs only)" else {
+        val builds = if (effectiveChoice == LinuxEmulator.FEX) fexBuilds else boxBuilds
+        (builds.firstOrNull { it.id == emulatorId } ?: builds.firstOrNull())?.name ?: "$effectiveChoice (not installed)"
     }
     val emulatorProblem = when {
         effectiveChoice == LinuxEmulator.NONE -> false
@@ -157,14 +174,6 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     }
     val hasDll = remember { LsfgManager.hasDll(context) }
     val sizeValid = size.isEmpty() || isValidScreenSize(size.trim())
-
-    // What each setting is when the shortcut leaves it alone.
-    val containerSize = container.screenSize
-    val containerFit = if (container.isFullscreenStretched) "fit" else "1:1"
-    val containerUpscaler = UPSCALER_MODES.firstOrNull { it.first == container.getExtra(UPSCALER) }?.second?.substringBefore(" (")
-        ?: "Off"
-    val containerMultiplier = LsfgManager.getMultiplier(container).let { if (it >= 2) "${it}x" else "Off" }
-    val containerFlow = "%.2f".format(java.util.Locale.US, LsfgManager.getFlowScale(context, container))
 
     fun save() {
         // One line: the shortcut file keeps each extra on a line of its own.
@@ -196,21 +205,18 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, vulkanPresent.ifEmpty { null })
         shortcut.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, keyboardButton.ifEmpty { null })
         shortcut.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, autoKeyboard.ifEmpty { null })
+        shortcut.putExtra(LinuxShortcutDefaults.EXTRA_OWN, "1")
         shortcut.saveData()
         onClose()
     }
 
     val graphicsSummary = if (throughSteam) "native size (Steam)" else listOf(
-        if (size.isEmpty()) (if (effective?.resolution?.isNotEmpty() == true) "game profile size" else "container size") else if (size.trim() == "native") "native size" else size.trim(),
-        when (fit) { "1" -> "fit"; "0" -> "1:1"; else -> "container scaling" },
-        UPSCALER_MODES.firstOrNull { it.first == upscaler && it.first != "0" }?.second?.substringBefore(" (")
-            ?: if (upscaler == "0") "no upscaler" else "container upscaler"
+        if (size.trim() == "native") "native size" else size.trim(),
+        when (fit) { "1" -> "fit"; "2" -> "game window"; else -> "1:1" },
+        UPSCALER_MODES.firstOrNull { it.first == upscaler && it.first != "0" }?.second?.substringBefore(" (") ?: "no upscaler"
     ).joinToString(" · ")
-    val frameGenerationSummary = when (multiplier) {
-        "" -> "Container default ($containerMultiplier)"
-        "0" -> "Off"
-        else -> "${multiplier}x" + if (flowScale.isNotEmpty()) " · flow $flowScale" else ""
-    }
+    val frameGenerationSummary =
+        if (multiplier == "0" || multiplier.isEmpty()) "Off" else "${multiplier}x · flow $flowScale"
 
     val gameSummary = profile?.let { it.name + " · " + (effective?.version?.label ?: "version not recognised") }
         ?: if (profileId == GameProfiles.NONE) "None (turned off)" else "None"
@@ -236,6 +242,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     profileId = it
                     profileVersion = ""
                     noSteam = ""
+                    takeFromProfile = true
                 }
                 val current = profile
                 if (current != null) {
@@ -247,7 +254,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                             put("", "Recognise it (now: ${detected?.version?.label ?: "not recognised"})")
                             current.versions.forEach { put(it.id, it.label + if (it.status == GameProfile.STATUS_BROKEN) " (does not work)" else "") }
                         }
-                    ) { profileVersion = it }
+                    ) {
+                        profileVersion = it
+                        takeFromProfile = true
+                    }
                     if (!shortcut.isSteamGame) {
                         SettingsDivider()
                         SettingText("Game folder", gameRoot) { gameRoot = it }
@@ -299,7 +309,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             if (profile == null) {
                 Text(
                     "A game profile from the registry gives the shortcut the program to start, the arguments and the resolution that are " +
-                        "known to work for a version of the game. Whatever you set in the other groups wins over it.",
+                        "known to work for a version of the game. Choosing one writes its settings into the groups below, where you can change them.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -339,19 +349,13 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    ResolutionSetting(
-                        size,
-                        effective?.resolution?.takeIf { it.isNotEmpty() }
-                            ?.let { "Game profile default (${if (it == "native") "native size" else it})" }
-                            ?: "Container default ($containerSize)"
-                    ) { size = it }
+                    ResolutionSetting(size) { size = it }
                 }
                 SettingsDivider()
                 SettingMappedChoice(
                     "Scaling",
                     fit,
                     linkedMapOf(
-                        "" to (profileExtra(FIT) { "Game profile default (${when (it) { "1" -> "fit"; "2" -> "game window"; else -> "1:1" }})" } ?: "Container default ($containerFit)"),
                         "1" to "Fit to screen (keep proportions)",
                         "2" to "Scale the game window to the screen (a game smaller than the container)",
                         "0" to "Original size (1:1)"
@@ -361,30 +365,20 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 SettingMappedChoice(
                     "Upscaler (needs native output and Fit to screen)",
                     upscaler,
-                    LinkedHashMap<String, String>().apply {
-                        put(
-                            "",
-                            profileExtra(UPSCALER) { mode -> "Game profile default (${UPSCALER_MODES.firstOrNull { it.first == mode }?.second?.substringBefore(" (") ?: "Off"})" }
-                                ?: "Container default ($containerUpscaler)"
-                        )
-                        UPSCALER_MODES.forEach { put(it.first, it.second) }
-                    }
+                    LinkedHashMap<String, String>().apply { UPSCALER_MODES.forEach { put(it.first, it.second) } }
                 ) { upscaler = it }
                 SettingsDivider()
                 SettingMappedChoice(
                     "Turnip without tiled rendering (TU_DEBUG=sysmem)",
                     tuSysmem,
-                    linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                    linkedMapOf("1" to "On", "0" to "Off")
                 ) { tuSysmem = it }
                 SettingsDivider()
-                val containerDriver = container.getExtra(LinuxDriverManager.EXTRA_DRIVER).let { id ->
-                    drivers.firstOrNull { it.id == id }?.label() ?: id.ifEmpty { "runtime default" }
-                }
                 SettingMappedChoice(
                     "Turnip driver",
                     driverId,
                     LinkedHashMap<String, String>().apply {
-                        put("", "Container default ($containerDriver)")
+                        put("", "The one the Linux runtime brings")
                         drivers.forEach { put(it.id, it.label()) }
                         if (driverId.isNotEmpty() && driverId !in this) put(driverId, "$driverId (not installed)")
                     }
@@ -394,7 +388,6 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "OpenGL driver",
                     glDriver,
                     linkedMapOf(
-                        "" to "Container default (${if (container.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "Zink on Turnip" else "software"})",
                         "zink" to "Zink on Turnip (OpenGL 4.6 over Vulkan, accelerated)",
                         "software" to "Software (llvmpipe, CPU)"
                     )
@@ -404,7 +397,6 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "Vulkan output",
                     vulkanPresent,
                     linkedMapOf(
-                        "" to "Container default (${if (container.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT) == "native") "native" else "CPU copy"})",
                         "native" to "Native (dma-buf, needed for upscalers and frame generation)",
                         "sw" to "Software (CPU copy, experimental)"
                     )
@@ -416,11 +408,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 SettingMappedChoice(
                     "Multiplier",
                     multiplier,
-                    linkedMapOf(
-                        "" to (profileExtra(LsfgManager.EXTRA_MULTIPLIER) { m -> "Game profile default (${if (m == "0" || m.isEmpty()) "Off" else "${m}x"})" }
-                            ?: "Container default ($containerMultiplier)"),
-                        "0" to "Off", "2" to "2x", "3" to "3x", "4" to "4x"
-                    )
+                    linkedMapOf("0" to "Off", "2" to "2x", "3" to "3x", "4" to "4x")
                 ) { multiplier = it }
                 if (multiplier.isNotEmpty() && multiplier != "0" && !hasDll) {
                     Text(
@@ -434,10 +422,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 SettingMappedChoice(
                     "Flow scale",
                     flowScale,
-                    LinkedHashMap<String, String>().apply {
-                        put("", "Container default ($containerFlow)")
-                        FLOW_SCALES.forEach { put(it, it) }
-                    }
+                    LinkedHashMap<String, String>().apply { FLOW_SCALES.forEach { put(it, it) } }
                 ) { flowScale = it }
             }
             Text(
@@ -449,7 +434,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         EditorCategory(
             "input", "Input",
-            when (touch) { "1" -> "touchscreen"; "0" -> "touchpad"; else -> "container default" },
+            if (touch == "0") "touchpad" else "touchscreen",
             false
         ) {
             SettingsCard {
@@ -457,8 +442,6 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "Touchscreen mode",
                     touch,
                     linkedMapOf(
-                        "" to (profileExtra("simTouchScreen") { "Game profile default (${if (it == "1") "touchscreen" else "touchpad"})" }
-                            ?: "Container default (${if (container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_TOUCHSCREEN) == "0") "touchpad" else "touchscreen"})"),
                         "1" to "Touchscreen: a tap clicks where you touch",
                         "0" to "Touchpad: a finger moves the pointer"
                     )
@@ -467,13 +450,13 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 SettingMappedChoice(
                     "Keyboard button on the screen",
                     keyboardButton,
-                    linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                    linkedMapOf("1" to "On", "0" to "Off")
                 ) { keyboardButton = it }
                 SettingsDivider()
                 SettingMappedChoice(
                     "Open the keyboard when a text field is tapped",
                     autoKeyboard,
-                    linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                    linkedMapOf("1" to "On", "0" to "Off")
                 ) { autoKeyboard = it }
             }
         },
@@ -503,15 +486,15 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         // A Steam game's emulator is applied by the launcher that starts the game, so it can differ from the client's session.
         EditorCategory(
             "emulation", "x86 emulator",
-            if (emulatorChoice.isEmpty()) "Container default · $containerEmulatorName" else emulator,
+            emulator,
             emulatorProblem
         ) {
             SettingsCard {
                 SettingMappedChoice(
                     "x86 emulator",
-                    emulatorChoice,
+                    effectiveChoice,
                     linkedMapOf(
-                        "" to "Container default ($containerEmulatorName)",
+                        LinuxEmulator.NONE to "None (ARM64 programs only)",
                         LinuxEmulator.BOX64 to "Box64",
                         LinuxEmulator.FEX to "FEX"
                     )
@@ -526,7 +509,6 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "Runtime",
                     bionic,
                     linkedMapOf(
-                        "" to "Container default (${if (container.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA) == "1") "Android's C library" else "Linux runtime (glibc)"})",
                         "0" to "Linux runtime (glibc)",
                         "1" to "Android's C library (experimental, Box64)"
                     )
@@ -548,7 +530,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                             "${if (fex) "FEX" else "Box64"} build",
                             emulatorId,
                             LinkedHashMap<String, String>().apply {
-                                put("", "Default" + if (emulatorChoice.isEmpty() || emulatorChoice == LinuxEmulator.choice(container)) " (the container's)" else "")
+                                put("", "Whichever is installed")
                                 builds.forEach { put(it.id, it.name) }
                             }
                         ) { emulatorId = it }
@@ -563,7 +545,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                                 "x86-64 root filesystem",
                                 rootfsId,
                                 LinkedHashMap<String, String>().apply {
-                                    put("", "Container default")
+                                    put("", "Whichever is installed")
                                     rootfsList.forEach { put(it.id, it.name) }
                                 }
                             ) { rootfsId = it }
@@ -572,31 +554,31 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                         SettingMappedChoice(
                             "FEX preset",
                             fexPreset,
-                            LinkedHashMap<String, String>().apply { put("", "Container default"); putAll(fexPresets) }
+                            LinkedHashMap<String, String>().apply { putAll(fexPresets) }
                         ) { fexPreset = it }
                         SettingsDivider()
                         SettingMappedChoice(
                             "Use the runtime's Vulkan (FEX thunk)",
                             fexThunks,
-                            linkedMapOf("" to "Container default", "1" to "On", "0" to "Off")
+                            linkedMapOf("1" to "On", "0" to "Off")
                         ) { fexThunks = it }
                         SettingsDivider()
                         SettingMappedChoice(
                             "32-bit games on the GPU (OpenGL thunk)",
                             fexGl32,
-                            linkedMapOf("" to "Container default", "1" to "On", "0" to "Off (software OpenGL)")
+                            linkedMapOf("1" to "On", "0" to "Off (software OpenGL)")
                         ) { fexGl32 = it }
                         SettingsDivider()
                         SettingMappedChoice(
                             "GPU a 32-bit game is told it has",
                             glVendor,
-                            linkedMapOf("" to "Container default", "nvidia" to "NVIDIA", "amd" to "AMD", "mesa" to "As it is (Mesa / zink)")
+                            linkedMapOf("nvidia" to "NVIDIA", "amd" to "AMD", "mesa" to "As it is (Mesa / zink)")
                         ) { glVendor = it }
                     } else {
                         SettingMappedChoice(
                             "Box64 preset",
                             emulatorPreset,
-                            LinkedHashMap<String, String>().apply { put("", "Container default"); putAll(boxPresets) }
+                            LinkedHashMap<String, String>().apply { putAll(boxPresets) }
                         ) { emulatorPreset = it }
                     }
                 }

@@ -303,7 +303,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         if (ContainerManager.linuxShortcutExists(container, name)) {
             nameClash = NameClash(name, path, extras)
         } else {
-            ContainerManager.addLinuxShortcut(container, name, path, extras)
+            ContainerManager.addLinuxShortcut(context, container, name, path, extras)
             tick++
         }
     }
@@ -693,7 +693,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             },
             confirmButton = {
                 TextButton(enabled = newName.isNotBlank() && !taken, onClick = {
-                    ContainerManager.addLinuxShortcut(container, newName.trim(), clash.path, clash.extras)
+                    ContainerManager.addLinuxShortcut(context, container, newName.trim(), clash.path, clash.extras)
                     nameClash = null
                     tick++
                 }) { Text("Add") }

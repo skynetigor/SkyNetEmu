@@ -212,7 +212,7 @@ public final class SteamContainer {
                 steam = create(context, manager, defaults);
                 if (steam == null) return null;
             }
-            ContainerManager.syncSteamShortcut(steam, LinuxRuntime.resolve(context, steam) != null);
+            ContainerManager.syncSteamShortcut(context, steam, LinuxRuntime.resolve(context, steam) != null);
             return steam;
         }
     }

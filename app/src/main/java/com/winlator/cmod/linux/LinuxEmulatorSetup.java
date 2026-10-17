@@ -7,10 +7,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * The x86 emulator a Linux program runs under: the container's choice, with whatever its shortcut sets laid over it. A
- * shortcut's extras have the container's names; an empty one follows the container ("Container default"). The settings are
- * decided when the session is built (the emulator's variables, the FEX configuration, the binds of its root filesystem), so
- * the session gets {@link #of} instead of the container.
+ * The x86 emulator a Linux program runs under: what its shortcut says, which is a copy of the container's settings made when
+ * the shortcut was written (see {@link LinuxShortcutDefaults}). A shortcut's extras have the container's names, so the setup
+ * code is shared. The settings are decided when the session is built (the emulator's variables, the FEX configuration, the
+ * binds of its root filesystem), so the session gets {@link #of} instead of the container.
  */
 public final class LinuxEmulatorSetup {
     /** Container (or shortcut) extra: "1" runs Turnip without its tiled (GMEM) rendering, TU_DEBUG=sysmem. */
@@ -39,7 +39,15 @@ public final class LinuxEmulatorSetup {
      * shortcut's settings. Choosing another emulator drops the container's build and preset (they name builds of the other one).
      */
     public static Container of(Container container, Shortcut shortcut) {
-        if (container == null || !container.isLinux() || !overrides(shortcut)) return container;
+        if (container == null || !container.isLinux() || shortcut == null) return container;
+        // A shortcut with its own settings decides all of them, an empty one included (no driver of its own, say, means the
+        // runtime's, not the container's).
+        if (LinuxShortcutDefaults.isOwn(shortcut)) {
+            Map<String, String> own = new LinkedHashMap<>();
+            for (String name : EXTRAS) own.put(name, shortcut.getExtra(name));
+            return container.copyWithExtras(own);
+        }
+        if (!overrides(shortcut)) return container;
         Map<String, String> over = new LinkedHashMap<>();
         String emulator = shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR);
         boolean switched = !emulator.isEmpty() && !emulator.equals(LinuxEmulator.choice(container));

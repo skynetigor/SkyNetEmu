@@ -1,7 +1,7 @@
 # Linux containers: Box64 / FEX chosen per shortcut (plan)
 
 Status: **implemented** (see "What was built" at the end). Goal: one Linux container is enough; the x86 emulator (and its settings) can be
-overridden by a shortcut, "Container default" being the default.
+kept by each shortcut as its own copy of the container's settings (see "Every setting is the shortcut's own" below).
 
 ## What is already global
 
@@ -29,7 +29,7 @@ that point, not only `programCommand`.
    `LinuxEmulatorSetup.of(context, container, shortcut)`: every field is the shortcut's extra when not empty, else the
    container's. `shortcut == null` gives today's behaviour (Steam client, tools, debug shell). Replace the direct
    `choice/resolve` calls in `LinuxSession` and `LinuxFex` with it.
-2. **Shortcut extras** (empty = container default), same names as the container's so the setup code is shared:
+2. **Shortcut extras** (the shortcut's own values, written when it was made), same names as the container's so the setup code is shared:
    `linuxEmulator` (box64 / fex), `linuxEmulatorId`, `linuxEmulatorPreset`, `linuxRootfsId`, `linuxFexPreset`,
    `linuxFexThunks`. "None" is not offered for a shortcut.
 3. **Editor**: a "x86 emulator" group in `LinuxShortcutEditor.kt` (category `program`, not for Steam games), reusing the
@@ -59,7 +59,7 @@ emulator rows are hidden for Steam game shortcuts.
 ## Verification (only when asked to build / run)
 
 - A Box64 container with a shortcut set to FEX (program copied in): the program starts under FEX; and the other way round.
-- "Container default" shortcuts behave as before; the Steam client and the debug shell are unchanged.
+- A shortcut made before `linuxOwnSettings` still follows its container until its settings are opened once; the Steam client and the debug shell are unchanged.
 - The refusals: emulator removed, FEX without rootfs, FEX with a program on shared storage.
 - Two shortcuts of one container with different emulators, started one after another and at the same time.
 
@@ -71,7 +71,7 @@ emulator rows are hidden for Steam game shortcuts.
   choosing another emulator drops the container's build and preset (they name builds of the other one). The existing
   `choice/resolve`, `guestEnv` and `LinuxFex` code is unchanged: it simply gets this container. Used by `XServerDisplayActivity`
   (the launcher component and `programCommand`) and by the desktop's launcher scripts (`LinuxDesktop.prepareLaunchers`).
-- The shortcut editor has an "x86 emulator" group (not for Steam games): emulator (container default / Box64 / FEX), build, and
+- The shortcut editor has an "x86 emulator" group (not for Steam games): emulator (None / Box64 / FEX), build, and
   for FEX the root filesystem, preset and thunk switch; for Box64 the preset.
 - `LinuxSession.directCommand`: a program that FEX would run from shared storage is refused with a message (storage is noexec);
   a 32-bit program goes to FEX (any installed build and root filesystem) instead of being refused.
@@ -116,3 +116,12 @@ upscaler, TU_DEBUG=sysmem, 32-bit GPU, GPU vendor, emulator and its presets, fra
 container. The driver, OpenGL and output extras are in `LinuxEmulatorSetup.EXTRAS`, so the session is built from the container with
 them laid over; the activity reads the output and keyboard ones through `linuxSetting`. The HUD mode is not per shortcut (a Wine
 shortcut's HUD choice writes through to its container); the FPS limiter keeps its own shortcut store.
+
+## Every setting is the shortcut's own
+
+A Linux shortcut carries a value for every setting a session is started with, and the editor shows those values: there is no
+"container default" entry to pick. The container's settings are what a new shortcut is written with
+(`linux/LinuxShortcutDefaults`, marker extra `linuxOwnSettings=1`); changing the container afterwards leaves its shortcuts
+alone. A game profile's settings are copied in the same way, when the shortcut is made and when its profile or version is
+changed in the editor. A shortcut written before this has no marker and keeps following its container until its settings are
+opened, which gives it its own copy of whatever it does not set.

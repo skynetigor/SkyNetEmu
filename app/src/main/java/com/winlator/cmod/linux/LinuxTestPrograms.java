@@ -49,6 +49,6 @@ public final class LinuxTestPrograms {
         File shortcut = new File(container.getDesktopDir(), name + ".desktop");
         if (shortcut.isFile()) return;
         FileUtils.chmod(program, 0755);
-        ContainerManager.addLinuxShortcut(container, name, program.getPath());
+        ContainerManager.addLinuxShortcut(context, container, name, program.getPath());
     }
 }

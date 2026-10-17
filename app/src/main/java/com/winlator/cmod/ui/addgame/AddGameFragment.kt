@@ -313,7 +313,7 @@ class AddGameFragment : Fragment() {
             val root = it.game.linuxExecutables.firstOrNull { rel -> guest.endsWith("/$rel") }?.let { rel -> guest.removeSuffix("/$rel") }
             extras[GameProfiles.EXTRA_ROOT] = root.orEmpty()
         }
-        return LinuxProgramInstaller.addShortcut(container, name, guest, extras)
+        return LinuxProgramInstaller.addShortcut(requireContext(), container, name, guest, extras)
     }
 
     /** Asks (on the screen, from the worker thread) what of the program's folder goes into the container; null when cancelled. */

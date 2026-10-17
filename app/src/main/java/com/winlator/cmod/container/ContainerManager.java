@@ -182,8 +182,8 @@ public class ContainerManager {
 
     /** Demo programs of the runtime, for checking a new Linux container; debug builds only. */
     private void addLinuxTestPrograms(Container container) {
-        addLinuxShortcut(container, "glxgears", "/usr/bin/glxgears");
-        addLinuxShortcut(container, "vkcube", "/usr/bin/vkcube");
+        addLinuxShortcut(context, container, "glxgears", "/usr/bin/glxgears");
+        addLinuxShortcut(context, container, "vkcube", "/usr/bin/vkcube");
     }
 
     /** The shortcut file a Linux program of this name would get (the name decides the file, so two programs cannot share it). */
@@ -196,25 +196,38 @@ public class ContainerManager {
     }
 
     /** Writes a shortcut for a program at {@code path} (as the guest sees it) into the container's Desktop. */
-    public static File addLinuxShortcut(Container container, String name, String path) {
-        return addLinuxShortcut(container, name, path, null);
+    public static File addLinuxShortcut(Context context, Container container, String name, String path) {
+        return addLinuxShortcut(context, container, name, path, null);
     }
 
-    /** As above, with settings the shortcut starts with (its [Extra Data]); an empty value is left out. */
-    public static File addLinuxShortcut(Container container, String name, String path, java.util.Map<String, String> extras) {
+    /**
+     * As above, with settings the shortcut starts with (its [Extra Data]); an empty value is left out. The container's own
+     * settings are written in under them, so the shortcut keeps running the way the container does today even when the
+     * container is changed later (see {@link com.winlator.cmod.linux.LinuxShortcutDefaults}).
+     */
+    public static File addLinuxShortcut(Context context, Container container, String name, String path, java.util.Map<String, String> extras) {
         File dir = container.getDesktopDir();
         dir.mkdirs();
         File file = linuxShortcutFile(container, name);
         StringBuilder text = new StringBuilder("[Desktop Entry]\nName=" + name + "\nExec=" + path + "\nType=Application\ncontainer_id:" + container.id + "\n");
-        if (extras != null) {
+        java.util.Map<String, String> all = com.winlator.cmod.linux.LinuxShortcutDefaults.of(context, container);
+        if (extras != null) for (java.util.Map.Entry<String, String> entry : extras.entrySet()) {
+            if (entry.getValue() != null && !entry.getValue().isEmpty()) all.put(entry.getKey(), entry.getValue());
+        }
+        {
             StringBuilder lines = new StringBuilder();
-            for (java.util.Map.Entry<String, String> entry : extras.entrySet()) {
+            for (java.util.Map.Entry<String, String> entry : all.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isEmpty() || entry.getValue().contains("\n")) continue;
                 lines.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
             }
             if (lines.length() > 0) text.append("\n[Extra Data]\n").append(lines);
         }
         FileUtils.writeString(file, text.toString());
+        // What the game's registry profile asks for comes over the container's settings.
+        try {
+            com.winlator.cmod.linux.LinuxShortcutDefaults.applyProfile(context, container, new Shortcut(container, file));
+        }
+        catch (RuntimeException ignored) {}
         return file;
     }
 
@@ -224,7 +237,7 @@ public class ContainerManager {
      * The app's Steam container has a shortcut for the Steam client that only the container owns: it is written here while
      * Steam can run and removed with the container (or when its runtime is gone), never by the user.
      */
-    public static void syncSteamShortcut(Container container, boolean enabled) {
+    public static void syncSteamShortcut(Context context, Container container, boolean enabled) {
         File file = linuxShortcutFile(container, STEAM_SHORTCUT);
         if (!enabled) {
             if (file.exists() && file.delete()) Log.d("ContainerManager", "Removed the Steam shortcut");
@@ -232,9 +245,7 @@ public class ContainerManager {
         }
         // Written once: what the app saves into it later (when it was last run) must survive the next sync.
         if (file.isFile()) return;
-        file.getParentFile().mkdirs();
-        FileUtils.writeString(file, "[Desktop Entry]\nName=" + STEAM_SHORTCUT + "\nExec=" + com.winlator.cmod.linux.LinuxSession.STEAM_PROGRAM
-                + "\nType=Application\ncontainer_id:" + container.id + "\n");
+        addLinuxShortcut(context, container, STEAM_SHORTCUT, com.winlator.cmod.linux.LinuxSession.STEAM_PROGRAM);
     }
 
     public void duplicateContainerAsync(Container container, Runnable callback) {
