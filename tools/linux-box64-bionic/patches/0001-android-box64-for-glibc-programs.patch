@@ -90,7 +90,7 @@ index 1d98dee42..f6350371f 100644
      return emu;
  }
 diff --git a/src/emu/x64printer.c b/src/emu/x64printer.c
-index e31f16f20..41da46138 100644
+index e31f16f20..c9e129f87 100644
 --- a/src/emu/x64printer.c
 +++ b/src/emu/x64printer.c
 @@ -1733,6 +1733,8 @@ void x64Print(x64emu_t* emu, char* buff, size_t buffsz, const char* func, int ti
@@ -111,6 +111,24 @@ index e31f16f20..41da46138 100644
      } else if (w == iFpppipipi) {
          snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIp ", %" PRIp ", %" PRIi32 ", %" PRIp ", %" PRIi32 ", %" PRIp ", %" PRIi32 ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (void*)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(int32_t*)(R_RSP + 16));
      } else if (w == iFppppiiup) {
+@@ -7719,6 +7723,8 @@ void x64Print(x64emu_t* emu, char* buff, size_t buffsz, const char* func, int ti
+     } else if (w == iFEipipp) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIi32 ", %" PRIp ", %" PRIi32 ", %" PRIp ", %" PRIp ")", tid, *(void**)(R_RSP), func, (int32_t)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (void*)R_RCX, (void*)R_R8);
+ #endif
++#if !defined(ANDROID)
++#endif
+ #if !defined(STATICBUILD)
+     } else if (w == iFlip) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIi64 ", %" PRIi32 ", %" PRIp ")", tid, *(void**)(R_RSP), func, (intptr_t)R_RDI, (int32_t)R_RSI, (void*)R_RDX);
+@@ -7740,8 +7746,6 @@ void x64Print(x64emu_t* emu, char* buff, size_t buffsz, const char* func, int ti
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIi32 ", %" PRIi32 ", %" PRIu64 ", %" PRIu64 ", %" PRIi32 ", %" PRIp ", %" PRIp ", %" PRIp ")", tid, *(void**)(R_RSP), func, (int32_t)R_RDI, (int32_t)R_RSI, (uint64_t)R_RDX, (uintptr_t)R_RCX, (int32_t)R_R8, (void*)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16));
+     } else if (w == lFpLpdddddd) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIu64 ", %" PRIp ", %" PRIf ", %" PRIf ", %" PRIf ", %" PRIf ", %" PRIf ", %" PRIf ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (uintptr_t)R_RSI, (void*)R_RDX, emu->xmm[0].d[0], emu->xmm[1].d[0], emu->xmm[2].d[0], emu->xmm[3].d[0], emu->xmm[4].d[0], emu->xmm[5].d[0]);
+-#endif
+-#if !defined(PPC64LE)
+ #endif
+     }
+     else
 diff --git a/src/include/signals.h b/src/include/signals.h
 index 930cc35e9..a2f470c87 100644
 --- a/src/include/signals.h
@@ -332,10 +350,10 @@ index 5f73ab4bb..95443a0cb 100644
      elfheader_t* elf_header = NULL;
 diff --git a/src/wrapped/androidpath.h b/src/wrapped/androidpath.h
 new file mode 100644
-index 000000000..bf7ddcc74
+index 000000000..87c1c9657
 --- /dev/null
 +++ b/src/wrapped/androidpath.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,165 @@
 +// Android has no /dev/shm and no /tmp: the program's paths there go to BOX64_SHM_DIR and TMPDIR (the way libskypath does for the glibc session).
 +#ifndef ANDROIDPATH_H
 +#define ANDROIDPATH_H
@@ -349,6 +367,11 @@ index 000000000..bf7ddcc74
 +#include <sys/stat.h>
 +#include <sys/statvfs.h>
 +#include <sys/vfs.h>
++#include <sys/ioctl.h>
++#include <sys/sysmacros.h>
++#include <time.h>
++#include <errno.h>
++#include <linux/input.h>
 +
 +static inline const char* skyFixPath(const char* path, char* out, size_t size)
 +{
@@ -364,6 +387,102 @@ index 000000000..bf7ddcc74
 +    return out;
 +}
 +#define ANDROID_FIXPATH(p) char p##_fix[PATH_MAX]; p = (__typeof__(p))skyFixPath((const char*)(p), p##_fix, sizeof p##_fix)
++
++// Gamepads: Android has no /dev/input for apps. The app writes the controller as evdev events into $SKY_INPUT_DIR/event<N>; a program that opens
++// /dev/input/event<N> is given that file and its ioctls are answered as an Xbox 360 pad (what libskyshim does for the glibc session).
++#define SKY_MAX_PADS 16
++static int sky_pad_fds[SKY_MAX_PADS];
++static int sky_pad_clocks[SKY_MAX_PADS];
++static int sky_pad_count = 0;
++static volatile int sky_pad_lock = 0;
++static void sky_pad_acquire(void) { while(__sync_lock_test_and_set(&sky_pad_lock, 1)) sched_yield(); }
++static void sky_pad_release(void) { __sync_lock_release(&sky_pad_lock); }
++static int skyPadIs(int fd) { int r = 0; sky_pad_acquire(); for(int i=0; i<sky_pad_count; ++i) if(sky_pad_fds[i]==fd) r = 1; sky_pad_release(); return r; }
++static void skyPadRemember(int fd) { sky_pad_acquire(); if(sky_pad_count<SKY_MAX_PADS) { sky_pad_clocks[sky_pad_count] = CLOCK_REALTIME; sky_pad_fds[sky_pad_count++] = fd; } sky_pad_release(); }
++static void skyPadForget(int fd) { sky_pad_acquire(); for(int i=0; i<sky_pad_count; ++i) if(sky_pad_fds[i]==fd) { sky_pad_fds[i] = sky_pad_fds[--sky_pad_count]; sky_pad_clocks[i] = sky_pad_clocks[sky_pad_count]; break; } sky_pad_release(); }
++static int skyPadClock(int fd) { int r = CLOCK_REALTIME; sky_pad_acquire(); for(int i=0; i<sky_pad_count; ++i) if(sky_pad_fds[i]==fd) r = sky_pad_clocks[i]; sky_pad_release(); return r; }
++static void skyPadSetClock(int fd, int c) { sky_pad_acquire(); for(int i=0; i<sky_pad_count; ++i) if(sky_pad_fds[i]==fd) sky_pad_clocks[i] = c; sky_pad_release(); }
++static int skyPadPath(const char* path, char* out, size_t size)
++{
++    if(!path || strncmp(path, "/dev/input/event", 16)) return -1;
++    const char* digits = path+16;
++    if(!*digits) return -1;
++    for(const char* c=digits; *c; ++c) if(*c<'0' || *c>'9') return -1;
++    const char* dir = getenv("SKY_INPUT_DIR");
++    if(!dir || !*dir) return -1;
++    snprintf(out, size, "%s/event%s", dir, digits);
++    return atoi(digits);
++}
++static int skyPadOpen(const char* path, int flags)
++{
++    char backing[512];
++    if(skyPadPath(path, backing, sizeof backing)<0) return -2;
++    int fd = open(backing, (flags & ~(O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND)) | O_RDONLY);
++    if(fd>=0) { lseek(fd, 0, SEEK_END); skyPadRemember(fd); }
++    return fd;
++}
++static void skySetBit(unsigned char* bits, size_t size, int n) { if((size_t)(n>>3)<size) bits[n>>3] |= 1<<(n&7); }
++static int skyPadIoctl(unsigned long req, void* arg)
++{
++    unsigned nr = req & 0xff;
++    size_t size = (req>>16) & 0x3fff;
++    if(((req>>8)&0xff)!='E') { errno = ENOTTY; return -1; }
++    if(nr==0x01) { *(int*)arg = 0x010001; return 0; }
++    if(nr==0x02) { struct input_id id = {3, 0x045e, 0x028e, 0x0110}; memcpy(arg, &id, sizeof id); return 0; }
++    if(nr==0x06) { const char* name = "Microsoft X-Box 360 pad"; size_t n = strlen(name)+1; if(n>size) n = size; memcpy(arg, name, n); return (int)n; }
++    if(nr==0x07 || nr==0x08) { errno = ENOENT; return -1; }
++    if(nr==0x09 || nr==0x18 || nr==0x19 || nr==0x1b) { memset(arg, 0, size); return 0; }
++    if(nr>=0x20 && nr<0x40) {
++        int type = nr-0x20;
++        unsigned char* bits = arg;
++        memset(bits, 0, size);
++        if(type==0) { skySetBit(bits, size, EV_SYN); skySetBit(bits, size, EV_KEY); skySetBit(bits, size, EV_ABS); }
++        else if(type==EV_KEY) { static const int keys[] = {0x130,0x131,0x133,0x134,0x136,0x137,0x13a,0x13b,0x13c,0x13d,0x13e}; for(unsigned i=0; i<sizeof keys/sizeof keys[0]; ++i) skySetBit(bits, size, keys[i]); }
++        else if(type==EV_ABS) { static const int axes[] = {ABS_X,ABS_Y,ABS_Z,ABS_RX,ABS_RY,ABS_RZ,ABS_HAT0X,ABS_HAT0Y}; for(unsigned i=0; i<sizeof axes/sizeof axes[0]; ++i) skySetBit(bits, size, axes[i]); }
++        return 0;
++    }
++    if(nr>=0x40 && nr<0x80) {
++        int axis = nr-0x40;
++        struct input_absinfo info;
++        memset(&info, 0, sizeof info);
++        if(axis==ABS_Z || axis==ABS_RZ) { info.minimum = 0; info.maximum = 255; }
++        else if(axis==ABS_HAT0X || axis==ABS_HAT0Y) { info.minimum = -1; info.maximum = 1; }
++        else { info.minimum = -32768; info.maximum = 32767; info.fuzz = 16; info.flat = 128; }
++        memcpy(arg, &info, size<sizeof info ? size : sizeof info);
++        return 0;
++    }
++    if(nr==0x90) return 0;
++    errno = EINVAL;
++    return -1;
++}
++EXPORT int my_ioctl(int fd, unsigned long req, void* arg)
++{
++    if(skyPadIs(fd)) {
++        if((req&0xff)==0xa0 && ((req>>8)&0xff)=='E') { skyPadSetClock(fd, arg?*(const int*)arg:CLOCK_REALTIME); return 0; }
++        return skyPadIoctl(req, arg);
++    }
++    return ioctl(fd, req, arg);
++}
++EXPORT ssize_t my_read(int fd, void* buf, size_t count)
++{
++    ssize_t n = read(fd, buf, count);
++    if(n>=0 && skyPadIs(fd)) {
++        if(n==0) { errno = EAGAIN; return -1; }
++        struct timespec now;
++        if(clock_gettime(skyPadClock(fd), &now)) now.tv_sec = now.tv_nsec = 0;
++        struct input_event* ev = buf;
++        for(size_t i=0; i<(size_t)n/sizeof *ev; ++i) {
++            if(ev[i].type==EV_ABS && ev[i].code==ABS_BRAKE) ev[i].code = ABS_Z;
++            else if(ev[i].type==EV_ABS && ev[i].code==ABS_GAS) ev[i].code = ABS_RZ;
++            ev[i].time.tv_sec = now.tv_sec;
++            ev[i].time.tv_usec = now.tv_nsec/1000;
++        }
++    }
++    return n;
++}
++EXPORT ssize_t my___read(int fd, void* buf, size_t count) { return my_read(fd, buf, count); }
++EXPORT int my_close(int fd) { skyPadForget(fd); return close(fd); }
++EXPORT int my___close(int fd) { return my_close(fd); }
 +
 +// the glibc names the plain wrappers cannot translate by themselves
 +EXPORT int my_unlink(const char* p) { ANDROID_FIXPATH(p); return unlink(p); }
@@ -401,7 +520,7 @@ index 000000000..bf7ddcc74
 +EXPORT void* my_mkdtemp(char* t) { char* o=t; ANDROID_FIXPATH(t); char* r = mkdtemp(t); if(t!=o) skyTempBack(o, t, 0); return r ? (void*)o : NULL; }
 +#endif
 diff --git a/src/wrapped/generated/functions_list.txt b/src/wrapped/generated/functions_list.txt
-index 47f4c0d4a..a4267660a 100644
+index 47f4c0d4a..ee2ba6ec1 100644
 --- a/src/wrapped/generated/functions_list.txt
 +++ b/src/wrapped/generated/functions_list.txt
 @@ -998,6 +998,7 @@
@@ -420,6 +539,22 @@ index 47f4c0d4a..a4267660a 100644
  #() iFpppipipi
  #() iFppppiiup
  #() iFppppiipp
+@@ -4199,6 +4201,7 @@
+ #!defined(NOALIGN) iFEipii
+ #!defined(NOALIGN) iFEipiip
+ #!defined(NOALIGN) iFEipipp
++#!defined(ANDROID) iFiLN
+ #!defined(STATICBUILD) lFiN
+ #!defined(STATICBUILD) iFlip
+ #!defined(STATICBUILD) iFLLi
+@@ -4211,7 +4214,6 @@
+ #!defined(STATICBUILD) iFEpipppL
+ #!defined(STATICBUILD) iFiiULippp
+ #!defined(STATICBUILD) lFpLpdddddd
+-#!defined(PPC64LE) iFiLN
+ #() vFEv -> vFE
+ #() iFEv -> iFE
+ #() lFEv -> lFE
 @@ -4224,6 +4226,7 @@
  #() iFEpuvvppp -> iFEpuppp
  wrappedalure:
@@ -428,7 +563,7 @@ index 47f4c0d4a..a4267660a 100644
  wrappedanl:
  wrappedatk:
  - vFp:
-@@ -5483,22 +5486,45 @@ wrappedlibc:
+@@ -5483,22 +5486,47 @@ wrappedlibc:
    - _ITM_deregisterTMCloneTable
    - _ZGTtdlPv
    - __cxa_finalize
@@ -442,6 +577,8 @@ index 47f4c0d4a..a4267660a 100644
    - sched_getcpu
    - vfork
  - iFi:
++  - __close
++  - close
    - iopl
 +  - pkey_free
 +  - pkey_get
@@ -474,7 +611,7 @@ index 47f4c0d4a..a4267660a 100644
  - CFp:
    - _ITM_RU1
  - uFp:
-@@ -5511,16 +5537,41 @@ wrappedlibc:
+@@ -5511,16 +5539,41 @@ wrappedlibc:
    - __sysconf
    - sysconf
  - LFL:
@@ -516,7 +653,7 @@ index 47f4c0d4a..a4267660a 100644
    - _longjmp
    - _obstack_newchunk
    - longjmp
-@@ -5541,32 +5592,59 @@ wrappedlibc:
+@@ -5541,32 +5594,59 @@ wrappedlibc:
    - vwarnx
  - iFiu:
    - pidfd_open
@@ -576,7 +713,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpV:
    - __isoc23_scanf
    - __isoc99_scanf
-@@ -5577,6 +5655,8 @@ wrappedlibc:
+@@ -5577,6 +5657,8 @@ wrappedlibc:
    - scanf
    - wprintf
    - wscanf
@@ -585,7 +722,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpA:
    - __isoc23_vscanf
    - __isoc99_vscanf
-@@ -5584,20 +5664,35 @@ wrappedlibc:
+@@ -5584,20 +5666,35 @@ wrappedlibc:
    - vscanf
    - vwprintf
    - vwscanf
@@ -621,7 +758,7 @@ index 47f4c0d4a..a4267660a 100644
    - realpath
  - SFpp:
    - fopen
-@@ -5616,11 +5711,15 @@ wrappedlibc:
+@@ -5616,11 +5713,15 @@ wrappedlibc:
    - backtrace_symbols_fd
  - vFpup:
    - _ITM_addUserCommitAction
@@ -637,7 +774,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFiiu:
    - pidfd_getfd
  - iFiip:
-@@ -5636,8 +5735,14 @@ wrappedlibc:
+@@ -5636,8 +5737,14 @@ wrappedlibc:
    - ioctl
    - sched_getaffinity
    - sched_setaffinity
@@ -652,7 +789,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFipp:
    - __lxstat
    - __lxstat64
-@@ -5645,13 +5750,18 @@ wrappedlibc:
+@@ -5645,13 +5752,18 @@ wrappedlibc:
    - __xstat
    - __xstat64
    - getopt
@@ -671,7 +808,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpLi:
    - mprotect
  - iFpLp:
-@@ -5659,11 +5769,15 @@ wrappedlibc:
+@@ -5659,11 +5771,15 @@ wrappedlibc:
  - iFppi:
    - ftw
    - ftw64
@@ -687,7 +824,7 @@ index 47f4c0d4a..a4267660a 100644
    - execve
    - execvpe
  - iFppV:
-@@ -5688,6 +5802,8 @@ wrappedlibc:
+@@ -5688,6 +5804,8 @@ wrappedlibc:
    - vsprintf
    - vsscanf
    - vswscanf
@@ -696,7 +833,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpON:
    - __open
    - open
-@@ -5702,17 +5818,35 @@ wrappedlibc:
+@@ -5702,17 +5820,38 @@ wrappedlibc:
    - vfscanf
    - vfwprintf
    - vfwscanf
@@ -704,6 +841,9 @@ index 47f4c0d4a..a4267660a 100644
 +  - __strtof_l
 +- dFppp:
 +  - __strtod_l
++- lFipL:
++  - __read
++  - read
  - lFipV:
    - __wprintf_chk
  - lFppL:
@@ -732,7 +872,7 @@ index 47f4c0d4a..a4267660a 100644
    - tdelete
    - tfind
    - tsearch
-@@ -5727,6 +5861,8 @@ wrappedlibc:
+@@ -5727,6 +5866,8 @@ wrappedlibc:
    - qsort
  - vFppiV:
    - makecontext
@@ -741,7 +881,7 @@ index 47f4c0d4a..a4267660a 100644
  - vFpppp:
    - __libc_init
  - iFiiip:
-@@ -5741,6 +5877,7 @@ wrappedlibc:
+@@ -5741,6 +5882,7 @@ wrappedlibc:
    - __vdprintf_chk
  - iFipii:
    - epoll_wait
@@ -749,7 +889,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFipup:
    - __xmknod
  - iFippi:
-@@ -5748,6 +5885,11 @@ wrappedlibc:
+@@ -5748,6 +5890,11 @@ wrappedlibc:
    - fstatat64
  - iFippL:
    - __inet_pton_chk
@@ -761,7 +901,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpipp:
    - __vasprintf_chk
    - glob
-@@ -5758,6 +5900,10 @@ wrappedlibc:
+@@ -5758,6 +5905,10 @@ wrappedlibc:
    - __fwprintf_chk
  - iFpipA:
    - __vfwprintf_chk
@@ -772,7 +912,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpLpV:
    - __snprintf
    - snprintf
-@@ -5770,6 +5916,7 @@ wrappedlibc:
+@@ -5770,6 +5921,7 @@ wrappedlibc:
    - nftw
    - nftw64
  - iFpppp:
@@ -780,7 +920,7 @@ index 47f4c0d4a..a4267660a 100644
    - __register_atfork
    - __vsprintf_chk
    - scandir
-@@ -5778,12 +5925,30 @@ wrappedlibc:
+@@ -5778,12 +5930,30 @@ wrappedlibc:
    - readlinkat
  - lFuipp:
    - ptrace
@@ -811,7 +951,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFiipup:
    - __xmknodat
  - iFiippi:
-@@ -5803,23 +5968,41 @@ wrappedlibc:
+@@ -5803,23 +5973,41 @@ wrappedlibc:
    - epoll_pwait2
  - iFipupL:
    - mount_setattr
@@ -853,7 +993,7 @@ index 47f4c0d4a..a4267660a 100644
  - pFpppLp:
    - lfind
    - lsearch
-@@ -5835,6 +6018,8 @@ wrappedlibc:
+@@ -5835,6 +6023,8 @@ wrappedlibc:
  - iFpLiLpV:
    - __snprintf_chk
    - __swprintf_chk
@@ -862,7 +1002,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpppppp:
    - posix_spawn
    - posix_spawnp
-@@ -5848,6 +6033,9 @@ wrappedlibc:
+@@ -5848,6 +6038,9 @@ wrappedlibc:
    - __libc_start_main
  - iFppipppp:
    - clone
@@ -872,7 +1012,7 @@ index 47f4c0d4a..a4267660a 100644
  wrappedlibcmusl:
  wrappedlibcrypt:
  wrappedlibcups:
-@@ -6301,7 +6489,11 @@ wrappedlibpthread:
+@@ -6301,7 +6494,11 @@ wrappedlibpthread:
    - fork
  - iFu:
    - pthread_key_delete
@@ -884,7 +1024,7 @@ index 47f4c0d4a..a4267660a 100644
    - __pthread_mutexattr_destroy
    - __pthread_mutexattr_init
    - pthread_attr_destroy
-@@ -6317,12 +6509,16 @@ wrappedlibpthread:
+@@ -6317,12 +6514,16 @@ wrappedlibpthread:
    - pthread_condattr_destroy
    - pthread_condattr_init
    - pthread_getattr_default_np
@@ -901,7 +1041,7 @@ index 47f4c0d4a..a4267660a 100644
  - iFpi:
    - __pthread_mutexattr_settype
    - pthread_attr_setdetachstate
-@@ -6369,6 +6565,7 @@ wrappedlibpthread:
+@@ -6369,6 +6570,7 @@ wrappedlibpthread:
    - pthread_getattr_np
    - pthread_key_create
    - pthread_mutex_init
@@ -909,7 +1049,7 @@ index 47f4c0d4a..a4267660a 100644
    - pthread_mutexattr_getkind_np
    - pthread_mutexattr_getprotocol
    - pthread_mutexattr_getrobust
-@@ -6434,10 +6631,14 @@ wrappedlibrt:
+@@ -6434,10 +6636,14 @@ wrappedlibrt:
    - aio_read64
    - aio_write
    - aio_write64
@@ -925,7 +1065,7 @@ index 47f4c0d4a..a4267660a 100644
    - lio_listio
  wrappedlibsm:
 diff --git a/src/wrapped/generated/wrappedlibctypes.h b/src/wrapped/generated/wrappedlibctypes.h
-index d01566c8e..8713b0839 100644
+index d01566c8e..54a3ac6c4 100644
 --- a/src/wrapped/generated/wrappedlibctypes.h
 +++ b/src/wrapped/generated/wrappedlibctypes.h
 @@ -16,13 +16,17 @@ typedef void (*vFi_t)(int32_t);
@@ -970,7 +1110,7 @@ index d01566c8e..8713b0839 100644
  typedef void* (*pFpp_t)(void*, void*);
  typedef void* (*SFpp_t)(void*, void*);
  typedef unsigned __int128 (*HFHH_t)(unsigned __int128, unsigned __int128);
-@@ -49,36 +60,51 @@ typedef void (*vFipV_t)(int32_t, void*, ...);
+@@ -49,36 +60,52 @@ typedef void (*vFipV_t)(int32_t, void*, ...);
  typedef void (*vFipA_t)(int32_t, void*, va_list);
  typedef void (*vFpii_t)(void*, int32_t, int32_t);
  typedef void (*vFpup_t)(void*, uint32_t, void*);
@@ -1004,6 +1144,7 @@ index d01566c8e..8713b0839 100644
  typedef int32_t (*iFSpA_t)(void*, void*, va_list);
 +typedef float (*fFppp_t)(void*, void*, void*);
 +typedef double (*dFppp_t)(void*, void*, void*);
++typedef intptr_t (*lFipL_t)(int32_t, void*, uintptr_t);
  typedef intptr_t (*lFipV_t)(int32_t, void*, ...);
  typedef intptr_t (*lFppL_t)(void*, void*, uintptr_t);
 +typedef uintptr_t (*LFpLp_t)(void*, uintptr_t, void*);
@@ -1022,7 +1163,7 @@ index d01566c8e..8713b0839 100644
  typedef void (*vFpppp_t)(void*, void*, void*, void*);
  typedef int32_t (*iFiiip_t)(int32_t, int32_t, int32_t, void*);
  typedef int32_t (*iFiiiN_t)(int32_t, int32_t, int32_t, ...);
-@@ -89,18 +115,29 @@ typedef int32_t (*iFipii_t)(int32_t, void*, int32_t, int32_t);
+@@ -89,18 +116,29 @@ typedef int32_t (*iFipii_t)(int32_t, void*, int32_t, int32_t);
  typedef int32_t (*iFipup_t)(int32_t, void*, uint32_t, void*);
  typedef int32_t (*iFippi_t)(int32_t, void*, void*, int32_t);
  typedef int32_t (*iFippL_t)(int32_t, void*, void*, uintptr_t);
@@ -1052,7 +1193,7 @@ index d01566c8e..8713b0839 100644
  typedef int32_t (*iFiipup_t)(int32_t, int32_t, void*, uint32_t, void*);
  typedef int32_t (*iFiippi_t)(int32_t, int32_t, void*, void*, int32_t);
  typedef int32_t (*iFiuppi_t)(int32_t, uint32_t, void*, void*, int32_t);
-@@ -110,25 +147,35 @@ typedef int32_t (*iFipiup_t)(int32_t, void*, int32_t, uint32_t, void*);
+@@ -110,25 +148,35 @@ typedef int32_t (*iFipiup_t)(int32_t, void*, int32_t, uint32_t, void*);
  typedef int32_t (*iFipipu_t)(int32_t, void*, int32_t, void*, uint32_t);
  typedef int32_t (*iFipipp_t)(int32_t, void*, int32_t, void*, void*);
  typedef int32_t (*iFipupL_t)(int32_t, void*, uint32_t, void*, uintptr_t);
@@ -1088,7 +1229,7 @@ index d01566c8e..8713b0839 100644
  
  #define SUPER() ADDED_FUNCTIONS() \
  	GO(_Jv_RegisterClasses, vFv_t) \
-@@ -139,32 +186,76 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -139,32 +187,78 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(_ITM_deregisterTMCloneTable, vFp_t) \
  	GO(_ZGTtdlPv, vFp_t) \
  	GO(__cxa_finalize, vFp_t) \
@@ -1100,6 +1241,8 @@ index d01566c8e..8713b0839 100644
 +	GO(getdtablesize, iFv_t) \
  	GO(sched_getcpu, iFv_t) \
  	GO(vfork, iFv_t) \
++	GO(__close, iFi_t) \
++	GO(close, iFi_t) \
  	GO(iopl, iFi_t) \
 +	GO(pkey_free, iFi_t) \
 +	GO(pkey_get, iFi_t) \
@@ -1165,7 +1308,7 @@ index d01566c8e..8713b0839 100644
  	GO(_longjmp, vFpi_t) \
  	GO(_obstack_newchunk, vFpi_t) \
  	GO(longjmp, vFpi_t) \
-@@ -180,26 +271,51 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -180,26 +274,51 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(vwarn, vFpA_t) \
  	GO(vwarnx, vFpA_t) \
  	GO(pidfd_open, iFiu_t) \
@@ -1217,7 +1360,7 @@ index d01566c8e..8713b0839 100644
  	GO(__isoc23_scanf, iFpV_t) \
  	GO(__isoc99_scanf, iFpV_t) \
  	GO(execl, iFpV_t) \
-@@ -209,22 +325,34 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -209,22 +328,34 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(scanf, iFpV_t) \
  	GO(wprintf, iFpV_t) \
  	GO(wscanf, iFpV_t) \
@@ -1252,7 +1395,7 @@ index d01566c8e..8713b0839 100644
  	GO(realpath, pFpp_t) \
  	GO(fopen, SFpp_t) \
  	GO(fopen64, SFpp_t) \
-@@ -237,9 +365,11 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -237,9 +368,11 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(vsyslog, vFipA_t) \
  	GO(backtrace_symbols_fd, vFpii_t) \
  	GO(_ITM_addUserCommitAction, vFpup_t) \
@@ -1264,7 +1407,7 @@ index d01566c8e..8713b0839 100644
  	GO(pidfd_getfd, iFiiu_t) \
  	GO(__fxstat, iFiip_t) \
  	GO(__fxstat64, iFiip_t) \
-@@ -250,26 +380,36 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -250,26 +383,36 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(ioctl, iFiLp_t) \
  	GO(sched_getaffinity, iFiLp_t) \
  	GO(sched_setaffinity, iFiLp_t) \
@@ -1301,7 +1444,7 @@ index d01566c8e..8713b0839 100644
  	GO(execve, iFppp_t) \
  	GO(execvpe, iFppp_t) \
  	GO(__asprintf, iFppV_t) \
-@@ -292,6 +432,7 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -292,6 +435,7 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(vsprintf, iFppA_t) \
  	GO(vsscanf, iFppA_t) \
  	GO(vswscanf, iFppA_t) \
@@ -1309,12 +1452,14 @@ index d01566c8e..8713b0839 100644
  	GO(__open, iFpON_t) \
  	GO(open, iFpON_t) \
  	GO(open64, iFpON_t) \
-@@ -303,12 +444,24 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -303,12 +447,26 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(vfscanf, iFSpA_t) \
  	GO(vfwprintf, iFSpA_t) \
  	GO(vfwscanf, iFSpA_t) \
 +	GO(__strtof_l, fFppp_t) \
 +	GO(__strtod_l, dFppp_t) \
++	GO(__read, lFipL_t) \
++	GO(read, lFipL_t) \
  	GO(__wprintf_chk, lFipV_t) \
  	GO(readlink, lFppL_t) \
 +	GO(__mbrlen, LFpLp_t) \
@@ -1334,7 +1479,7 @@ index d01566c8e..8713b0839 100644
  	GO(tdelete, pFppp_t) \
  	GO(tfind, pFppp_t) \
  	GO(tsearch, pFppp_t) \
-@@ -318,6 +471,7 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -318,6 +476,7 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(__vsyslog_chk, vFiipA_t) \
  	GO(qsort, vFpLLp_t) \
  	GO(makecontext, vFppiV_t) \
@@ -1342,7 +1487,7 @@ index d01566c8e..8713b0839 100644
  	GO(__libc_init, vFpppp_t) \
  	GO(epoll_ctl, iFiiip_t) \
  	GO(semctl, iFiiiN_t) \
-@@ -325,10 +479,14 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -325,10 +484,14 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(__dprintf_chk, iFiipV_t) \
  	GO(__vdprintf_chk, iFiipA_t) \
  	GO(epoll_wait, iFipii_t) \
@@ -1357,7 +1502,7 @@ index d01566c8e..8713b0839 100644
  	GO(__vasprintf_chk, iFpipp_t) \
  	GO(glob, iFpipp_t) \
  	GO(glob64, iFpipp_t) \
-@@ -336,6 +494,8 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -336,6 +499,8 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(__fprintf_chk, iFpipV_t) \
  	GO(__fwprintf_chk, iFpipV_t) \
  	GO(__vfwprintf_chk, iFpipA_t) \
@@ -1366,7 +1511,7 @@ index d01566c8e..8713b0839 100644
  	GO(__snprintf, iFpLpV_t) \
  	GO(snprintf, iFpLpV_t) \
  	GO(swprintf, iFpLpV_t) \
-@@ -344,15 +504,27 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -344,15 +509,27 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(vswprintf, iFpLpA_t) \
  	GO(nftw, iFppii_t) \
  	GO(nftw64, iFppii_t) \
@@ -1394,7 +1539,7 @@ index d01566c8e..8713b0839 100644
  	GO(__xmknodat, iFiipup_t) \
  	GO(__fxstatat, iFiippi_t) \
  	GO(__fxstatat64, iFiippi_t) \
-@@ -363,16 +535,26 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -363,16 +540,26 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(move_mount, iFipipu_t) \
  	GO(epoll_pwait2, iFipipp_t) \
  	GO(mount_setattr, iFipupL_t) \
@@ -1421,7 +1566,7 @@ index d01566c8e..8713b0839 100644
  	GO(lfind, pFpppLp_t) \
  	GO(lsearch, pFpppLp_t) \
  	GO(error_at_line, vFiipupV_t) \
-@@ -382,12 +564,15 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+@@ -382,12 +569,15 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
  	GO(__vsnprintf_chk, iFpLiLpp_t) \
  	GO(__snprintf_chk, iFpLiLpV_t) \
  	GO(__swprintf_chk, iFpLiLpV_t) \
@@ -1511,7 +1656,7 @@ index 1b1d12401..347570300 100644
  
  #endif // __wrappedlibrtTYPES_H_
 diff --git a/src/wrapped/generated/wrapper.c b/src/wrapped/generated/wrapper.c
-index d1ac4cfdf..eefa51ea1 100644
+index d1ac4cfdf..6ccdcd460 100644
 --- a/src/wrapped/generated/wrapper.c
 +++ b/src/wrapped/generated/wrapper.c
 @@ -1029,6 +1029,7 @@ typedef void (*vFEpuV_t)(x64emu_t*, void*, uint32_t, void*);
@@ -1530,6 +1675,28 @@ index d1ac4cfdf..eefa51ea1 100644
  typedef int32_t (*iFpppipipi_t)(void*, void*, void*, int32_t, void*, int32_t, void*, int32_t);
  typedef int32_t (*iFppppiiup_t)(void*, void*, void*, void*, int32_t, int32_t, uint32_t, void*);
  typedef int32_t (*iFppppiipp_t)(void*, void*, void*, void*, int32_t, int32_t, void*, void*);
+@@ -4285,6 +4287,10 @@ typedef int32_t (*iFEipiip_t)(x64emu_t*, int32_t, void*, int32_t, int32_t, void*
+ typedef int32_t (*iFEipipp_t)(x64emu_t*, int32_t, void*, int32_t, void*, void*);
+ #endif
+ 
++#if !defined(ANDROID)
++typedef int32_t (*iFiLN_t)(int32_t, uintptr_t, ...);
++#endif
++
+ #if !defined(STATICBUILD)
+ typedef intptr_t (*lFiN_t)(int32_t, ...);
+ typedef int32_t (*iFlip_t)(intptr_t, int32_t, void*);
+@@ -4300,10 +4306,6 @@ typedef int32_t (*iFiiULippp_t)(int32_t, int32_t, uint64_t, uintptr_t, int32_t,
+ typedef intptr_t (*lFpLpdddddd_t)(void*, uintptr_t, void*, double, double, double, double, double, double);
+ #endif
+ 
+-#if !defined(PPC64LE)
+-typedef int32_t (*iFiLN_t)(int32_t, uintptr_t, ...);
+-#endif
+-
+ void vFE(x64emu_t *emu, uintptr_t fcn) { vFE_t fn = (vFE_t)fcn; fn(emu); }
+ void vFv(x64emu_t *emu, uintptr_t fcn) { vFv_t fn = (vFv_t)fcn; fn(); (void)emu; }
+ void vFc(x64emu_t *emu, uintptr_t fcn) { vFc_t fn = (vFc_t)fcn; fn((int8_t)R_RDI); }
 @@ -5284,6 +5286,7 @@ void vFEpuV(x64emu_t *emu, uintptr_t fcn) { vFEpuV_t fn = (vFEpuV_t)fcn; fn(emu,
  void vFEpuA(x64emu_t *emu, uintptr_t fcn) { vFEpuA_t fn = (vFEpuA_t)fcn; fn(emu, (void*)R_RDI, (uint32_t)R_RSI, (void*)R_RDX); }
  void vFEpUp(x64emu_t *emu, uintptr_t fcn) { vFEpUp_t fn = (vFEpUp_t)fcn; fn(emu, (void*)R_RDI, (uint64_t)R_RSI, (void*)R_RDX); }
@@ -1546,8 +1713,30 @@ index d1ac4cfdf..eefa51ea1 100644
  void iFpppipipi(x64emu_t *emu, uintptr_t fcn) { iFpppipipi_t fn = (iFpppipipi_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (void*)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(int32_t*)(R_RSP + 16)); }
  void iFppppiiup(x64emu_t *emu, uintptr_t fcn) { iFppppiiup_t fn = (iFppppiiup_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (void*)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(uint32_t*)(R_RSP + 8), *(void**)(R_RSP + 16)); }
  void iFppppiipp(x64emu_t *emu, uintptr_t fcn) { iFppppiipp_t fn = (iFppppiipp_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (void*)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16)); }
+@@ -8565,6 +8569,10 @@ void iFEipiip(x64emu_t *emu, uintptr_t fcn) { iFEipiip_t fn = (iFEipiip_t)fcn; R
+ void iFEipipp(x64emu_t *emu, uintptr_t fcn) { iFEipipp_t fn = (iFEipipp_t)fcn; R_RAX=(int)fn(emu, (int32_t)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (void*)R_RCX, (void*)R_R8); }
+ #endif
+ 
++#if !defined(ANDROID)
++void iFiLN(x64emu_t *emu, uintptr_t fcn) { iFiLN_t fn = (iFiLN_t)fcn; R_RAX=(int)fn((int32_t)R_RDI, (uintptr_t)R_RSI, (void*)R_RDX); }
++#endif
++
+ #if !defined(STATICBUILD)
+ void lFiN(x64emu_t *emu, uintptr_t fcn) { lFiN_t fn = (lFiN_t)fcn; R_RAX=(intptr_t)fn((int32_t)R_RDI, (void*)R_RSI); }
+ void iFlip(x64emu_t *emu, uintptr_t fcn) { iFlip_t fn = (iFlip_t)fcn; R_RAX=(int)fn((intptr_t)R_RDI, (int32_t)R_RSI, (void*)R_RDX); }
+@@ -8580,10 +8588,6 @@ void iFiiULippp(x64emu_t *emu, uintptr_t fcn) { iFiiULippp_t fn = (iFiiULippp_t)
+ void lFpLpdddddd(x64emu_t *emu, uintptr_t fcn) { lFpLpdddddd_t fn = (lFpLpdddddd_t)fcn; R_RAX=(intptr_t)fn((void*)R_RDI, (uintptr_t)R_RSI, (void*)R_RDX, emu->xmm[0].d[0], emu->xmm[1].d[0], emu->xmm[2].d[0], emu->xmm[3].d[0], emu->xmm[4].d[0], emu->xmm[5].d[0]); }
+ #endif
+ 
+-#if !defined(PPC64LE)
+-void iFiLN(x64emu_t *emu, uintptr_t fcn) { iFiLN_t fn = (iFiLN_t)fcn; R_RAX=(int)fn((int32_t)R_RDI, (uintptr_t)R_RSI, (void*)R_RDX); }
+-#endif
+-
+ void vFEv(x64emu_t *emu, uintptr_t fcn) { vFE_t fn = (vFE_t)fcn; fn(emu); }
+ void iFEv(x64emu_t *emu, uintptr_t fcn) { iFE_t fn = (iFE_t)fcn; R_RAX=(int)fn(emu); }
+ void lFEv(x64emu_t *emu, uintptr_t fcn) { lFE_t fn = (lFE_t)fcn; R_RAX=(intptr_t)fn(emu); }
 diff --git a/src/wrapped/generated/wrapper.h b/src/wrapped/generated/wrapper.h
-index bc0112979..f7ab979b1 100644
+index bc0112979..d2d59a6fc 100644
 --- a/src/wrapped/generated/wrapper.h
 +++ b/src/wrapped/generated/wrapper.h
 @@ -1035,6 +1035,7 @@ void vFEpuV(x64emu_t *emu, uintptr_t fnc);
@@ -1566,8 +1755,30 @@ index bc0112979..f7ab979b1 100644
  void iFpppipipi(x64emu_t *emu, uintptr_t fnc);
  void iFppppiiup(x64emu_t *emu, uintptr_t fnc);
  void iFppppiipp(x64emu_t *emu, uintptr_t fnc);
+@@ -4243,6 +4245,10 @@ void iFEipiip(x64emu_t *emu, uintptr_t fnc);
+ void iFEipipp(x64emu_t *emu, uintptr_t fnc);
+ #endif
+ 
++#if !defined(ANDROID)
++void iFiLN(x64emu_t *emu, uintptr_t fnc);
++#endif
++
+ #if !defined(STATICBUILD)
+ void lFiN(x64emu_t *emu, uintptr_t fnc);
+ void iFlip(x64emu_t *emu, uintptr_t fnc);
+@@ -4258,10 +4264,6 @@ void iFiiULippp(x64emu_t *emu, uintptr_t fnc);
+ void lFpLpdddddd(x64emu_t *emu, uintptr_t fnc);
+ #endif
+ 
+-#if !defined(PPC64LE)
+-void iFiLN(x64emu_t *emu, uintptr_t fnc);
+-#endif
+-
+ void vFEv(x64emu_t *emu, uintptr_t fnc);
+ void iFEv(x64emu_t *emu, uintptr_t fnc);
+ void lFEv(x64emu_t *emu, uintptr_t fnc);
 diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
-index c995a0cc5..85d734747 100644
+index c995a0cc5..22278e8c6 100644
 --- a/src/wrapped/wrappedlibc.c
 +++ b/src/wrapped/wrappedlibc.c
 @@ -160,6 +160,9 @@ static void my_wrap_error_print_progname(void)
@@ -1650,27 +1861,29 @@ index c995a0cc5..85d734747 100644
      (void)emu;
      struct stat st;
      int r = fstatat(fd, path, &st, flags);
-@@ -2276,6 +2300,9 @@ static int shm_unlink(const char *name) {
+@@ -2276,6 +2300,10 @@ static int shm_unlink(const char *name) {
  #define TMP_CPUCACHE_SIZE "box64_cpucachesize"
  EXPORT int32_t my_open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
  {
 +#ifdef ANDROID
++    {int pad = skyPadOpen((const char*)pathname, flags); if(pad!=-2) return pad;}
 +    ANDROID_FIXPATH(pathname);
 +#endif
      if(isProcSelf((const char*) pathname, "cmdline")) {
          // special case for self command line...
          #if 0
-@@ -2419,6 +2446,9 @@ EXPORT int32_t my___open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t
+@@ -2419,6 +2447,10 @@ EXPORT int32_t my___open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t
  
  EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
  {
 +#ifdef ANDROID
++    {int pad = skyPadOpen((const char*)pathname, flags); if(pad!=-2) return pad;}
 +    ANDROID_FIXPATH(pathname);
 +#endif
      if(isProcSelf((const char*)pathname, "cmdline")) {
          // special case for self command line...
          #if 0
-@@ -2510,6 +2540,9 @@ EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t
+@@ -2510,6 +2542,9 @@ EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t
  
  EXPORT FILE* my_fopen64(x64emu_t* emu, const char* path, const char* mode)
  {
@@ -1680,7 +1893,7 @@ index c995a0cc5..85d734747 100644
      if(isProcSelf((const char*)path, "cmdline")) {
          int tmp = shm_open(TMP_CMDLINE, O_RDWR | O_CREAT, S_IRWXU);
          if(tmp<0) return fopen64(path, mode);
-@@ -3455,8 +3488,17 @@ void InitCpuModel()
+@@ -3455,8 +3490,17 @@ void InitCpuModel()
  #endif
  
  #ifdef ANDROID
@@ -1698,7 +1911,7 @@ index c995a0cc5..85d734747 100644
  }
  #else
  EXPORT const unsigned short int *my___ctype_b;
-@@ -3554,6 +3596,9 @@ EXPORT void my___explicit_bzero_chk(x64emu_t* emu, void* dst, uint32_t len, uint
+@@ -3554,6 +3598,9 @@ EXPORT void my___explicit_bzero_chk(x64emu_t* emu, void* dst, uint32_t len, uint
  
  EXPORT void* my_realpath(x64emu_t* emu, void* path, void* resolved_path)
  {
@@ -1708,7 +1921,7 @@ index c995a0cc5..85d734747 100644
      if(path && isProcSelf(path, "exe")) {
          return realpath(emu->context->fullpath, resolved_path);
      }
-@@ -3788,11 +3833,23 @@ EXPORT void* my_mallinfo(x64emu_t* emu, void* p)
+@@ -3788,11 +3835,23 @@ EXPORT void* my_mallinfo(x64emu_t* emu, void* p)
          inited = 1;
          f = (mallinfo_fnc)dlsym(my_lib->w.lib, "mallinfo");
      }
@@ -1732,7 +1945,7 @@ index c995a0cc5..85d734747 100644
  }
  
  struct my_mallinfo2_s {
-@@ -4851,7 +4908,57 @@ __attribute__((weak)) int dn_skipname(const unsigned char* ptr, const unsigned c
+@@ -4851,7 +4910,57 @@ __attribute__((weak)) int dn_skipname(const unsigned char* ptr, const unsigned c
  #ifndef _SC_NPROCESSORS_CONF
  #define _SC_NPROCESSORS_CONF    83
  #endif
@@ -2170,7 +2383,7 @@ index 000000000..9850ab76f
 +EXPORT void* my___fgets_chk(char* buf, size_t buflen, int n, FILE* f) { return fgets(buf, n, f); }
 +
 diff --git a/src/wrapped/wrappedlibc_private.h b/src/wrapped/wrappedlibc_private.h
-index c147d76d7..13a344da8 100644
+index c147d76d7..57f03332b 100644
 --- a/src/wrapped/wrappedlibc_private.h
 +++ b/src/wrapped/wrappedlibc_private.h
 @@ -8,7 +8,11 @@ GO(abort, vFv)
@@ -2247,7 +2460,24 @@ index c147d76d7..13a344da8 100644
  GOW(chown, iFpuu)
  GO(chroot, iFp)
  GOW(clearenv, iFv)
-@@ -177,8 +209,16 @@ GOW(__connect, iFipu)
+@@ -164,8 +196,16 @@ GOW(clock_nanosleep, iFiipp)
+ GOW(clock_settime, iFip)
+ //GO(__clone, 
+ GOWM(clone, iFEppipppp)
++#ifdef ANDROID
++GOM(__close, iFi) //%noE
++#else
+ GO(__close, iFi)
++#endif
++#ifdef ANDROID
++GOWM(close, iFi) //%noE
++#else
+ GOW(close, iFi)
++#endif
+ GOW(closedir, iFp)
+ GO(closelog, vFv)
+ //GO(__close_nocancel, 
+@@ -177,8 +217,16 @@ GOW(__connect, iFipu)
  GOW(connect, iFipu)
  GO(copy_file_range, lFipipLu)
  //GO(__copy_grp, 
@@ -2264,7 +2494,7 @@ index c147d76d7..13a344da8 100644
  //GO(create_module, 
  GO(ctermid, pFp)
  GO(ctime, pFp)
-@@ -191,18 +231,30 @@ DATA(_ctype_, 8)
+@@ -191,18 +239,30 @@ DATA(_ctype_, 8)
  //DATA(__ctype32_b, 
  //DATA(__ctype32_tolower, 
  //DATA(__ctype32_toupper, 
@@ -2297,7 +2527,7 @@ index c147d76d7..13a344da8 100644
  //DATAB(__curbrk, 
  GO(cuserid, pFp)
  GOM(__cxa_atexit, iFEppp)
-@@ -215,8 +267,16 @@ GO(daemon, iFii)
+@@ -215,8 +275,16 @@ GO(daemon, iFii)
  DATAB(__daylight, 4)
  DATA(daylight, 4)
  GO(__dcgettext, pFppi)
@@ -2314,7 +2544,7 @@ index c147d76d7..13a344da8 100644
  //GO(__default_morecore, 
  #ifdef STATICBUILD
  //GO(delete_module, 
-@@ -226,7 +286,11 @@ GOM(delete_module, iFEpu)
+@@ -226,7 +294,11 @@ GOM(delete_module, iFEpu)
  GO(des_setparity, vFp)
  #endif
  GO(__dgettext, pFpp)
@@ -2326,7 +2556,7 @@ index c147d76d7..13a344da8 100644
  GO(difftime, dFll)
  GO(dirfd, iFp)
  GO(dirname, pFp)
-@@ -248,7 +312,11 @@ GO(_dl_mcount_wrapper_check, vFp)
+@@ -248,7 +320,11 @@ GO(_dl_mcount_wrapper_check, vFp)
  //GO(_dl_sym, 
  //GO(_dl_vsym, 
  GOW(dngettext, pFpppL)
@@ -2338,7 +2568,7 @@ index c147d76d7..13a344da8 100644
  GOM(dprintf, iFEipV)
  GOM(__dprintf_chk, iFEiipV)
  GO(drand48, dFv)
-@@ -257,10 +325,22 @@ GOW(dup, iFi)
+@@ -257,10 +333,22 @@ GOW(dup, iFi)
  GO(__dup2, iFii)
  GOW(dup2, iFii)
  GOW(dup3, iFiiO)
@@ -2361,7 +2591,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //GO(ecb_crypt, 
  #else
-@@ -315,7 +395,11 @@ GO(erand48, dFp)
+@@ -315,7 +403,11 @@ GO(erand48, dFp)
  GOW(erand48_r, iFppp)
  GOM(err, vFEipV)
  //DATAB(errno, 
@@ -2373,7 +2603,7 @@ index c147d76d7..13a344da8 100644
  GOWM(error, vFEiipV)
  GOWM(error_at_line, vFEiipupV)
  //DATAB(error_message_count, 4)
-@@ -339,7 +423,11 @@ GO(ether_ntoa, pFp)
+@@ -339,7 +431,11 @@ GO(ether_ntoa, pFp)
  GO(ether_ntoa_r, pFpp)
  GO(ether_ntohost, iFpp)
  #endif
@@ -2385,7 +2615,7 @@ index c147d76d7..13a344da8 100644
  GO(eventfd, iFui)
  GO(eventfd_read, iFip)
  GO(eventfd_write, iFiU)
-@@ -354,8 +442,12 @@ GOM(_exit, vFEi)
+@@ -354,8 +450,12 @@ GOM(_exit, vFEi)
  GOM(exit, vFEi)
  GOW(_Exit, vFi)
  GO(explicit_bzero, vFpL)
@@ -2399,7 +2629,7 @@ index c147d76d7..13a344da8 100644
  GOW(fallocate, iFiill)
  GO(fallocate64, iFiiII)
  GO(fanotify_init, iFuu)
-@@ -376,7 +468,11 @@ GOWM(fcntl64, iFEiiN)
+@@ -376,7 +476,11 @@ GOWM(fcntl64, iFEiiN)
  GO(fcvt, pFdipp)
  GO(fcvt_r, iFdipppL)
  GO(fdatasync, iFi)
@@ -2411,7 +2641,7 @@ index c147d76d7..13a344da8 100644
  //GO(__fdelt_warn, 
  //GO(fdetach, 
  GO(fdopen, SFip)
-@@ -402,7 +498,11 @@ GO(fgetpos64, iFSp)
+@@ -402,7 +506,11 @@ GO(fgetpos64, iFSp)
  GO(fgetpwent, pFS)
  GOW(fgetpwent_r, iFSppLp)
  GOW(fgets, pFpiS)
@@ -2423,7 +2653,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //GO(fgetsgent, 
  //GOW(fgetsgent_r, 
-@@ -416,7 +516,7 @@ GOW(fgets_unlocked, pFpiS)
+@@ -416,7 +524,7 @@ GOW(fgets_unlocked, pFpiS)
  #ifdef STATICBUILD
  //GO(__fgets_unlocked_chk,
  #else
@@ -2432,7 +2662,7 @@ index c147d76d7..13a344da8 100644
  #endif
  GOW(fgetwc, uFS)
  GOW(fgetwc_unlocked, uFS)
-@@ -457,15 +557,31 @@ GO(fputws, iFpS)
+@@ -457,15 +565,31 @@ GO(fputws, iFpS)
  GO(fputws_unlocked, iFpS)
  GO(fread, LFpLLS)
  GO(__freadable, iFp)
@@ -2464,7 +2694,7 @@ index c147d76d7..13a344da8 100644
  GO(fremovexattr, iFip)
  GO(freopen, SFppS)
  GO(freopen64, SFppS)
-@@ -497,7 +613,11 @@ GO(ftruncate, iFil)
+@@ -497,7 +621,11 @@ GO(ftruncate, iFil)
  GO(ftruncate64, iFiI)
  GOW(ftrylockfile, iFS)
  GOW(fts64_children, pFpi)
@@ -2476,7 +2706,7 @@ index c147d76d7..13a344da8 100644
  GOWM(fts64_open, pFEpip)
  GOW(fts64_read, pFp)
  GOW(fts64_set, iFppi)
-@@ -549,20 +669,32 @@ GO(getchar_unlocked, iFv)
+@@ -549,20 +677,32 @@ GO(getchar_unlocked, iFv)
  GOWM(getcontext, iFEp)
  GOW(getcpu, iFpp)
  GOW(getc_unlocked, iFS)
@@ -2509,7 +2739,7 @@ index c147d76d7..13a344da8 100644
  GOW(getegid, uFv)
  GO(getentropy, iFpL)
  GO(getenv, pFp)
-@@ -579,7 +711,11 @@ GO(getgrnam, pFp)
+@@ -579,7 +719,11 @@ GO(getgrnam, pFp)
  GO(getgrnam_r, iFpppLp)
  GO(getgrouplist, iFpupp)
  GOW(getgroups, iFip)
@@ -2521,7 +2751,7 @@ index c147d76d7..13a344da8 100644
  GO(gethostbyaddr, pFpui)
  GO(gethostbyaddr_r, iFpuippLpp)
  GO(gethostbyname, pFp)
-@@ -651,9 +787,17 @@ GO(getpid, iFv)
+@@ -651,9 +795,17 @@ GO(getpid, iFv)
  GOW(getppid, iFv)
  GOW(getpriority, iFuu)
  GO(getprotobyname, pFp)
@@ -2539,7 +2769,7 @@ index c147d76d7..13a344da8 100644
  GO(getprotoent, pFv)
  GO(getprotoent_r, iFppLp)
  GOW(getpt, iFv)
-@@ -695,7 +839,11 @@ GOW(getrusage, iFip)
+@@ -695,7 +847,11 @@ GOW(getrusage, iFip)
  GO(getsecretkey, iFppp)
  #endif
  GO(getservbyname, pFpp)
@@ -2551,7 +2781,7 @@ index c147d76d7..13a344da8 100644
  GO(getservbyport, pFip)
  GO(getservbyport_r, iFipppLp)
  GO(getservent, pFv)
-@@ -712,15 +860,27 @@ GO(getsgnam, pFp)
+@@ -712,15 +868,27 @@ GO(getsgnam, pFp)
  GO(getsgnam_r, iFpppLp)
  #endif
  GO(getsid, iFi)
@@ -2579,7 +2809,7 @@ index c147d76d7..13a344da8 100644
  GOW(gettid, iFv)
  GO(__gettimeofday, iFpp)
  GO(gettimeofday, iFpp)
-@@ -757,13 +917,21 @@ GO(globfree, vFp)
+@@ -757,13 +925,21 @@ GO(globfree, vFp)
  GOW(globfree64, vFp)
  GOW(glob_pattern_p, iFpi)
  GO(gmtime, pFp)
@@ -2601,7 +2831,7 @@ index c147d76d7..13a344da8 100644
  GO(grantpt, iFi)
  GOW(group_member, iFu)
  GOW(gsignal, iFi)
-@@ -775,7 +943,11 @@ GOW(hdestroy, vFv)
+@@ -775,7 +951,11 @@ GOW(hdestroy, vFv)
  GOW(hdestroy_r, vFp)
  //DATA(h_errlist, 
  //DATAB(__h_errno, 
@@ -2613,7 +2843,7 @@ index c147d76d7..13a344da8 100644
  GO(herror, vFp)
  #ifdef STATICBUILD
  //GO(host2netname, 
-@@ -838,7 +1010,11 @@ GOM(__inet_pton_chk, iFEippL)
+@@ -838,7 +1018,11 @@ GOM(__inet_pton_chk, iFEippL)
  GO(initgroups, iFpu)
  GOM(init_module, iFEpLp)
  GO(initstate, pFupL)
@@ -2625,7 +2855,18 @@ index c147d76d7..13a344da8 100644
  GO(innetgr, iFpppp)
  GO(inotify_add_watch, iFipu)
  GO(inotify_init, iFv)
-@@ -1081,7 +1257,11 @@ GOW(iswcntrl, iFu)
+@@ -853,8 +1037,8 @@ DATA(_IO_2_1_stdin_, 224)
+ DATA(_IO_2_1_stdout_, 224)
+ //GO(_IO_adjust_column, 
+ //GO(_IO_adjust_wcolumn, 
+-#ifdef PPC64LE
+-GOWM(ioctl, iFEiLp)
++#ifdef ANDROID
++GOWM(ioctl, iFiLp) //%noE
+ #else
+ GOW(ioctl, iFiLN)
+ #endif
+@@ -1081,7 +1265,11 @@ GOW(iswcntrl, iFu)
  GOW(iswcntrl_l, iFup)
  //GO(__iswctype, 
  GOW(iswctype, iFuL)
@@ -2637,7 +2878,7 @@ index c147d76d7..13a344da8 100644
  GOW(iswctype_l, iFuLp)
  GOW(iswdigit, iFu)
  //GO(__iswdigit_l, 
-@@ -1263,12 +1443,20 @@ GO(malloc, pFL)
+@@ -1263,12 +1451,20 @@ GO(malloc, pFL)
  GOW(malloc_info, iFiS)
  //GO(malloc_set_state, 
  GOW(malloc_stats, vFv)
@@ -2658,7 +2899,7 @@ index c147d76d7..13a344da8 100644
  GO(mbrlen, LFpLp)
  GO(mbrtoc16, LFppLp)
  GOW(mbrtoc32, LFppLp)
-@@ -1280,7 +1468,11 @@ GO(__mbsnrtowcs_chk, LFppLLpL)
+@@ -1280,7 +1476,11 @@ GO(__mbsnrtowcs_chk, LFppLLpL)
  GO(mbsrtowcs, LFppLp)
  GO(__mbsrtowcs_chk, LFppLpL)
  GO(mbstowcs, LFppL)
@@ -2670,7 +2911,7 @@ index c147d76d7..13a344da8 100644
  GO(mbtowc, iFppL)
  //GOM(mcheck, iFp)
  GO(mcheck_check_all, vFv)
-@@ -1309,19 +1501,47 @@ GO(__memset_chk, pFpiLL)
+@@ -1309,19 +1509,47 @@ GO(__memset_chk, pFpiLL)
  //GO(__mempcpy_small, 
  //GO(__merge_grp, 
  GO(mincore, iFpLp)
@@ -2718,7 +2959,7 @@ index c147d76d7..13a344da8 100644
  GO(mkstemps, iFpi)
  GOW(mkstemps64, iFpi)
  GO(__mktemp, pFp)
-@@ -1375,7 +1595,11 @@ GO(munlockall, iFv)
+@@ -1375,7 +1603,11 @@ GO(munlockall, iFv)
  //GO(__munmap, 
  GOWM(munmap, iFEpL)
  GO(muntrace, vFv)
@@ -2730,7 +2971,7 @@ index c147d76d7..13a344da8 100644
  GO(__nanosleep, iFpp)
  GOW(nanosleep, iFpp)
  //GO(__nanosleep_nocancel, 
-@@ -1387,17 +1611,37 @@ GOW(nanosleep, iFpp)
+@@ -1387,17 +1619,37 @@ GOW(nanosleep, iFpp)
  GO(netname2host, iFppi)
  GO(netname2user, iFppppp)
  #endif
@@ -2768,7 +3009,7 @@ index c147d76d7..13a344da8 100644
  DATAB(_nl_msg_cat_cntr, 4)
  GO(nrand48, lFp)
  GOW(nrand48_r, iFppp)
-@@ -1447,16 +1691,36 @@ GOWM(open, iFEpON)
+@@ -1447,16 +1699,36 @@ GOWM(open, iFEpON)
  GO(__open_2, iFpO)
  //GOW(__open64, 
  GOWM(open64, iFEpON)
@@ -2805,7 +3046,7 @@ index c147d76d7..13a344da8 100644
  GO(openlog, vFpii)
  GOW(open_memstream, SFpp)
  //GO(__open_nocancel, 
-@@ -1465,8 +1729,16 @@ DATA(optarg, 8)
+@@ -1465,8 +1737,16 @@ DATA(optarg, 8)
  DATA(opterr, 4)
  DATA(optind, 4)
  DATA(optopt, 4)
@@ -2822,7 +3063,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //GO(passwd2des, 
  #else
-@@ -1485,11 +1757,31 @@ GO(__pipe, iFp)
+@@ -1485,11 +1765,31 @@ GO(__pipe, iFp)
  GOW(pipe, iFp)
  GO(pipe2, iFpO)
  //GO(pivot_root, 
@@ -2854,7 +3095,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //GO(pmap_getmaps, pFp)
  //GO(pmap_getport, WFpLLu)
-@@ -1627,9 +1919,17 @@ GO(quotactl, iFipip)
+@@ -1627,15 +1927,31 @@ GO(quotactl, iFipip)
  GO(raise, iFi)
  GO(rand, iFv)
  GOW(random, lFv)
@@ -2872,7 +3113,21 @@ index c147d76d7..13a344da8 100644
  GO(rawmemchr, pFpi)
  GO(rcmd, iFpWpppp)
  GO(rcmd_af, iFpWppppW)
-@@ -1681,7 +1981,11 @@ GOW(re_match_2, iFppipiipi)
+ //DATAB(__rcmd_errstr, 
++#ifdef ANDROID
++GOWM(__read, lFipL) //%noE
++#else
+ GOW(__read, lFipL)
++#endif
++#ifdef ANDROID
++GOM(read, lFipL) //%noE
++#else
+ GO(read, lFipL)
++#endif
+ GO(readahead, lFiIL)
+ GO(__read_chk, lFipLL)
+ GOW(readdir, pFp)
+@@ -1681,7 +1997,11 @@ GOW(re_match_2, iFppipiipi)
  GO(remove, iFp)
  GO(removexattr, iFpp)
  GO(remque, vFp)
@@ -2884,7 +3139,7 @@ index c147d76d7..13a344da8 100644
  GOW(renameat, iFipip)
  GOW(renameat2, iFipipu)
  //DATAB(_res, 
-@@ -1690,22 +1994,46 @@ GOW(re_search_2, iFppipiiipi)
+@@ -1690,22 +2010,46 @@ GOW(re_search_2, iFppipiiipi)
  GOW(re_set_registers, vFppupp)
  GOW(re_set_syntax, LFL)
  //DATAB(_res_hconf, 
@@ -2931,7 +3186,7 @@ index c147d76d7..13a344da8 100644
  //DATAB(re_syntax_options, 8)
  GOW(revoke, iFp)
  GO(rewind, vFS)
-@@ -1714,7 +2042,11 @@ GO(rexec, iFpipppp)
+@@ -1714,7 +2058,11 @@ GO(rexec, iFpipppp)
  GO(rexec_af, iFpippppW)
  //DATAB(rexecoptions, 
  GO(rindex, pFpi)
@@ -2943,7 +3198,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //DATAB(rpc_createerr, 
  //GO(_rpc_dtablesize, iFv)
-@@ -1838,7 +2170,11 @@ GO(setservent, vFi)
+@@ -1838,7 +2186,11 @@ GO(setservent, vFi)
  GO(setsgent, vFv)
  #endif
  GOW(setsid, iFv)
@@ -2955,7 +3210,7 @@ index c147d76d7..13a344da8 100644
  GO(setsourcefilter, iFiupuuup)
  GO(setspent, vFv)
  GOW(setstate, pFp)
-@@ -1880,7 +2216,11 @@ GO(siggetmask, iFv)
+@@ -1880,7 +2232,11 @@ GO(siggetmask, iFv)
  GO(sighold, iFi)
  GO(sigignore, iFi)
  GO(siginterrupt, iFii)
@@ -2967,7 +3222,7 @@ index c147d76d7..13a344da8 100644
  //GO(__sigismember, 
  GO(sigismember, iFpi)
  GOM(siglongjmp, vFEpi)
-@@ -1920,7 +2260,11 @@ GOWM(snprintf, iFEpLpV)
+@@ -1920,7 +2276,11 @@ GOWM(snprintf, iFEpLpV)
  GOWM(__snprintf_chk, iFEpLiLpV)
  GO(sockatmark, iFi)
  GO(__socket, iFiii)
@@ -2979,7 +3234,7 @@ index c147d76d7..13a344da8 100644
  GOW(socketpair, iFiiip)
  GO(splice, lFipipLu)
  GOM(sprintf, iFEppV)
-@@ -1942,9 +2286,17 @@ GOM(__stack_chk_fail, vFEv)
+@@ -1942,9 +2302,17 @@ GOM(__stack_chk_fail, vFEv)
  GOM(stat, iFEpp)
  GOM(stat64, iFEpp)
  //GO(__statfs, 
@@ -2997,7 +3252,7 @@ index c147d76d7..13a344da8 100644
  GOW(statvfs64, iFpp)
  GOM(statx, iFEipiup)
  DATA(stderr, 8)
-@@ -1971,7 +2323,11 @@ GO(strchr, pFpi)
+@@ -1971,7 +2339,11 @@ GO(strchr, pFpi)
  GO(strchrnul, pFpi)
  GO(strcmp, iFpp)
  GO(strcoll, iFpp)
@@ -3009,7 +3264,7 @@ index c147d76d7..13a344da8 100644
  GOW(strcoll_l, iFppp)
  GO(strcpy, pFpp)
  GO(__strcpy_chk, pFppL)
-@@ -1980,14 +2336,26 @@ GO(strcspn, LFpp)
+@@ -1980,14 +2352,26 @@ GO(strcspn, LFpp)
  //GO(__strcspn_c1, 
  //GO(__strcspn_c2, 
  //GO(__strcspn_c3, 
@@ -3036,7 +3291,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //GO(strfmon, lFpLpV)
  //GO(__strfmon_l, 
-@@ -2001,12 +2369,20 @@ GO(strfromf, iFpLpf)
+@@ -2001,12 +2385,20 @@ GO(strfromf, iFpLpf)
  GOD(strfromf128, iFpLpD, strfromf64)
  GO(strfromf32, iFpLpf)
  GO(strfromf32x, iFpLpd)
@@ -3057,7 +3312,7 @@ index c147d76d7..13a344da8 100644
  GOW(strftime_l, LFpLppp)
  GO(strlen, LFp)
  GO(__strlcpy_chk, LFppLL)
-@@ -2040,7 +2416,11 @@ GO(strspn, LFpp)
+@@ -2040,7 +2432,11 @@ GO(strspn, LFpp)
  GO(strstr, pFpp)
  GO(strtod, dFpp)
  GO(__strtod_internal, dFppi)
@@ -3069,7 +3324,7 @@ index c147d76d7..13a344da8 100644
  GOW(strtod_l, dFppp)
  //GO(__strtod_nan, 
  GO(strtof, fFpp)
-@@ -2052,12 +2432,20 @@ GOW(strtof32, fFpp)
+@@ -2052,12 +2448,20 @@ GOW(strtof32, fFpp)
  GOW(strtof32_l, fFppp)
  GOW(strtof32x, dFpp)
  GOW(strtof32x_l, dFppp)
@@ -3090,7 +3345,7 @@ index c147d76d7..13a344da8 100644
  GOW(strtof_l, fFppp)
  //GO(__strtof_nan, 
  GO(strtoimax, IFppi)
-@@ -2069,7 +2457,11 @@ GO2(__isoc23_wcstoll, IFppi, wcstoll)
+@@ -2069,7 +2473,11 @@ GO2(__isoc23_wcstoll, IFppi, wcstoll)
  GO2(__isoc23_wcstoul, LFppi, wcstoul)
  GO2(__isoc23_wcstoull, UFppi, wcstoull)
  GO(strtok, pFpp)
@@ -3102,7 +3357,7 @@ index c147d76d7..13a344da8 100644
  GOW(strtok_r, pFppp)
  //GO(__strtok_r_1c, 
  GO(strtol, lFppi)
-@@ -2085,7 +2477,11 @@ GOW(strtoll, IFppi)
+@@ -2085,7 +2493,11 @@ GOW(strtoll, IFppi)
  GO(__strtoll_internal, IFppii)
  GOW(__strtoll_l, IFppip)
  GOW(strtoll_l, IFppip)
@@ -3114,7 +3369,7 @@ index c147d76d7..13a344da8 100644
  GO(strtoul, LFppi)
  GO(__strtoul_internal, LFppii)
  //GO(__strtoul_l, 
-@@ -2096,11 +2492,19 @@ GOW(__strtoull_l, UFppip)
+@@ -2096,11 +2508,19 @@ GOW(__strtoull_l, UFppip)
  GOW(strtoull_l, UFppip)
  GO(strtoumax, UFppi)
  GO2(__isoc23_strtoumax, UFppi, strtoumax)
@@ -3134,7 +3389,7 @@ index c147d76d7..13a344da8 100644
  GO(strxfrm_l, LFppLp)
  //GO(stty, 
  #ifdef STATICBUILD
-@@ -2217,7 +2621,11 @@ GOWM(tdestroy, vFEpp)
+@@ -2217,7 +2637,11 @@ GOWM(tdestroy, vFEpp)
  GO(tee, lFiiLu)
  GO(telldir, lFp)
  GO(tempnam, pFpp)
@@ -3146,7 +3401,7 @@ index c147d76d7..13a344da8 100644
  //GO(__tfind, 
  GOWM(tfind, pFEppp)
  GOW(tgkill, iFiii)
-@@ -2252,7 +2660,11 @@ GO(timerfd_gettime, iFip)
+@@ -2252,7 +2676,11 @@ GO(timerfd_gettime, iFip)
  GO(timerfd_settime, iFiipp)
  GOW(times, lFp)
  GO(timespec_get, iFpi)
@@ -3158,7 +3413,7 @@ index c147d76d7..13a344da8 100644
  DATAV(timezone, 8)
  GO(tmpfile, SFv)
  GOW(tmpfile64, SFv)
-@@ -2273,13 +2685,25 @@ GOW(towctrans, uFup)
+@@ -2273,13 +2701,25 @@ GOW(towctrans, uFup)
  //GO(__towctrans_l, 
  GOW(towctrans_l, uFupp)
  GOW(towlower, uFu)
@@ -3184,7 +3439,7 @@ index c147d76d7..13a344da8 100644
  GO(truncate64, iFpI)
  //GO(__tsearch, 
  GOWM(tsearch, pFEppp)
-@@ -2294,7 +2718,11 @@ DATA(__tzname, 16)
+@@ -2294,7 +2734,11 @@ DATA(__tzname, 16)
  DATAV(tzname, 16)
  GOW(tzset, vFv)
  GO(ualarm, uFuu)
@@ -3196,7 +3451,7 @@ index c147d76d7..13a344da8 100644
  GOW(ulckpwdf, iFv)
  #ifdef STATICBUILD
  //GOW(ulimit, lFiV)
-@@ -2305,19 +2733,39 @@ GOW(umask, uFu)
+@@ -2305,19 +2749,39 @@ GOW(umask, uFu)
  GOW(umount, iFp)
  GOW(umount2, iFpi)
  GOWM(uname, iFp)
@@ -3236,7 +3491,7 @@ index c147d76d7..13a344da8 100644
  #ifdef STATICBUILD
  //GO(user2netname, 
  #else
-@@ -2327,7 +2775,11 @@ GO(usleep, iFu)
+@@ -2327,7 +2791,11 @@ GO(usleep, iFu)
  //GO(ustat, 
  GO(utime, iFpp)
  GO(utimensat, iFippi)
@@ -3248,7 +3503,7 @@ index c147d76d7..13a344da8 100644
  GOW(utmpname, iFp)
  GO(utmpxname, iFp)
  GO(valloc, pFL)
-@@ -2396,14 +2848,22 @@ GO(wcschr, pFpi)
+@@ -2396,14 +2864,22 @@ GO(wcschr, pFpi)
  GO(wcschrnul, pFpi)
  GO(wcscmp, iFpp)
  GOW(wcscoll, iFpp)
@@ -3271,7 +3526,7 @@ index c147d76d7..13a344da8 100644
  GO(wcsftime_l, LFpLppp)
  GO(wcslen, LFp)
  GO(wcsncasecmp, iFppL)
-@@ -2413,7 +2873,11 @@ GO(wcsncat, pFppL)
+@@ -2413,7 +2889,11 @@ GO(wcsncat, pFppL)
  GO(__wcsncat_chk, pFppLL)
  GO(wcsncmp, iFppL)
  GOW(wcsncpy, pFppL)
@@ -3283,7 +3538,7 @@ index c147d76d7..13a344da8 100644
  GO(wcsnlen, LFpL)
  GO(wcsnrtombs, LFppLLp)
  #ifdef STATICBUILD
-@@ -2482,7 +2946,11 @@ GOW(wcstouq, UFppi)
+@@ -2482,7 +2962,11 @@ GOW(wcstouq, UFppi)
  GOW(wcswcs, pFpp)
  GO(wcswidth, iFpL)
  GO(wcsxfrm, LFppL)
@@ -3295,7 +3550,7 @@ index c147d76d7..13a344da8 100644
  GO(wcsxfrm_l, LFppLp)
  GO(wctob, iFu)
  GO(wctomb, iFpi)
-@@ -2492,14 +2960,26 @@ GOW(wctrans, pFp)
+@@ -2492,14 +2976,26 @@ GOW(wctrans, pFp)
  GOW(wctrans_l, pFpp)
  GOW(wctype, LFp)
  GOW(wctype_l, LFpp)
@@ -3322,7 +3577,7 @@ index c147d76d7..13a344da8 100644
  GOW(wmempcpy, pFppL)
  //GO(__wmempcpy_chk, 
  GO(wmemset, pFpiL)
-@@ -2666,9 +3146,17 @@ GO(xdr_void, iFv)
+@@ -2666,9 +3162,17 @@ GO(xdr_void, iFv)
  GOM(__xmknod, iFEipup)
  GOM(__xmknodat, iFEiipup)
  #endif
@@ -3340,7 +3595,7 @@ index c147d76d7..13a344da8 100644
  //GOM(xprt_register, vFp)
  //GOM(xprt_unregister, vFp)
  GOM(__xstat, iFEipp)
-@@ -3183,3 +3671,45 @@ GO(ynf, fFif)
+@@ -3183,3 +3687,45 @@ GO(ynf, fFif)
  // __ynf_finite
  // __yn_finite
  GOD(ynl, DFiD, yn)

@@ -47,6 +47,7 @@ the translation layer; `build.sh` builds it with the NDK. What it had to fix, in
 | `vfork` | Box64 waits `waitpid(child, WEXITED)` after emulating it as fork: glibc's kernel call refuses the option and the parent goes on, bionic waits for the child to end (CEF's helper processes) |
 | paths | `/dev/shm`, `/tmp` and `/sys/class/power_supply` (Android answers EACCES where a machine without a battery says ENOENT; `std::filesystem::status` throws) |
 | libraries | no native glib/gtk/pango/cairo on Android: `BOX64_EMULATED_LIBS` runs the root filesystem's; the root filesystem's OpenGL (Mesa on LLVM) is replaced by `libskynogl_x64.so`, which answers "no GLX/EGL" |
+| gamepads | `/dev/input/event<N>` opens the app's fake evdev file and its ioctls answer as an Xbox 360 pad (libskyshim does this for the glibc session) |
 | shared memory | Android has no `/dev/shm`: `BOX64_SHM_DIR` |
 
 `vkCmdDispatchTileQCOM`-style functions the driver knows and Box64 does not wrap return NULL (patch 0002 of the glibc build, included).
