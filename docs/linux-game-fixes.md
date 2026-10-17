@@ -120,6 +120,45 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
   `tomb-raider-2013-linux-fex-performance.wcfg` carries the same override and the tested GPU/emulator settings.
   The previous Windows profile/config was removed. Global FEX defaults are unchanged.
 
+## Tomb Raider 2013: unsupported-driver notice and slow startup (2026-10-17)
+
+- **Existing GPU override confirmed:** the running Steam/FEX game had `SKY_FEX_GL_VENDOR=nvidia`,
+  `DRIRC_CONFIGDIR=/root/.skynet/drirc`, `MESA_GL_VERSION_OVERRIDE=4.6COMPAT` and `FEX_TSOENABLED=1`.
+  Its driconf file requests NVIDIA Corporation / GeForce GTX 1060 6GB. A screenshot showed gameplay at 53 FPS.
+  Reporting an NVIDIA card is already implemented; it does not make the underlying driver an NVIDIA driver.
+- **Warning rules:** the installed game's `share/specifications.xml` tests NVIDIA's driver version against 352.55
+  and selects `LnxGraphicsDriverUnsupported`; `share/specification_stock.xml` gives that alert Continue Anyway / Quit
+  buttons. NVIDIA vendor strings combined with Mesa's version are a plausible false-positive trigger, not a measured
+  value of the game's internal version parser. The rule explicitly contains `ignore_if_set=SkipDriverWarnings`.
+- **Verified warning workaround:** added only integer
+  `SkipDriverWarnings=1` under `HKEY_CURRENT_USER/Software/Crystal Dynamics/Tomb Raider/Setup` in the game's
+  preferences. The original preferences were backed up locally; all other XML values were checked unchanged.
+  The first test failed in the native Steam client before Tomb Raider started (SIGSEGV after 18 s).
+  A subsequent launch reached the game.
+- **Observed result:** Steam started the launch wrapper at 22:37:05, invoked `TombRaider.sh` at 22:37:42, and
+  started the FEX game process at 22:37:43. The first captured screen showed a rendered in-game sequence at 75 FPS;
+  the next showed gameplay at 42 FPS. The preference remained 1 and the live game retained NVIDIA spoofing and
+  `FEX_TSOENABLED=1`. The user explicitly confirmed that no unsupported-hardware warning appeared on this launch.
+  Keep `SkipDriverWarnings=1` to suppress the notice; this verifies warning suppression, not shorter startup or
+  improved driver stability.
+- **Delay/crash evidence:** the earlier 22:01:02 session did not invoke `TombRaider.sh` until 22:02:13, about 71 s
+  later. Even with Steam already running, the latest launch spent about 38 s before the game process started.
+  Earlier game runs logged `MESA: error: zink: DEVICE LOST!`, and the latest launch acquired the same line when
+  the session ended around 22:41:14. Android records the app exit as `EXIT_SELF`, status 0, with no app crash or
+  low-memory kill recorded for that exit. The user subsequently clarified that the game died when they used the
+  recording tool; treat this session end as recording-triggered, not evidence of a spontaneous game crash.
+  The `DEVICE LOST` line alone does not establish the mechanism of that exit. There is no evidence here of a repeated
+  hardware-check loop or that suppressing a compatibility notice resolves a GPU fault. Reaching gameplay once does not
+  establish stability.
+- **No supported `-nosteam` found in this Linux build:** `TombRaider.sh` starts Steam and exits when `SteamAppId` is
+  absent; earlier direct launches logged Steam initialization failure and exited. The executable contains
+  `-nolauncher`, which skips the pre-game options UI, but no `-nosteam` string was found. This is not a proof about
+  every Tomb Raider release or every possible undocumented option.
+- **Source:** the installed game's launcher/specification XML, process environment, logs and screenshot;
+  [Feral's Linux readme](https://www.feralinteractive.com/en/readmes/tombraider/1.2/linux/?access=NSjdb5tuuF)
+  documents Steam startup and its historical GPU/driver requirements. No new GPU identity or graphics settings
+  were applied during this check.
+
 ## 32-bit x86 game: `cannot execute: required file not found`
 
 - **Game:** Tomb Raider (2013, Steam 203160), any 32-bit ELF (`od` shows class 1, machine `03 00`).
