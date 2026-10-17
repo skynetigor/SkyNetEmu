@@ -24,6 +24,16 @@ internal object StandardLinuxContainer {
     const val CONFIG_BOX64 = "builtin-linux-box64"
     const val CONFIG_NATIVE = "builtin-linux-native"
 
+    fun shortcutSettings(context: Context, kind: ExecutableKind): Map<String, String> {
+        val defaults = SteamContainer.defaults(context, false)
+        val choice = if (kind == ExecutableKind.LINUX_X86) LinuxEmulator.FEX
+            else if (usesBox64(kind)) LinuxEmulator.BOX64 else LinuxEmulator.NONE
+        return mapOf(LinuxEmulator.EXTRA_EMULATOR to choice,
+            LinuxEmulator.EXTRA_ID to if (choice == LinuxEmulator.BOX64) defaults.emulator else if (choice == LinuxEmulator.FEX) defaults.fex else "",
+            LinuxEmulator.EXTRA_PRESET to defaults.emulatorPreset,
+            LinuxEmulator.EXTRA_ROOTFS to defaults.rootfs)
+    }
+
     /** Programs that need an x86 emulator: x86-64 ones and scripts (a script may start x86-64 programs). */
     fun usesBox64(kind: ExecutableKind) = kind != ExecutableKind.LINUX_ARM64
 
@@ -39,7 +49,6 @@ internal object StandardLinuxContainer {
         warnings: MutableList<String>
     ): Container? {
         val id = configId(kind)
-        EnvironmentProvider.findLinux(manager, id)?.let { return it }
         val defaults = SteamContainer.defaults(context, true)
         val box64 = usesBox64(kind)
 

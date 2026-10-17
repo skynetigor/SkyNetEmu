@@ -30,6 +30,8 @@ public final class LinuxShortcutDefaults {
     public static final String UPSCALER = "graphicsFilterMode";
     public static final String TOUCHSCREEN = "simTouchScreen";
 
+    public static final String VERSION = "linuxSettingsVersion";
+    public static final String RUNTIME = "linuxRuntime";
     private LinuxShortcutDefaults() {}
 
     public static boolean isOwn(Shortcut shortcut) {
@@ -44,14 +46,24 @@ public final class LinuxShortcutDefaults {
         Map<String, String> values = new LinkedHashMap<>();
         if (container == null || !container.isLinux()) return values;
         values.put(EXTRA_OWN, "1");
+        values.put(VERSION, "3");
+        values.put(RUNTIME, container.getLinuxRuntime());
+        values.put("envVars", Container.DEFAULT_ENV_VARS.equals(container.getEnvVars()) ? "" : container.getEnvVars());
+        values.put("cpuList", container.getCPUList(true));
+        values.put("graphicsFpsPreset", container.getExtra("graphicsFpsPreset", "0"));
+        values.put("hudMode", container.getExtra("hudMode", container.isShowFPS() ? "1" : "0"));
+        values.put(LinuxSession.EXTRA_NO_PROOT, on(container, LinuxSession.EXTRA_NO_PROOT));
 
         values.put(SCREEN_SIZE, container.getScreenSize());
-        values.put(FULLSCREEN_STRETCHED, container.isFullscreenStretched() ? "1" : "0");
+        values.put(FULLSCREEN_STRETCHED, container.isFullscreenStretched()
+                ? ("1".equals(container.getExtra("scaleGameWindow")) ? "2" : "1") : "0");
         values.put(UPSCALER, container.getExtra(UPSCALER, "0"));
         values.put(TOUCHSCREEN, on(container, LinuxSession.EXTRA_TOUCHSCREEN));
         values.put(LinuxSession.EXTRA_KEYBOARD_BUTTON, on(container, LinuxSession.EXTRA_KEYBOARD_BUTTON));
         values.put(LinuxSession.EXTRA_AUTO_KEYBOARD, on(container, LinuxSession.EXTRA_AUTO_KEYBOARD));
         values.put(LsfgManager.EXTRA_MULTIPLIER, String.valueOf(LsfgManager.getMultiplier(container)));
+        values.put(LsfgManager.EXTRA_PERFORMANCE_MODE, LsfgManager.isPerformanceMode(context, container) ? "1" : "0");
+        values.put(LsfgManager.EXTRA_PRESENT_MODE, LsfgManager.getPresentMode(context, container));
         values.put(LsfgManager.EXTRA_FLOW_SCALE,
                 String.format(Locale.US, "%.2f", LsfgManager.getFlowScale(context, container)));
 
@@ -93,6 +105,13 @@ public final class LinuxShortcutDefaults {
         shortcut.saveData();
     }
 
+    public static Map<String, String> fromData(Context context, com.winlator.cmod.container.ContainerManager manager,
+                                               org.json.JSONObject data) throws org.json.JSONException {
+        Container template = new Container(-1, manager);
+        template.loadData(data);
+        return of(context, template);
+    }
+
     /** A setting that is on unless the container turned it off. */
     private static String on(Container container, String name) {
         return "0".equals(container.getExtra(name)) ? "0" : "1";
@@ -108,10 +127,21 @@ public final class LinuxShortcutDefaults {
      * the container as it is now. Does nothing to a shortcut that has one.
      */
     public static void snapshot(Context context, Container container, Shortcut shortcut) {
-        if (shortcut == null || container == null || !container.isLinux() || isOwn(shortcut)) return;
+        if (shortcut == null || container == null || !container.isLinux() || "3".equals(shortcut.getExtra(VERSION))) return;
+        boolean own = isOwn(shortcut);
         for (Map.Entry<String, String> entry : of(context, container).entrySet()) {
-            if (shortcut.getExtra(entry.getKey()).isEmpty()) shortcut.putExtra(entry.getKey(), entry.getValue());
+            String key = entry.getKey();
+            boolean added = key.equals(RUNTIME) || key.equals("cpuList") || key.equals("graphicsFpsPreset")
+                    || key.equals("hudMode") || key.equals(LinuxSession.EXTRA_NO_PROOT)
+                    || key.equals(LsfgManager.EXTRA_PERFORMANCE_MODE) || key.equals(LsfgManager.EXTRA_PRESENT_MODE);
+            if ((!own || added) && shortcut.getExtra(key).isEmpty()) shortcut.putExtra(key, entry.getValue());
         }
+        // Explicit shortcut variables override the old container's variables, preserving unrelated inherited variables.
+        com.winlator.cmod.core.EnvVars env = new com.winlator.cmod.core.EnvVars(
+                Container.DEFAULT_ENV_VARS.equals(container.getEnvVars()) ? "" : container.getEnvVars());
+        env.putAll(shortcut.getExtra("envVars"));
+        shortcut.putExtra("envVars", env.toString());
+        shortcut.putExtra(VERSION, "3");
         shortcut.putExtra(EXTRA_OWN, "1");
         shortcut.saveData();
     }

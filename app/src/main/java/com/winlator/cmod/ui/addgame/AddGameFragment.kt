@@ -221,7 +221,7 @@ class AddGameFragment : Fragment() {
                 "Takes the settings made for another game from the list, for a game that is similar.", "Pick one from the list.", 2) { pickOther(others) })
         }
         // Only the containers of the file's platform that can run it (a Linux one: the emulator, the root filesystem it needs).
-        val mine = manager.containers.filter { it.isLinux == kind.isLinux }
+        val mine = manager.containers.filter { !kind.isLinux && !it.isLinux }
         if (mine.isNotEmpty()) {
             val refusals = if (kind.isLinux) mine.associateWith { LinuxProgramSupport.refusal(context, it, kind) } else emptyMap()
             val fits = mine.filter { refusals[it] == null }
@@ -291,19 +291,20 @@ class AddGameFragment : Fragment() {
      */
     private fun addLinuxProgram(context: android.content.Context, container: Container, name: String, game: GameMatcher.Result?,
                                 extras: MutableMap<String, String?>): File? {
-        val refusal = LinuxProgramSupport.refusal(context, container, kind)
+        val configured = container.copyWithExtras(extras.filterValues { it != null }.mapValues { it.value!! })
+        val refusal = LinuxProgramSupport.refusal(context, configured, kind)
         if (container.isLinux && refusal != null) {
             phase = Phase.Failed("This container cannot run this program: $refusal.")
             return null
         }
         var guest = exe.absolutePath
-        if (LinuxProgramInstaller.needsCopy(container, exe)) {
+        if (LinuxProgramInstaller.needsCopy(configured, exe)) {
             val mode = askCopyMode(container) ?: run {
                 phase = Phase.Failed("Nothing was added.")
                 return null
             }
             phase = Phase.Working("Copying into the container…")
-            guest = LinuxProgramInstaller.copy(container, exe, mode) ?: run {
+            guest = LinuxProgramInstaller.copy(configured, exe, mode) ?: run {
                 phase = Phase.Failed("Copying failed. Is there room on the device?")
                 return null
             }
@@ -380,11 +381,13 @@ class AddGameFragment : Fragment() {
             val contents = ContentsManager(context).apply { syncContents() }
             val progress = ContainerImporter.Progress { text -> phase = Phase.Working(text) }
             val warnings = mutableListOf<String>()
+            var linuxSettings: Map<String, String> = emptyMap()
             val container: Container? = when (pick) {
                 is Pick.Registry -> {
                     phase = Phase.Working("Getting the environment…")
                     val result = EnvironmentProvider.ensure(context, manager, contents, pick.config, null, progress)
                     warnings.addAll(result.warnings)
+                    linuxSettings = result.linuxSettings
                     result.container
                 }
                 is Pick.Standard -> {
@@ -394,12 +397,14 @@ class AddGameFragment : Fragment() {
                 }
                 is Pick.StandardLinux -> {
                     phase = Phase.Working("Making the environment…")
+                    linuxSettings = StandardLinuxContainer.shortcutSettings(context, kind)
                     StandardLinuxContainer.ensure(context, manager, contents, kind, progress, warnings)
                 }
                 is Pick.Existing -> pick.container
                 is Pick.Imported -> {
                     val result = ContainerImporter.run(context, manager, contents, pick.envelope, progress)
                     warnings.addAll(result.warnings)
+                    linuxSettings = result.linuxSettings
                     result.container
                 }
             }
@@ -413,6 +418,7 @@ class AddGameFragment : Fragment() {
             phase = Phase.Working("Adding the game…")
             val settings = game?.game?.effective(game.version, platform)
             val extras = LinkedHashMap<String, String?>()
+            extras.putAll(linuxSettings)
             if (settings != null) extras.putAll(settings.extras)
             if (game != null) {
                 extras[GameProfiles.EXTRA_PROFILE] = game.game.id

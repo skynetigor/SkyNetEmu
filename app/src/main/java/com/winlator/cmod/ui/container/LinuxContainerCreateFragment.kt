@@ -191,9 +191,7 @@ private class SteamScreen(
     /** The container exists (so every component is installed): the settings can be changed. */
     val ready: Boolean,
     /** The card above the settings: what is to be downloaded, and how far it is. */
-    val header: @Composable () -> Unit,
-    /** Wipes the Steam container and makes a new one from the defaults. */
-    val onReset: () -> Unit
+    val header: @Composable () -> Unit
 )
 
 @Composable
@@ -207,7 +205,7 @@ private fun LinuxContainerEditor(
 ) {
     val context = LocalContext.current
     val manager = remember { ContainerManager(context) }
-    if (steam) {
+    if (steam || editId == null) {
         SteamSettingsScreen(manager, refreshTick, install, onBack, onDone)
         return
     }
@@ -264,7 +262,7 @@ private fun SteamSettingsScreen(
     key(container?.id) {
         LinuxContainerEditorBody(
             container,
-            SteamScreen(defaults, container != null, header) { container = SteamContainer.reset(context, manager) },
+            SteamScreen(defaults, container != null, header),
             manager, refreshTick, install, onBack, onDone
         )
     }
@@ -466,7 +464,6 @@ private fun LinuxContainerEditorBody(
     val notEnoughSpace = needsDownload && offered != null && offered!!.size > 0 && freeBytes < neededBytes
     val busy = creating || install.running || waitingForRuntime
     val canSave = if (steam != null) editing != null && !busy else name.isNotBlank() && sizeValid && !busy && !notEnoughSpace
-    var confirmReset by remember { mutableStateOf(false) }
 
     LaunchedEffect(needsDownload) {
         if (needsDownload && offered == null) {
@@ -846,27 +843,13 @@ private fun LinuxContainerEditorBody(
             Text(if (editing != null || steam != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")
         }
     }
-    val resetButton: @Composable () -> Unit = {
-        if (steam != null && editing != null) {
-            OutlinedButton(onClick = { confirmReset = true }, modifier = Modifier.fillMaxWidth()) { Text("Reset Steam") }
-        }
-    }
-    if (confirmReset && steam != null) {
-        AlertDialog(
-            onDismissRequest = { confirmReset = false },
-            title = { Text("Reset Steam?") },
-            text = { Text("Steam's container is deleted with everything in it (the sign-in, the downloaded games) and made again from the defaults.") },
-            confirmButton = { TextButton(onClick = { confirmReset = false; steam.onReset() }) { Text("Reset") } },
-            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
-        )
-    }
 
     if (steam != null) {
         // The Steam settings are a page of the app's Settings, in their layout.
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Steam") },
+                    title = { Text("Linux") },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
                 )
             }
@@ -875,7 +858,6 @@ private fun LinuxContainerEditorBody(
                 GroupedSettings(categories, header = steam.header, enabled = steam.ready) {
                     problems()
                     saveButton()
-                    resetButton()
                 }
             }
         }

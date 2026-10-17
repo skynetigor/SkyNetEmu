@@ -47,6 +47,7 @@ public final class ContainerImporter {
     public static final class Result {
         public final Container container;      // null on failure
         public final List<String> warnings;
+        public java.util.Map<String, String> linuxSettings = java.util.Collections.emptyMap();
 
         Result(Container container, List<String> warnings) {
             this.container = container;
@@ -620,7 +621,9 @@ public final class ContainerImporter {
                 warnings.add("Container creation failed.");
                 return new Result(null, warnings);
             }
-            return new Result(created, warnings);
+            Result result = new Result(created, warnings);
+            result.linuxSettings = com.winlator.cmod.linux.LinuxShortcutDefaults.fromData(context, manager, data);
+            return result;
         } catch (Exception e) {
             Log.e(TAG, "Linux container import failed", e);
             warnings.add("Container creation failed: " + e.getMessage());

@@ -21,19 +21,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The app's one Steam container. The user does not create it: it appears when the components Steam needs (the Linux runtime,
- * Box64 for the games' x86-64 code, a Turnip driver) are installed, built from a configuration the app defines
- * ({@link Defaults}, the "steam" block of the registry's linux.json). It is marked with the container extra
- * {@link #EXTRA_MANAGED}, can be configured but not removed, renamed or duplicated from the container list, and owns the Steam
- * shortcut in the library and the shortcuts of the games installed in its Steam.
+ * Steam and all Linux games use the app's one protected Linux container. Existing Steam homes are preferred during
+ * migration to preserve login and installed games. Its defaults come from the "steam" block of linux.json;
+ * each shortcut owns its launch settings. The class name and managed marker are retained for compatibility.
  */
 public final class SteamContainer {
     private static final String TAG = "SteamContainer";
     /** Container extra: {@link #MANAGED_STEAM} for the app's Steam container. */
     public static final String EXTRA_MANAGED = "linuxManaged";
     public static final String MANAGED_STEAM = "steam";
-    public static final String NAME = "Steam";
-    private static final Object LOCK = new Object();
+    public static final String NAME = "Linux";
+    private static final Object LOCK = ContainerManager.LINUX_LOCK;
 
     /** What a new Steam container is made of. */
     public static final class Defaults {
@@ -82,12 +80,11 @@ public final class SteamContainer {
     private SteamContainer() {}
 
     public static boolean isManaged(Container container) {
-        return container != null && container.isLinux() && MANAGED_STEAM.equals(container.getExtra(EXTRA_MANAGED));
+        return container != null && container.isLinux();
     }
 
     public static Container find(ContainerManager manager) {
-        for (Container container : manager.getContainers()) if (isManaged(container)) return container;
-        return null;
+        return com.winlator.cmod.linux.SharedLinuxContainers.find(manager);
     }
 
     /** The configuration of a new Steam container: the registry's "steam" block, or the built-in one when it cannot be read. */
@@ -258,11 +255,10 @@ public final class SteamContainer {
         }
     }
 
-    /** Removes the Steam container with everything in it (the login, the downloaded games) and makes a new one from the defaults. */
+    /** Compatibility entry point: the shared Linux container cannot be reset or deleted. */
     public static Container reset(Context context, ContainerManager manager) {
         synchronized (LOCK) {
-            Container steam = find(manager);
-            if (steam != null) manager.removeManagedContainer(steam);
+            // The shared Linux container owns every Linux game and cannot be deleted or reset.
             return ensure(context, manager);
         }
     }

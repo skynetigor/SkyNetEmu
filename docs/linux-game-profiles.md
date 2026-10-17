@@ -34,24 +34,24 @@ program. Turning "Launch without Steam" off in the shortcut starts it through th
 (BeamNG) gets the stub that keeps Box64 from mixing allocators either way (`SKY_MIMALLOC_STUB`, set by `LinuxSession.guestEnv` and used
 by `assets/linux/skynet-launcher.sh` for a game the client starts).
 
-**Resolution.** A session that runs the Steam client (the Steam shortcut, a game started through it) is always native: the game picks its
-own mode through RandR, or the user sets it in Steam. Any other session: the shortcut's size, then the profile's, then the container's
-(`GameProfiles.screenSize`).
+**Resolution.** Every Linux shortcut, including Steam and Steam games, uses the shortcut's size, then the profile's,
+then the shared container's (`GameProfiles.screenSize`). Games may also select their own mode through RandR.
 
 Programs added by hand take a profile too: the "Add program" dialogs have a "Game profile" choice (game and version), and a program
 picked from storage that is a registry game's executable is offered it.
 
 ## The Steam container
 
-There is one Steam container, made by the app (`steam/SteamContainer.java`), marked `linuxManaged=steam`. It is created, from the
+Steam and all Linux programs use one protected container named Linux (`steam/SteamContainer.java`), marked
+`linuxManaged=steam` for compatibility. See [shared Linux container](linux-shared-container.md) for migration and shortcut settings. The shared container is created from the
 `steam` block of the registry's `linux.json` (runtime, Box64 build and preset, Turnip driver, OpenGL driver, Vulkan present), when the
 Linux runtime, Box64 and the Turnip driver are all installed. Settings, Steam: the components to download (one button, one bar per
 package), then the container's settings; they are greyed out until the container exists. The Steam shortcut in the library exists only while
 the container's runtime does; the games installed in Steam keep getting shortcuts of their own (`LinuxSteamGames.sync`).
-The container cannot be removed, renamed or duplicated from the list; "Reset Steam" in its settings deletes it and makes a new one.
+The shared container cannot be removed or duplicated. The Reset Steam action has been removed, and the legacy reset API preserves its data.
 
-Steam always runs native and in Big Picture mode. The old per-container Steam options (`linuxSteam`, `linuxSteamBigPicture`) are gone from
-the container settings; an old container that has them is an ordinary container now.
+The Steam shortcut defaults to native resolution and Big Picture mode; its resolution can be changed in shortcut settings. The old per-container Steam options (`linuxSteam`, `linuxSteamBigPicture`) are gone from
+the container settings. Existing Linux containers are consolidated into the shared one while retaining their data.
 
 ## Settings screen
 

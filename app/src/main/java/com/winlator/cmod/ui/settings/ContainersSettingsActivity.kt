@@ -148,7 +148,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
     fun startContainer(kind: String) {
         when (kind) {
             "windows" -> openFragment(ContainerCreateComposeFragment())
-            "linux" -> openFragment(LinuxContainerCreateFragment())
+            "linux" -> openFragment(LinuxContainerCreateFragment.forSteam())
             "steam" -> openFragment(LinuxContainerCreateFragment.forSteam())
             "game" -> openFragment(GameContainerFragment())
             "import" -> importContainer()
@@ -420,6 +420,23 @@ class ContainersSettingsActivity : AppCompatActivity() {
 
     private fun showImportSummary(result: ContainerImporter.Result) {
         val ok = result.container != null
+        if (ok && result.container!!.isLinux) {
+            val shortcuts = ContainerManager(this).loadShortcuts().filter { it.container.isLinux }
+            if (shortcuts.isEmpty()) {
+                AppCompatAlertDialog.Builder(this).setTitle("Linux is ready")
+                    .setMessage("Linux games and Steam share one container. Add a game to create a shortcut with its own settings.")
+                    .setPositiveButton(android.R.string.ok, null).show()
+            } else {
+                AppCompatAlertDialog.Builder(this).setTitle("Apply Linux settings to shortcut")
+                    .setItems(shortcuts.map { it.name }.toTypedArray()) { _, index ->
+                        val shortcut = shortcuts[index]
+                        result.linuxSettings.forEach { (key, value) -> shortcut.putExtra(key, value) }
+                        shortcut.saveData()
+                        android.widget.Toast.makeText(this, "Settings applied to ${shortcut.name}", android.widget.Toast.LENGTH_SHORT).show()
+                    }.setNegativeButton(android.R.string.cancel, null).show()
+            }
+            return
+        }
         val title = if (ok) "Import complete" else "Import failed"
         val body = StringBuilder()
         if (ok) body.append("Created \"").append(result.container!!.name).append("\".")

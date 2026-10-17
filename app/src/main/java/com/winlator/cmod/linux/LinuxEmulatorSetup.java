@@ -22,7 +22,8 @@ public final class LinuxEmulatorSetup {
             LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS, LinuxFex.EXTRA_GL_32,
             LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM,
             LinuxDriverManager.EXTRA_DRIVER, LinuxSession.EXTRA_GL_DRIVER, LinuxSession.EXTRA_VULKAN_PRESENT,
-            LinuxBionicSession.EXTRA
+            LinuxBionicSession.EXTRA, LinuxSession.EXTRA_NO_PROOT,
+            com.winlator.cmod.lsfg.LsfgManager.EXTRA_PERFORMANCE_MODE, com.winlator.cmod.lsfg.LsfgManager.EXTRA_PRESENT_MODE
     };
 
     private LinuxEmulatorSetup() {}
@@ -45,7 +46,7 @@ public final class LinuxEmulatorSetup {
         if (LinuxShortcutDefaults.isOwn(shortcut)) {
             Map<String, String> own = new LinkedHashMap<>();
             for (String name : EXTRAS) own.put(name, shortcut.getExtra(name));
-            return container.copyWithExtras(own);
+            return session(container.copyWithExtras(own), shortcut);
         }
         if (!overrides(shortcut)) return container;
         Map<String, String> over = new LinkedHashMap<>();
@@ -59,6 +60,19 @@ public final class LinuxEmulatorSetup {
             String value = shortcut.getExtra(name);
             if (!value.isEmpty()) over.put(name, value);
         }
-        return container.copyWithExtras(over);
+        return session(container.copyWithExtras(over), shortcut);
+    }
+
+    private static Container session(Container copy, Shortcut shortcut) {
+        String runtime = shortcut.getExtra(LinuxShortcutDefaults.RUNTIME);
+        if (!runtime.isEmpty()) copy.setLinuxRuntime(runtime);
+        String variables = shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS);
+        com.winlator.cmod.core.EnvVars env = new com.winlator.cmod.core.EnvVars(
+                LinuxShortcutDefaults.isOwn(shortcut) || Container.DEFAULT_ENV_VARS.equals(copy.getEnvVars()) ? "" : copy.getEnvVars());
+        LinuxLaunchOptions.parse("", variables).env.forEach(env::put);
+        copy.setEnvVars(env.toString());
+        String cpu = shortcut.getExtra("cpuList");
+        if (!cpu.isEmpty()) copy.setCPUList(cpu);
+        return copy;
     }
 }

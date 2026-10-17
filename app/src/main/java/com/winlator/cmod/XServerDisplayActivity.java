@@ -458,8 +458,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         linuxSession = container.isLinux();
+        if (shortcutPath != null && !shortcutPath.isEmpty()) {
+            shortcut = new Shortcut(container, new File(shortcutPath));
+            if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
+        }
         if (linuxSession) {
-            linuxRuntime = LinuxRuntime.resolve(this, container);
+            linuxRuntime = LinuxRuntime.resolve(this, com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut));
             if (linuxRuntime == null) {
                 Toast.makeText(this, "This container's Linux runtime is not installed. Download it in Components.",
                         Toast.LENGTH_LONG).show();
@@ -484,9 +488,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         containerManager.activateContainer(container);
 
-        if (shortcutPath != null && !shortcutPath.isEmpty()) {
-            shortcut = new Shortcut(container, new File(shortcutPath));
-        }
         // What the game's registry profile says about this shortcut (a Linux one only); the shortcut's own choices win over it.
         gameProfile = shortcut != null && container.isLinux() ? GameProfiles.resolve(this, container, shortcut) : null;
         // A Linux shortcut's own frame generation settings win over its container's for this session.
@@ -1676,7 +1677,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         if (container != null) {
-            String hudModeExtra = container.getExtra("hudMode");
+            String hudModeExtra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             int hudMode = !hudModeExtra.isEmpty()
                     ? Integer.parseInt(hudModeExtra)
                     : (container.isShowFPS() ? 1 : 0);
@@ -2108,7 +2109,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if      (modernHud  != null) currentMode = 2;
         else if (classicHud != null) currentMode = 1;
         else if (container  != null) {
-            String extra = container.getExtra("hudMode");
+            String extra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             if (!extra.isEmpty())           currentMode = Integer.parseInt(extra);
             else if (container.isShowFPS()) currentMode = 1;
         }
@@ -2258,9 +2259,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void saveHudModeToContainer(int mode) {
         if (container == null) return;
-        container.putExtra("hudMode", String.valueOf(mode));
-        container.setShowFPS(mode != 0);
-        container.saveData();
+        if (linuxSession && shortcut != null) {
+            shortcut.putExtra("hudMode", String.valueOf(mode));
+            shortcut.saveData();
+        } else {
+            container.putExtra("hudMode", String.valueOf(mode));
+            container.setShowFPS(mode != 0);
+            container.saveData();
+        }
         if (xServerView instanceof XServerView) {
             ((XServerView) xServerView).setShowFPS(mode != 0);
         }
@@ -2322,7 +2328,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ArrayAdapter<String> a = createSidebarSpinnerAdapter(fpsLabels);
             a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             spNativeFPS.setAdapter(a);
-            String savedFps = container != null ? container.getExtra("graphicsFpsPreset") : "";
+            String savedFps = container != null ? (linuxSession ? linuxSetting("graphicsFpsPreset") : container.getExtra("graphicsFpsPreset")) : "";
             int savedFpsPos = savedFps.isEmpty() ? 0 : Integer.parseInt(savedFps);
             if (savedFpsPos < 0 || savedFpsPos >= fpsLabels.length) savedFpsPos = 0;
             spNativeFPS.setSelection(savedFpsPos);
@@ -2336,8 +2342,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (vkRenderer != null) vkRenderer.setFpsLimit(fpsLimit);
                     if (nativeRenderer != null) nativeRenderer.setFpsLimit(fpsLimit);
                     if (!isVulkanRenderer && container != null) {
-                        container.putExtra("graphicsFpsPreset", String.valueOf(pos));
-                        container.saveData();
+                        if (linuxSession && shortcut != null) {
+                            shortcut.putExtra("graphicsFpsPreset", String.valueOf(pos));
+                            shortcut.saveData();
+                        } else {
+                            container.putExtra("graphicsFpsPreset", String.valueOf(pos));
+                            container.saveData();
+                        }
                     }
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
@@ -2347,6 +2358,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (btSaveGraphicsPreset != null) {
             btSaveGraphicsPreset.setOnClickListener(v -> {
                 if (container == null) return;
+                if (linuxSession && shortcut != null) {
+                shortcut.putExtra("graphicsFpsPreset",
+                    String.valueOf(spNativeFPS != null ? spNativeFPS.getSelectedItemPosition() : 0));
+                if (vkRenderer != null) {
+                    shortcut.putExtra("graphicsFilterMode",
+                        String.valueOf(swEnableFSR != null && swEnableFSR.isChecked()
+                            ? (spUpscalerMode != null ? spUpscalerMode.getSelectedItemPosition() + 2 : 2) : 0));
+                    shortcut.putExtra("graphicsSharpness",
+                        String.valueOf(sbSharpness != null ? sbSharpness.getValue() : 50f));
+                    shortcut.putExtra("graphicsPostFXMode",
+                        String.valueOf(spPostFXMode != null ? spPostFXMode.getSelectedItemPosition() : 0));
+                    shortcut.putExtra("graphicsColorMode", "0");
+                }
+                shortcut.saveData();
+                } else {
                 container.putExtra("graphicsFpsPreset",
                     String.valueOf(spNativeFPS != null ? spNativeFPS.getSelectedItemPosition() : 0));
                 if (vkRenderer != null) {
@@ -2360,6 +2386,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     container.putExtra("graphicsColorMode", "0");
                 }
                 container.saveData();
+                }
                 Toast.makeText(this, "Preset saved", Toast.LENGTH_SHORT).show();
             });
         }
@@ -2380,7 +2407,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
-        String savedSharp = container != null ? container.getExtra("graphicsSharpness") : "";
+        String savedSharp = container != null ? (linuxSession ? linuxSetting("graphicsSharpness") : container.getExtra("graphicsSharpness")) : "";
         float  initSharp  = savedSharp.isEmpty() ? 50f : Float.parseFloat(savedSharp);
         if (sbSharpness != null) {
             sbSharpness.setValue(initSharp);
@@ -2431,7 +2458,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             spPostFXMode.setAdapter(a);
 
-            String savedPFX = container != null ? container.getExtra("graphicsPostFXMode") : "";
+            String savedPFX = container != null ? (linuxSession ? linuxSetting("graphicsPostFXMode") : container.getExtra("graphicsPostFXMode")) : "";
             int initPFX = savedPFX.isEmpty() ? 0 : Integer.parseInt(savedPFX);
             if (initPFX < 0 || initPFX >= pfxLabels.length) initPFX = 0;
 
@@ -2447,7 +2474,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
-        String savedPFXInit = container != null ? container.getExtra("graphicsPostFXMode") : "";
+        String savedPFXInit = container != null ? (linuxSession ? linuxSetting("graphicsPostFXMode") : container.getExtra("graphicsPostFXMode")) : "";
         boolean dlsRestored = !savedPFXInit.isEmpty() && Integer.parseInt(savedPFXInit) == 1;
         int sharpVis = (fsrOn || dlsRestored) ? View.VISIBLE : View.GONE;
         if (lblSharpnessHeader != null) lblSharpnessHeader.setVisibility(sharpVis);
@@ -3553,7 +3580,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public boolean isShowFPS() {
         if (container == null) return false;
-        String hudMode = container.getExtra("hudMode");
+        String hudMode = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
         return !hudMode.isEmpty() ? !"0".equals(hudMode) : container.isShowFPS();
     }
 

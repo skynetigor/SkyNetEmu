@@ -1,6 +1,9 @@
 # Linux containers: Box64 / FEX chosen per shortcut (plan)
 
-Status: **implemented** (see "What was built" at the end). Goal: one Linux container is enough; the x86 emulator (and its settings) can be
+Status: **implemented**. The current model enforces one protected Linux container for every Linux game and Steam; see
+[Shared Linux container](linux-shared-container.md). The design notes below describe its earlier implementation.
+
+Original goal: one Linux container is enough; the x86 emulator (and its settings) can be
 kept by each shortcut as its own copy of the container's settings (see "Every setting is the shortcut's own" below).
 
 ## What is already global

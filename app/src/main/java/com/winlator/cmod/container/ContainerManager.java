@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.concurrent.Executors;
 
 public class ContainerManager {
+    public static final Object LINUX_LOCK = new Object();
     private final ArrayList<Container> containers = new ArrayList<>();
     private int maxContainerId = 0;
     private final File homeDir;
@@ -38,7 +39,10 @@ public class ContainerManager {
         this.context = context;
         File rootDir = ImageFs.find(context).getRootDir();
         homeDir = new File(rootDir, "home");
-        loadContainers();
+        synchronized (LINUX_LOCK) {
+            loadContainers();
+            com.winlator.cmod.linux.SharedLinuxContainers.consolidate(context, this);
+        }
         isInitialized = true;
     }
 
@@ -147,6 +151,17 @@ public class ContainerManager {
     }
 
     private Container createLinuxContainer(JSONObject data) {
+        synchronized (LINUX_LOCK) {
+            // Another manager may have created the shared container since this instance was loaded.
+            loadContainers();
+            com.winlator.cmod.linux.SharedLinuxContainers.consolidate(context, this);
+            Container existing = com.winlator.cmod.linux.SharedLinuxContainers.find(this);
+            if (existing != null) return existing;
+            return createSharedLinuxContainer(data);
+        }
+    }
+
+    private Container createSharedLinuxContainer(JSONObject data) {
         try {
             int id = findNextContainerId();
             data.put("id", id);
@@ -163,6 +178,9 @@ public class ContainerManager {
             Container container = new Container(id, this);
             container.setRootDir(containerDir);
             container.loadData(data);
+            container.setName("Linux");
+            container.putExtra("linuxSharedVersion", "1");
+            container.putExtra(com.winlator.cmod.steam.SteamContainer.EXTRA_MANAGED, com.winlator.cmod.steam.SteamContainer.MANAGED_STEAM);
 
             if (!container.getLinuxHomeDir().mkdirs()) {
                 FileUtils.delete(containerDir);
@@ -271,6 +289,7 @@ public class ContainerManager {
     }
 
     private Container createContainer(JSONObject data, ContentsManager contentsManager) {
+        if (Container.TYPE_LINUX.equals(data.optString("type"))) return createLinuxContainer(data);
         try {
             int id = findNextContainerId();
             data.put("id", id);
@@ -362,8 +381,9 @@ public class ContainerManager {
         removeManagedContainer(container);
     }
 
-    /** Removes a container with everything in it, the app's Steam container included (its screen offers "Reset"). */
+    /** Removes a Windows container. Shared Linux data is protected even from legacy reset callers. */
     public void removeManagedContainer(Container container) {
+        if (container.isLinux()) return;
         if (FileUtils.delete(container.getRootDir())) containers.remove(container);
     }
 
@@ -406,6 +426,13 @@ public class ContainerManager {
 
     public Container getContainerById(int id) {
         for (Container container : containers) if (container.id == id) return container;
+        File redirect = new File(new File(homeDir, ImageFs.USER + "-" + id), com.winlator.cmod.linux.SharedLinuxContainers.REDIRECT);
+        if (redirect.isFile()) {
+            try {
+                int sharedId = Integer.parseInt(FileUtils.readString(redirect).trim());
+                for (Container container : containers) if (container.id == sharedId && container.isLinux()) return container;
+            } catch (RuntimeException ignored) {}
+        }
         return null;
     }
 

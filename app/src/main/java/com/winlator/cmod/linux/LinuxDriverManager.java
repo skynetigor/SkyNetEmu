@@ -102,9 +102,12 @@ public final class LinuxDriverManager {
 
     /** Name of a Linux container that uses this driver, or null. */
     public static String containerUsing(Context context, String id) {
-        for (Container container : new ContainerManager(context).getContainers()) {
+        ContainerManager manager = new ContainerManager(context);
+        for (Container container : manager.getContainers()) {
             if (container.isLinux() && id.equals(container.getExtra(EXTRA_DRIVER))) return container.getName();
         }
+        for (com.winlator.cmod.container.Shortcut shortcut : manager.loadShortcuts())
+            if (shortcut.container.isLinux() && id.equals(shortcut.getExtra(EXTRA_DRIVER))) return shortcut.name;
         return null;
     }
 

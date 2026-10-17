@@ -730,6 +730,17 @@ public class ShortcutsFragment extends Fragment {
             });
         }
         else if (LibraryComposeHost.ACTION_CLONE.equals(action)) {
+            if (shortcut.container.isLinux()) {
+                String name = com.winlator.cmod.container.ShortcutWriter.freeName(shortcut.container, shortcut.name);
+                File copy = ContainerManager.linuxShortcutFile(shortcut.container, name);
+                if (FileUtils.copy(shortcut.file, copy)) {
+                    Shortcut cloned = new Shortcut(shortcut.container, copy);
+                    cloned.putExtra("uuid", null);
+                    cloned.saveData();
+                    loadShortcutsList();
+                }
+                return;
+            }
             ContainerManager containerManager = new ContainerManager(context);
             ArrayList<Container> containers = containerManager.getWineContainers();
             AlertDialog.Builder builder = new AlertDialog.Builder(context);

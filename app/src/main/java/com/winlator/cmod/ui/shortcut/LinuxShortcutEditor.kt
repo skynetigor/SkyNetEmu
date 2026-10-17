@@ -22,6 +22,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,6 +41,7 @@ import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxEmulatorSetup
 import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxLaunchOptions
+import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.linux.LinuxShortcutDefaults
@@ -47,6 +49,7 @@ import com.winlator.cmod.lsfg.LsfgManager
 import com.winlator.cmod.ui.settings.EditorCategory
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
 import com.winlator.cmod.ui.settings.RailEditor
+import com.winlator.cmod.ui.settings.CpuSelectorRow
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.container.FexDownloadPrompt
 import com.winlator.cmod.ui.container.ResolutionSetting
@@ -78,12 +81,25 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var options by remember { mutableStateOf(shortcut.getExtra(LinuxLaunchOptions.EXTRA)) }
     var envVars by remember { mutableStateOf(shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS)) }
     val parsed = remember(options, envVars) { LinuxLaunchOptions.parse(options, envVars) }
+    val runtimes = remember { LinuxRuntime.listInstalled(context) }
+    var runtimeId by remember { mutableStateOf(shortcut.getExtra(LinuxShortcutDefaults.RUNTIME)) }
+    var noProot by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_NO_PROOT)) }
+    var fps by remember { mutableStateOf(shortcut.getExtra("graphicsFpsPreset", "0")) }
+    var hud by remember { mutableStateOf(shortcut.getExtra("hudMode", "0")) }
+    val cpuSelected = remember {
+        val selected = shortcut.getExtra("cpuList").split(",").mapNotNull { it.toIntOrNull() }.toSet()
+        mutableStateListOf<Boolean>().apply {
+            repeat(Runtime.getRuntime().availableProcessors().coerceIn(1, 32)) { add(selected.isEmpty() || it in selected) }
+        }
+    }
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
     var fit by remember { mutableStateOf(shortcut.getExtra(FIT)) }
     var upscaler by remember { mutableStateOf(shortcut.getExtra(UPSCALER)) }
     var touch by remember { mutableStateOf(shortcut.getExtra("simTouchScreen")) }
     var steamClient by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL)) }
     var multiplier by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER)) }
+    var lsfgPerformance by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_PERFORMANCE_MODE, "1")) }
+    var lsfgPresent by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_PRESENT_MODE, LsfgManager.PRESENT_MODE_MAILBOX)) }
     var flowScale by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_FLOW_SCALE)) }
     // The game profile: "" follows the registry (a Steam game's own app), "none" turns it off, anything else is a game's id.
     var profileId by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_PROFILE)) }
@@ -182,12 +198,19 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         val text = options.replace('\n', ' ').trim()
         shortcut.putExtra(LinuxLaunchOptions.EXTRA, text.ifEmpty { null })
         shortcut.putExtra(LinuxLaunchOptions.EXTRA_ENV_VARS, envVars.trim().ifEmpty { null })
+        shortcut.putExtra(LinuxShortcutDefaults.RUNTIME, runtimeId)
+        shortcut.putExtra(LinuxSession.EXTRA_NO_PROOT, noProot)
+        shortcut.putExtra("cpuList", cpuSelected.indices.filter { cpuSelected[it] }.joinToString(","))
+        shortcut.putExtra("graphicsFpsPreset", fps)
+        shortcut.putExtra("hudMode", hud)
         shortcut.putExtra(SIZE, size.trim().ifEmpty { null })
         shortcut.putExtra(FIT, fit.ifEmpty { null })
         shortcut.putExtra("simTouchScreen", touch.ifEmpty { null })
         shortcut.putExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL, steamClient.ifEmpty { null })
         shortcut.putExtra(UPSCALER, upscaler.ifEmpty { null })
         shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, multiplier.ifEmpty { null })
+        shortcut.putExtra(LsfgManager.EXTRA_PERFORMANCE_MODE, lsfgPerformance)
+        shortcut.putExtra(LsfgManager.EXTRA_PRESENT_MODE, lsfgPresent)
         shortcut.putExtra(LsfgManager.EXTRA_FLOW_SCALE, flowScale.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_PROFILE, profileId.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_VERSION, profileVersion.ifEmpty { null })
@@ -213,7 +236,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         onClose()
     }
 
-    val graphicsSummary = if (throughSteam) "native size (Steam)" else listOf(
+    val graphicsSummary = listOf(
         if (size.trim() == "native") "native size" else size.trim(),
         when (fit) { "1" -> "fit"; "2" -> "game window"; else -> "1:1" },
         UPSCALER_MODES.firstOrNull { it.first == upscaler && it.first != "0" }?.second?.substringBefore(" (") ?: "no upscaler"
@@ -358,17 +381,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         EditorCategory("graphics", "Graphics", graphicsSummary, !sizeValid) {
             SettingsCard {
-                if (throughSteam) {
-                    Text(
-                        "Native resolution: a game started through Steam runs in the Steam client's session, at the device's own size. " +
-                            "Set its resolution in Steam, or in the game.",
-                        modifier = Modifier.padding(14.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    ResolutionSetting(size) { size = it }
-                }
+                ResolutionSetting(size) { size = it }
                 SettingsDivider()
                 SettingMappedChoice(
                     "Scaling",
@@ -442,6 +455,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     flowScale,
                     LinkedHashMap<String, String>().apply { FLOW_SCALES.forEach { put(it, it) } }
                 ) { flowScale = it }
+                SettingsDivider()
+                SettingMappedChoice("Performance mode", lsfgPerformance, linkedMapOf("1" to "On", "0" to "Off")) { lsfgPerformance = it }
+                SettingsDivider()
+                SettingMappedChoice("Present mode", lsfgPresent, linkedMapOf(LsfgManager.PRESENT_MODE_MAILBOX to "Mailbox", LsfgManager.PRESENT_MODE_FIFO to "FIFO")) { lsfgPresent = it }
             }
             Text(
                 "Works with native output only (the container's \"Software Vulkan output\" off). Changes made in the " +
@@ -449,6 +466,17 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        },
+        EditorCategory("performance", "Performance", "${cpuSelected.count { it }} CPU cores", false) {
+            SettingsCard {
+                CpuSelectorRow("CPU cores", cpuSelected) { index, checked ->
+                    if (checked || cpuSelected.count { it } > 1) cpuSelected[index] = checked
+                }
+                SettingsDivider()
+                SettingMappedChoice("FPS limit", fps, linkedMapOf("0" to "Off", "1" to "30 FPS", "2" to "60 FPS", "3" to "90 FPS", "4" to "120 FPS")) { fps = it }
+                SettingsDivider()
+                SettingMappedChoice("HUD", hud, linkedMapOf("0" to "Off", "1" to "Classic", "2" to "Modern")) { hud = it }
+            }
         },
         EditorCategory(
             "input", "Input",
@@ -508,6 +536,13 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             emulatorProblem
         ) {
             SettingsCard {
+                SettingMappedChoice("Linux runtime", runtimeId, LinkedHashMap<String, String>().apply {
+                    runtimes.forEach { put(it.id, it.name) }
+                    if (runtimeId.isNotEmpty() && runtimeId !in this) put(runtimeId, "$runtimeId (not installed)")
+                }) { runtimeId = it }
+                SettingsDivider()
+                SettingMappedChoice("Run without proot (glibc)", noProot, linkedMapOf("1" to "On", "0" to "Off")) { noProot = it }
+                SettingsDivider()
                 SettingMappedChoice(
                     "x86 emulator",
                     effectiveChoice,

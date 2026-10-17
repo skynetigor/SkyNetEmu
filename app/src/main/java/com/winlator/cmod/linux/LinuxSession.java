@@ -113,7 +113,17 @@ public final class LinuxSession {
      */
     public static String[] programCommand(Context context, Container container, com.winlator.cmod.container.Shortcut shortcut) {
         String path = shortcut.path;
-        if (isSteam(path)) return steamCommand("", false, true);
+        if (isSteam(path)) {
+            LinuxLaunchOptions options = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
+                    shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS));
+            List<String> command = new ArrayList<>();
+            command.add("/usr/bin/env");
+            for (Map.Entry<String, String> e : options.env.entrySet()) command.add(e.getKey() + "=" + e.getValue());
+            command.addAll(options.wrapper);
+            command.addAll(java.util.Arrays.asList(steamCommand("", false, true)));
+            command.addAll(options.args);
+            return command.toArray(new String[0]);
+        }
         GameProfiles.Effective profile = GameProfiles.resolve(context, container, shortcut);
         LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
                 shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS));
@@ -283,7 +293,7 @@ public final class LinuxSession {
                         + "\"$steam_root/config/loginusers.vdf\"; then extra=\"$extra -silent -no-browser\"; fi; "
                         + "echo \"== steam launch: game=$game minimal=$minimal flags=$extra\"; "
                         + "for try in 1 2 3 4; do \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
-                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game}; code=$?; "
+                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game} \"${@:4}\"; code=$?; "
                         + "[ \"$code\" = 42 ] || break; done; exit $code",
                 STEAM_MARKER, appId, minimal ? "1" : "0", bigPicture ? "1" : "0"};
     }

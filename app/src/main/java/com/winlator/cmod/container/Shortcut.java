@@ -156,7 +156,7 @@ public class Shortcut {
             }
             else extraData.remove(name);
 
-            if ("hudMode".equals(name) && container != null && value != null) {
+            if ("hudMode".equals(name) && container != null && !container.isLinux() && value != null) {
                 int mode = 0;
                 try { mode = Integer.parseInt(value); } catch (NumberFormatException ignored) {}
                 container.putExtra("hudMode", String.valueOf(mode));
@@ -229,6 +229,7 @@ public class Shortcut {
     }
 
     public boolean cloneToContainer(Container newContainer) {
+        if (container.isLinux() || newContainer.isLinux()) return false;
         try {
             File newShortcutFile = new File(newContainer.getDesktopDir(), this.file.getName());
             ArrayList<String> lines = FileUtils.readLines(this.file);
@@ -271,9 +272,9 @@ public class Shortcut {
                 && (com.winlator.cmod.linux.LinuxSession.isSteam(path) || com.winlator.cmod.linux.LinuxSession.isSteamGame(path));
     }
 
-    /** The Steam client's own shortcut has nothing to set; a Steam game's settings (resolution, scaling, ...) can be changed. */
+    /** Every shortcut, including the Steam client, can configure its own launch settings. */
     public boolean hasFixedSettings() {
-        return container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteam(path);
+        return false;
     }
 
     public boolean isSteamGame() {

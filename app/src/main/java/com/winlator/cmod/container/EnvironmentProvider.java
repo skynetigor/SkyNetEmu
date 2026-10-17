@@ -31,6 +31,7 @@ public final class EnvironmentProvider {
         /** True when the container was made now, false when an earlier one was reused. */
         public final boolean created;
         public final List<String> warnings;
+        public java.util.Map<String, String> linuxSettings = java.util.Collections.emptyMap();
 
         Result(Container container, boolean created, List<String> warnings) {
             this.container = container;
@@ -64,7 +65,7 @@ public final class EnvironmentProvider {
         JSONObject data = envelope.container;
         String wine = wineOverride != null ? wineOverride : data.optString("wineVersion", WineInfo.MAIN_WINE_VERSION.identifier());
         boolean linux = Container.TYPE_LINUX.equals(data.optString("type"));
-        Container existing = linux ? findLinux(manager, config.id) : find(manager, config.id, wine);
+        Container existing = linux ? null : find(manager, config.id, wine);
         if (existing != null) return new Result(existing, false, warnings);
 
         try {
@@ -89,15 +90,14 @@ public final class EnvironmentProvider {
         ContainerImporter.Result result = ContainerImporter.run(context, manager, contents, envelope, progress, plan);
         warnings.addAll(result.warnings);
         for (String warning : result.warnings) ErrorReporter.report("import_warning", "ImportWarning", warning);
-        return new Result(result.container, result.container != null, warnings);
+        Result answer = new Result(result.container, existing == null && !linux && result.container != null, warnings);
+        answer.linuxSettings = result.linuxSettings;
+        return answer;
     }
 
     /** The Linux container made from the config, or null. */
     public static Container findLinux(ContainerManager manager, String configId) {
-        for (Container container : manager.getContainers()) {
-            if (container.isLinux() && configId.equals(container.getExtra(EXTRA_CONFIG_ID))) return container;
-        }
-        return null;
+        return com.winlator.cmod.steam.SteamContainer.find(manager);
     }
 
     /** The container made from the config with this Wine, or null. */
