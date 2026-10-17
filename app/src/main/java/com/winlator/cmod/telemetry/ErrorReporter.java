@@ -95,7 +95,8 @@ public final class ErrorReporter {
                 "error.message", Scrub.text(lastOutput.isEmpty() ? "no output" : lastOutput.substring(Math.max(0, lastOutput.length() - 1500)), 1500),
                 "skynet.exit.code", status,
                 "skynet.linux.seconds_running", seconds,
-                "skynet.linux.setup", setup);
+                "skynet.linux.setup", setup,
+                "skynet.linux.logs", LinuxDiagnostics.collect());
     }
 
     /** A failed download: the server's name and what went wrong, never the path of the file. */

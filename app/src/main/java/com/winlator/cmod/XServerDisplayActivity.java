@@ -1076,6 +1076,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
+        com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
         GameSessionRecorder.end();
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
         boolean removeLoadingBar = PreferenceManager.getDefaultSharedPreferences(this)
@@ -1552,6 +1553,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 () -> handler.postDelayed(() -> onLinuxProgramExit(launcher, status), 500)));
         environment.addComponent(launcher);
 
+        com.winlator.cmod.telemetry.LinuxDiagnostics.start(new File(container.getLinuxHomeDir(), ".local/share/Steam/logs"),
+                () -> launcher.lastOutput(60), launcher.setupDescription());
         environment.startEnvironmentComponents();
     }
 
