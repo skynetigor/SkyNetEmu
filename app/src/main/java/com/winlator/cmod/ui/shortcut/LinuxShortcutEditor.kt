@@ -86,6 +86,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var noSteam by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_NO_STEAM)) }
     var gameRoot by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_ROOT)) }
     // The x86 emulator: empty follows the container. The names are the container's, so the session code is shared.
+    var bionic by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA)) }
     var emulatorChoice by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR)) }
     var emulatorId by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_ID)) }
     var emulatorPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_PRESET)) }
@@ -180,6 +181,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(GameProfiles.EXTRA_VERSION, profileVersion.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_NO_STEAM, noSteam.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_ROOT, gameRoot.trim().ifEmpty { null })
+        shortcut.putExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA, bionic.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulatorChoice.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_ID, emulatorId.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_PRESET, emulatorPreset.ifEmpty { null })
@@ -519,6 +521,16 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     emulatorId = ""
                     emulatorPreset = ""
                 }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "Runtime",
+                    bionic,
+                    linkedMapOf(
+                        "" to "Container default (${if (container.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA) == "1") "Android's C library" else "Linux runtime (glibc)"})",
+                        "0" to "Linux runtime (glibc)",
+                        "1" to "Android's C library (experimental, Box64)"
+                    )
+                ) { bionic = it }
                 if (effectiveChoice == LinuxEmulator.BOX64 || effectiveChoice == LinuxEmulator.FEX) {
                     val fex = effectiveChoice == LinuxEmulator.FEX
                     val builds = if (fex) fexBuilds else boxBuilds
