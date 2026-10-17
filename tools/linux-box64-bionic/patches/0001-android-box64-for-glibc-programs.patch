@@ -1,0 +1,3526 @@
+diff --git a/src/elfs/elfloader.c b/src/elfs/elfloader.c
+index 89c248e8e..bb8cc004b 100644
+--- a/src/elfs/elfloader.c
++++ b/src/elfs/elfloader.c
+@@ -612,6 +612,15 @@ static elfheader_t* checkElfLib(elfheader_t* h, library_t* lib)
+     return h;
+ }
+ 
++// a symbol that is an IFUNC (libatomic's __atomic_load_16, ...) is bound to what its resolver returns, not to the resolver
++static uintptr_t relocIfunc(Elf64_Sym* elfsym, uintptr_t offs)
++{
++    if(offs && elfsym && ELF64_ST_TYPE(elfsym->st_info)==STT_GNU_IFUNC) {
++        printf_dump(LOG_DEBUG, "            Indirect function, will call the resolver now at %p\n", (void*)offs);
++        return RunFunction(offs, 0);
++    }
++    return offs;
++}
+ static int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, int deepbind, elfheader_t* head, int cnt, Elf64_Rela *rela, int* need_resolv)
+ {
+     int ret_ok = 0;
+@@ -739,7 +748,7 @@ static int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, int
+                             printf_log((bind==STB_WEAK)?LOG_DEBUG:LOG_NONE, "%s: Global Symbol %s not found, cannot apply R_X86_64_GLOB_DAT @%p (%p) in %s\n", (bind==STB_WEAK)?"Warning":"Error", symname, p, *(void**)p, head->name);
+                     } else {
+                         printf_dump(LOG_NEVER, "Apply %s R_X86_64_GLOB_DAT @%p (%p -> %p) on sym=%s (%sver=%d/%s, elf=%s)\n", BindSym(bind), p, (void*)(p?(*p):0), (void*)(offs + rela[i].r_addend), symname, veropt?"opt":"", version, vername?vername:"(none)", sym_elf?sym_elf->name:"(native)");
+-                        *p = offs + rela[i].r_addend;
++                        *p = relocIfunc(elfsym, offs) + rela[i].r_addend;
+                         if(sym_elf && sym_elf!=last_elf && sym_elf!=head) last_elf = checkElfLib(head, sym_elf->lib);
+                     }
+                 }
+@@ -767,7 +776,7 @@ static int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, int
+                         if(p) {
+                             printf_dump(LOG_NEVER, "Apply %s R_X86_64_JUMP_SLOT @%p with sym=%s (%p -> %p / %s (%sver=%d / %s))\n",
+                                 BindSym(bind), p, symname, *(void**)p, (void*)(offs+rela[i].r_addend), sym_elf?sym_elf->name:"native", veropt?"opt":"", version, vername?vername:"(none)");
+-                            *p = offs + rela[i].r_addend;
++                            *p = relocIfunc(elfsym, offs) + rela[i].r_addend;
+                             if(sym_elf && sym_elf!=last_elf && sym_elf!=head) last_elf = checkElfLib(head, sym_elf->lib);
+                         } else {
+                             printf_log(LOG_INFO, "Warning, Symbol %s found, but Jump Slot Offset is NULL \n", symname);
+@@ -795,7 +804,7 @@ static int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, int
+                 } else {
+                     printf_dump(LOG_NEVER, "Apply %s R_X86_64_64 @%p with sym=%s (%sver=%d/%s) addend=0x%lx (%p -> %p)\n",
+                         BindSym(bind), p, symname, veropt?"opt":"", version, vername?vername:"(none)", rela[i].r_addend, *(void**)p, (void*)(offs+rela[i].r_addend/*+*(uint64_t*)p*/));
+-                    *p /*+*/= offs+rela[i].r_addend;
++                    *p /*+*/= relocIfunc(elfsym, offs)+rela[i].r_addend;
+                     if(sym_elf && sym_elf!=last_elf && sym_elf!=head) last_elf = checkElfLib(head, sym_elf->lib);
+                 }
+                 break;
+diff --git a/src/emu/entrypoint.c b/src/emu/entrypoint.c
+index 2c7aea2d5..c01ab4077 100644
+--- a/src/emu/entrypoint.c
++++ b/src/emu/entrypoint.c
+@@ -29,7 +29,9 @@ void EXPORT my___libc_init(x64emu_t* emu, void* raw_args , void (*onexit)(void)
+     SetRBP(emu, Pop64(emu));    // restore RBP
+     emu->quit = 1; // finished!
+ }
+-#else
++#endif
++// glibc programs (a game built for Linux) start through __libc_start_main, on Android too
++#if 1
+ EXPORT int32_t my___libc_start_main(x64emu_t* emu, int (*main) (int, char * *, char * *), int argc, char * * ubp_av, void (*init) (void), void (*fini) (void), void (*rtld_fini) (void), void (* stack_end))
+ {
+     (void)argc; (void)ubp_av; (void)fini; (void)rtld_fini; (void)stack_end;
+diff --git a/src/emu/x64int3.c b/src/emu/x64int3.c
+index 1d98dee42..f6350371f 100644
+--- a/src/emu/x64int3.c
++++ b/src/emu/x64int3.c
+@@ -62,16 +62,20 @@ x64emu_t* x64emu_fork(x64emu_t* emu, int forktype)
+         for (int i=0; i<my_context->atfork_sz; ++i)
+             if(my_context->atforks[i].parent)
+                 EmuCall(emu, my_context->atforks[i].parent);
++#ifndef ANDROID
+         if(forktype==3) {
+             // vfork, the parent wait the end or execve of the son
++            // (WEXITED is no waitpid option: glibc's kernel call refuses it and the parent goes on; bionic's waits for the son to end)
+             waitpid(v, NULL, WEXITED);
+         }
++#endif
+     } else if(v==0) {
+-        // execute atforks child functions
++            // execute atforks child functions
+         for (int i=0; i<my_context->atfork_sz; ++i)
+-            if(my_context->atforks[i].child)
+-                EmuCall(emu, my_context->atforks[i].child);
+-    }
++            if(my_context->atforks[i].child) {
++                            EmuCall(emu, my_context->atforks[i].child);
++            }
++        }
+     R_EAX = v;
+     return emu;
+ }
+diff --git a/src/emu/x64printer.c b/src/emu/x64printer.c
+index e31f16f20..41da46138 100644
+--- a/src/emu/x64printer.c
++++ b/src/emu/x64printer.c
+@@ -1733,6 +1733,8 @@ void x64Print(x64emu_t* emu, char* buff, size_t buffsz, const char* func, int ti
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIu64 ", %" PRIp ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (uint64_t)R_RSI, (void*)R_RDX);
+     } else if (w == vFEpLi) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIu64 ", %" PRIi32 ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (uintptr_t)R_RSI, (int32_t)R_RDX);
++    } else if (w == vFEpLL) {
++        snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIu64 ", %" PRIu64 ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (uintptr_t)R_RSI, (uintptr_t)R_RDX);
+     } else if (w == vFEpLp) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIu64 ", %" PRIp ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (uintptr_t)R_RSI, (void*)R_RDX);
+     } else if (w == vFEppp) {
+@@ -6449,6 +6451,8 @@ void x64Print(x64emu_t* emu, char* buff, size_t buffsz, const char* func, int ti
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIp ", %" PRIp ", %" PRIi32 ", %" PRIi32 ", %" PRIi32 ", %" PRIp ", %" PRIi32 ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(int32_t*)(R_RSP + 16));
+     } else if (w == iFpppiiipp) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIp ", %" PRIp ", %" PRIi32 ", %" PRIi32 ", %" PRIi32 ", %" PRIp ", %" PRIp ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16));
++    } else if (w == iFpppiippp) {
++        snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIp ", %" PRIp ", %" PRIi32 ", %" PRIi32 ", %" PRIp ", %" PRIp ", %" PRIp ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (void*)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16));
+     } else if (w == iFpppipipi) {
+         snprintf(buff, buffsz, "%04d|%p: Calling %s(%" PRIp ", %" PRIp ", %" PRIp ", %" PRIi32 ", %" PRIp ", %" PRIi32 ", %" PRIp ", %" PRIi32 ")", tid, *(void**)(R_RSP), func, (void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (void*)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(int32_t*)(R_RSP + 16));
+     } else if (w == iFppppiiup) {
+diff --git a/src/include/signals.h b/src/include/signals.h
+index 930cc35e9..a2f470c87 100644
+--- a/src/include/signals.h
++++ b/src/include/signals.h
+@@ -8,13 +8,15 @@
+ typedef void (*sighandler_t)(int);
+ 
+ #ifdef ANDROID
++// the x86-64 program is a glibc one: its struct sigaction is { handler, sigset_t (128 bytes), flags, restorer }, bionic's sigset_t is 8 bytes
+ typedef struct x64_sigaction_s {
+-	int sa_flags;
+ 	union {
+ 	  sighandler_t _sa_handler;
+ 	  void (*_sa_sigaction)(int, siginfo_t *, void *);
+ 	} _u;
+ 	sigset_t sa_mask;
++	uint64_t sa_mask_rest[16 - sizeof(sigset_t)/8];
++	uint32_t sa_flags;
+ 	void (*sa_restorer)(void);
+ } x64_sigaction_t;
+ #else
+diff --git a/src/libtools/signals.c b/src/libtools/signals.c
+index 2745893b5..09ec14290 100644
+--- a/src/libtools/signals.c
++++ b/src/libtools/signals.c
+@@ -351,7 +351,7 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
+     if(p) {
+         pc = (void*)CONTEXT_PC(p);
+         if(db)
+-            frame = (uintptr_t)CONTEXT_REG(p, xRSP);    //this should not be needed, as emu has been "adjusted" to dynablock value already in the caller
++            frame = R_RSP;    // the value of emu (adjusted from the dynablock's registers in the caller, and fixed there when the signal lands just after a native call)
+     }
+ #else
+     (void)ucntx; (void)cur_db;
+@@ -658,6 +658,55 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
+     return 0;
+ }
+ 
++#if defined(DYNAREC) && defined(ARM64)
++// A signal that lands in a dynablock right after a native function returned (the code that calls a wrapped function) finds the x86 registers living in the
++// ARM caller-saved registers (x10-x17) overwritten by that function: they were saved in the emu (or on the ARM stack) before the call and are reloaded just
++// after it. Put the saved values back in the emu, the way the reload would.
++static int isArmBLR(uint32_t op) { return (op&0xFFFFFC1F)==0xD63F0000; }
++static int isArmLDPoff(uint32_t op, int rt, int rt2, int rn, int offs)
++{
++    return (op&0xFFC00000)==0xA9400000 && (int)(op&31)==rt && (int)((op>>10)&31)==rt2 && (int)((op>>5)&31)==rn && ((int)((op>>15)&0x7f))*8==offs;
++}
++static int isArmLDPpost(uint32_t op, int rt, int rt2)
++{
++    return (op&0xFFC00000)==0xA8C00000 && (int)(op&31)==rt && (int)((op>>10)&31)==rt2 && (int)((op>>5)&31)==31;
++}
++static void fixNativeCallWindow(x64emu_t* emu, ucontext_t* p, void* pc, const uint64_t* saved)
++{
++    uint32_t* ip = (uint32_t*)pc;
++    int after_blr = 0, blr_x16 = 0;
++    for(int k=1; k<=8 && !after_blr; ++k) {
++        if(isArmBLR(ip[-k])) { after_blr = 1; blr_x16 = (ip[-k]==0xD63F0200); }
++    }
++    if(!after_blr) return;
++    // call_c: all of RAX..R9 were stored in the emu, and are loaded back from it after the call
++    for(int k=0; k<8; ++k) {
++        if(isArmBLR(ip[k])) break;
++        if(isArmLDPoff(ip[k], xRAX, xRCX, xEmu, offsetof(x64emu_t, regs[_AX]))) {
++            emu->regs[_AX].q[0] = saved[_AX]; emu->regs[_CX].q[0] = saved[_CX]; emu->regs[_DX].q[0] = saved[_DX]; emu->regs[_BX].q[0] = saved[_BX];
++            emu->regs[_SP].q[0] = saved[_SP]; emu->regs[_BP].q[0] = saved[_BP]; emu->regs[_SI].q[0] = saved[_SI]; emu->regs[_DI].q[0] = saved[_DI];
++            emu->regs[_R8].q[0] = saved[_R8]; emu->regs[_R9].q[0] = saved[_R9];
++            return;
++        }
++    }
++    // call_n: RSP and RBP were stored in the emu and RBX on the ARM stack, all three loaded back after the call
++    if(!blr_x16) return;
++    for(int k=0; k<8; ++k) {
++        if(isArmBLR(ip[k])) break;
++        if(isArmLDPpost(ip[k], xEmu, xRBX)) {
++            // RBX not loaded yet: it is on the ARM stack, next to the emu pointer
++            emu->regs[_BX].q[0] = *(uint64_t*)(CONTEXT_REG(p, 31)+8);
++            emu->regs[_SP].q[0] = saved[_SP]; emu->regs[_BP].q[0] = saved[_BP];
++            return;
++        }
++        if(isArmLDPoff(ip[k], xRSP, xRBP, xEmu, offsetof(x64emu_t, regs[_SP]))) {
++            emu->regs[_SP].q[0] = saved[_SP]; emu->regs[_BP].q[0] = saved[_BP];
++            return;
++        }
++    }
++}
++#endif
++
+ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo_t* info, void * ucntx, int* old_code, void* cur_db, uintptr_t x64pc)
+ {
+     #define GO(A) uintptr_t old_##A = R_##A;
+@@ -708,7 +757,14 @@ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo
+     dynablock_t* db = cur_db;
+     if(db && ucntx) {
+         void * pc =(void*)CONTEXT_PC((ucontext_t*)ucntx);
++        #if defined(ARM64)
++        uint64_t saved_regs[16];
++        for(int i=0; i<16; ++i) saved_regs[i] = emu->regs[i].q[0];
++        #endif
+         copyUCTXreg2Emu(emu, ucntx, x64pc);
++        #if defined(ARM64)
++        fixNativeCallWindow(emu, (ucontext_t*)ucntx, pc, saved_regs);
++        #endif
+         adjustregs(emu, pc);
+         if(db && db->arch_size)
+             ARCH_ADJUST(db, emu, ucntx, x64pc);
+@@ -1430,6 +1486,9 @@ int EXPORT my_sigaction(x64emu_t* emu, int signum, const x64_sigaction_t *act, x
+     if(oldact) {
+         oldact->sa_flags = old.sa_flags;
+         oldact->sa_mask = old.sa_mask;
++#ifdef ANDROID
++        memset(oldact->sa_mask_rest, 0, sizeof(oldact->sa_mask_rest));
++#endif
+         if(old.sa_flags & 0x04)
+             oldact->_u._sa_sigaction = old.sa_sigaction; //TODO should wrap...
+         else
+@@ -1754,6 +1813,40 @@ static void atfork_child_dynarec_prot(void)
+     #endif
+ }
+ #endif
++// A thread of the program stuck somewhere: kill(SIGPWR) to one thread (tgkill) prints where its emulated code is. Debugging only.
++static void my_dumpthread_handler(int sig, siginfo_t* info, void* ucntx)
++{
++    (void)sig; (void)info;
++    x64emu_t* emu = thread_get_emu_no_create();
++    if(!emu) return;
++    #define BT_BUF_SIZE 100
++    void *buffer[BT_BUF_SIZE];
++    extern int my_backtrace_ip(x64emu_t* emu, void** buffer, int size);
++    extern char** my_backtrace_symbols(x64emu_t* emu, uintptr_t* buffer, int size);
++    #define GO(A) uintptr_t old_##A = R_##A;
++    GO(RSP); GO(RBP); GO(RIP);
++    #undef GO
++    #ifdef DYNAREC
++    ucontext_t* p = (ucontext_t*)ucntx;
++    void* pc = (void*)CONTEXT_PC(p);
++    dynablock_t* db = FindDynablockFromNativeAddress(pc);
++    if(db) {
++        uintptr_t x64pc = getX64Address(db, (uintptr_t)pc);
++        if(x64pc) copyUCTXreg2Emu(emu, p, x64pc);
++    }
++    #endif
++    printf_log(LOG_NONE, "DUMPTHREAD %d: x64 RIP=%p RSP=%p (native pc %p)\n", GetTID(), (void*)R_RIP, (void*)R_RSP, pc);
++    int nptrs = my_backtrace_ip(emu, buffer, BT_BUF_SIZE);
++    char** strings = my_backtrace_symbols(emu, (uintptr_t*)buffer, nptrs);
++    if(strings) {
++        for(int j=0; j<nptrs; ++j) printf_log(LOG_NONE, "DUMPTHREAD %d:   %s\n", GetTID(), strings[j]);
++        free(strings);
++    }
++    #define GO(A) R_##A = old_##A
++    GO(RSP); GO(RBP); GO(RIP);
++    #undef GO
++}
++
+ void init_signal_helper(box64context_t* context)
+ {
+     // setup signal handling
+@@ -1774,6 +1867,10 @@ void init_signal_helper(box64context_t* context)
+     action.sa_sigaction = my_box64signalhandler;
+     sigaction(SIGABRT, &action, NULL);
+ 
++    action.sa_flags = SA_SIGINFO | SA_RESTART;
++    action.sa_sigaction = my_dumpthread_handler;
++    sigaction(SIGPWR, &action, NULL);
++
+     pthread_once(&sigstack_key_once, sigstack_key_alloc);
+ #ifdef USE_SIGNAL_MUTEX
+     atfork_child_dynarec_prot();
+diff --git a/src/libtools/threads.c b/src/libtools/threads.c
+index 04d327847..2006ed3d5 100644
+--- a/src/libtools/threads.c
++++ b/src/libtools/threads.c
+@@ -570,7 +570,6 @@ EXPORT int my_pthread_attr_setstackaddr(x64emu_t* emu, pthread_attr_t* attr, voi
+ 	return 0;
+ 	//return pthread_attr_setstackaddr(getAlignedAttr(attr), addr);
+ }
+-#ifndef ANDROID
+ EXPORT int my_pthread_getattr_np(x64emu_t* emu, pthread_t thread_id, pthread_attr_t* attr)
+ {
+ 	(void)emu;
+@@ -586,16 +585,21 @@ EXPORT int my_pthread_getattr_np(x64emu_t* emu, pthread_t thread_id, pthread_att
+ //printf_log(LOG_INFO, "pthread_getattr_np called for self, stack=%p, sz=%lx\n", stack, sz);
+ 		if (!sz) {
+ 			// get default stack size
++			#ifdef ANDROID
++			sz = 8*1024*1024;	// bionic has no pthread_getattr_default_np
++			#else
+ 			pthread_attr_t attr;
+ 			pthread_getattr_default_np(&attr);
+ 			pthread_attr_getstacksize(&attr, &sz);
+ 			pthread_attr_destroy(&attr);
++			#endif
+ 			// should stack be adjusted?
+ 		}
+ 		AddStackSize((uintptr_t)attr, stack, sz);
+ 	}
+ 	return ret;
+ }
++#ifndef ANDROID
+ EXPORT int my_pthread_getattr_default_np(x64emu_t* emu, pthread_attr_t* attr)
+ {
+ 	(void)emu;
+diff --git a/src/main.c b/src/main.c
+index 5f73ab4bb..95443a0cb 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -1,6 +1,13 @@
+ #include "core.h"
++#ifdef ANDROID
++#include <malloc.h>
++#endif
+ 
+ int main(int argc, const char **argv, char **env) {
++#ifdef ANDROID
++    // Android's malloc hands out pointers tagged in the top byte (0xB4...): x86-64 code that packs a pointer into 48 bits (rapidjson, ...) loses the tag.
++    mallopt(-204 /*M_BIONIC_SET_HEAP_TAGGING_LEVEL*/, 0 /*M_HEAP_TAGGING_LEVEL_NONE*/);
++#endif
+ 
+     x64emu_t* emu = NULL;
+     elfheader_t* elf_header = NULL;
+diff --git a/src/wrapped/androidpath.h b/src/wrapped/androidpath.h
+new file mode 100644
+index 000000000..bf7ddcc74
+--- /dev/null
++++ b/src/wrapped/androidpath.h
+@@ -0,0 +1,64 @@
++// Android has no /dev/shm and no /tmp: the program's paths there go to BOX64_SHM_DIR and TMPDIR (the way libskypath does for the glibc session).
++#ifndef ANDROIDPATH_H
++#define ANDROIDPATH_H
++#include <limits.h>
++#include <string.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <fcntl.h>
++#include <unistd.h>
++#include <dirent.h>
++#include <sys/stat.h>
++#include <sys/statvfs.h>
++#include <sys/vfs.h>
++
++static inline const char* skyFixPath(const char* path, char* out, size_t size)
++{
++    if(!path || path[0]!='/') return path;
++    const char* dir = NULL;
++    size_t skip = 0;
++    if(!strncmp(path, "/dev/shm", 8) && (path[8]=='/' || !path[8])) { dir = getenv("BOX64_SHM_DIR"); skip = 8; }
++    else if(!strncmp(path, "/tmp", 4) && (path[4]=='/' || !path[4])) { dir = getenv("TMPDIR"); skip = 4; }
++    // Android denies the battery (EACCES), which a program takes for an error where a machine without one gives ENOENT
++    if(!strncmp(path, "/sys/class/power_supply", 23) && (path[23]=='/' || !path[23])) { snprintf(out, size, "/proc/skynet-enoent%s", path+23); return out; }
++    if(!dir || !*dir) return path;
++    snprintf(out, size, "%s%s", dir, path+skip);
++    return out;
++}
++#define ANDROID_FIXPATH(p) char p##_fix[PATH_MAX]; p = (__typeof__(p))skyFixPath((const char*)(p), p##_fix, sizeof p##_fix)
++
++// the glibc names the plain wrappers cannot translate by themselves
++EXPORT int my_unlink(const char* p) { ANDROID_FIXPATH(p); return unlink(p); }
++EXPORT int my_rmdir(const char* p) { ANDROID_FIXPATH(p); return rmdir(p); }
++EXPORT int my_mkdir(const char* p, mode_t m) { ANDROID_FIXPATH(p); return mkdir(p, m); }
++EXPORT int my_unlinkat(int fd, const char* p, int f) { ANDROID_FIXPATH(p); return unlinkat(fd, p, f); }
++EXPORT int my_mkdirat(int fd, const char* p, mode_t m) { ANDROID_FIXPATH(p); return mkdirat(fd, p, m); }
++EXPORT int my_rename(const char* a, const char* b) { ANDROID_FIXPATH(a); ANDROID_FIXPATH(b); return rename(a, b); }
++EXPORT int my_access(const char* p, int m) { ANDROID_FIXPATH(p); return access(p, m); }
++EXPORT int my_faccessat(int fd, const char* p, int m, int f) { ANDROID_FIXPATH(p); return faccessat(fd, p, m, f); }
++EXPORT int my_euidaccess(const char* p, int m) { ANDROID_FIXPATH(p); return access(p, m); }
++EXPORT int my_eaccess(const char* p, int m) { ANDROID_FIXPATH(p); return access(p, m); }
++EXPORT int my_chmod(const char* p, mode_t m) { ANDROID_FIXPATH(p); return chmod(p, m); }
++EXPORT void* my_opendir(const char* p) { ANDROID_FIXPATH(p); return opendir(p); }
++EXPORT int my_creat(const char* p, mode_t m) { ANDROID_FIXPATH(p); return creat(p, m); }
++EXPORT int my_creat64(const char* p, mode_t m) { ANDROID_FIXPATH(p); return creat(p, m); }
++EXPORT int my_openat(int fd, const char* p, int f, mode_t m) { ANDROID_FIXPATH(p); return openat(fd, p, f, m); }
++EXPORT int my_openat64(int fd, const char* p, int f, mode_t m) { ANDROID_FIXPATH(p); return openat(fd, p, f, m); }
++EXPORT int my_truncate(const char* p, off_t l) { ANDROID_FIXPATH(p); return truncate(p, l); }
++EXPORT int my_statfs(const char* p, void* b) { ANDROID_FIXPATH(p); return statfs(p, b); }
++EXPORT int my_statvfs(const char* p, void* b) { ANDROID_FIXPATH(p); return statvfs(p, b); }
++EXPORT int my_utimes(const char* p, void* t) { ANDROID_FIXPATH(p); return utimes(p, t); }
++EXPORT int my_chdir(const char* p) { ANDROID_FIXPATH(p); return chdir(p); }
++// the template of the mk*temp functions is edited in place: the six letters come back to the program's own copy
++static inline void skyTempBack(char* orig, const char* fixed, int suffix)
++{
++    size_t a = strlen(orig), b = strlen(fixed);
++    if(a < 6u+suffix || b < 6u+suffix || orig==fixed) return;
++    memcpy(orig + a - 6 - suffix, fixed + b - 6 - suffix, 6);
++}
++EXPORT int my_mkstemp(char* t) { char* o=t; ANDROID_FIXPATH(t); int r = mkstemp(t); if(t!=o) skyTempBack(o, t, 0); return r; }
++EXPORT int my_mkstemp64(char* t) { return my_mkstemp(t); }
++EXPORT int my_mkostemp(char* t, int f) { char* o=t; ANDROID_FIXPATH(t); int r = mkostemp(t, f); if(t!=o) skyTempBack(o, t, 0); return r; }
++EXPORT int my_mkostemp64(char* t, int f) { return my_mkostemp(t, f); }
++EXPORT void* my_mkdtemp(char* t) { char* o=t; ANDROID_FIXPATH(t); char* r = mkdtemp(t); if(t!=o) skyTempBack(o, t, 0); return r ? (void*)o : NULL; }
++#endif
+diff --git a/src/wrapped/generated/functions_list.txt b/src/wrapped/generated/functions_list.txt
+index 47f4c0d4a..a4267660a 100644
+--- a/src/wrapped/generated/functions_list.txt
++++ b/src/wrapped/generated/functions_list.txt
+@@ -998,6 +998,7 @@
+ #() vFEpuA
+ #() vFEpUp
+ #() vFEpLi
++#() vFEpLL
+ #() vFEpLp
+ #() vFEppp
+ #() vFEppV
+@@ -3513,6 +3514,7 @@
+ #() iFppLpLpLp
+ #() iFpppiiipi
+ #() iFpppiiipp
++#() iFpppiippp
+ #() iFpppipipi
+ #() iFppppiiup
+ #() iFppppiipp
+@@ -4224,6 +4226,7 @@
+ #() iFEpuvvppp -> iFEpuppp
+ wrappedalure:
+ wrappedalut:
++wrappedandroidshmem:
+ wrappedanl:
+ wrappedatk:
+ - vFp:
+@@ -5483,22 +5486,45 @@ wrappedlibc:
+   - _ITM_deregisterTMCloneTable
+   - _ZGTtdlPv
+   - __cxa_finalize
++  - __freelocale
++  - __resolv_context_put
++  - freelocale
+ - iFv:
++  - __res_init
+   - fork
++  - getdtablesize
+   - sched_getcpu
+   - vfork
+ - iFi:
+   - iopl
++  - pkey_free
++  - pkey_get
++- iFL:
++  - malloc_trim
++  - pthread_cancel
+ - iFp:
+   - __libc_dlclose
++  - __underflow
+   - _setjmp
+   - atexit
++  - chdir
++  - fts64_close
+   - getcontext
++  - mkstemp
++  - mkstemp64
+   - register_printf_type
++  - res_dnok
++  - res_hnok
++  - rmdir
+   - setcontext
+   - setjmp
++  - shm_unlink
++  - sigisemptyset
+   - stime
+   - uname
++  - unlink
++- iFS:
++  - __uflow
+ - CFp:
+   - _ITM_RU1
+ - uFp:
+@@ -5511,16 +5537,41 @@ wrappedlibc:
+   - __sysconf
+   - sysconf
+ - LFL:
++  - __fdelt_chk
+   - getauxval
++- pFv:
++  - __ctype_b_loc
++  - __ctype_tolower_loc
++  - __ctype_toupper_loc
++  - __errno_location
++  - __h_errno_location
++  - __res_state
++  - __resolv_context_get
++  - get_current_dir_name
++  - gnu_get_libc_version
++- pFi:
++  - nl_langinfo
+ - pFL:
+   - _ZGTtnaX
+   - _ZGTtnam
+ - pFp:
+   - __deregister_frame_info
++  - __duplocale
++  - __resolv_context_get_override
++  - __strdup
++  - __uselocale
++  - __xpg_basename
++  - duplocale
++  - gettext
+   - mallinfo
+   - mallinfo2
++  - mkdtemp
++  - opendir
++  - textdomain
++  - uselocale
+ - vFpi:
+   - __longjmp_chk
++  - __res_iclose
+   - _longjmp
+   - _obstack_newchunk
+   - longjmp
+@@ -5541,32 +5592,59 @@ wrappedlibc:
+   - vwarnx
+ - iFiu:
+   - pidfd_open
++  - pkey_set
+ - iFip:
++  - __towlower_l
++  - __towupper_l
+   - fstat
+   - fstat64
++  - mq_getattr
++  - pthread_setcanceltype
++- iFuu:
++  - pkey_alloc
+ - iFup:
+   - setrlimit
+ - iFpi:
+   - __sigsetjmp
++  - access
+   - backtrace
++  - eaccess
++  - euidaccess
++  - mkostemp
++  - mkostemp64
+   - sigsetjmp
+ - iFpu:
++  - chmod
++  - creat
++  - creat64
+   - delete_module
+   - fsopen
++  - mkdir
++- iFpl:
++  - truncate
+ - iFpL:
+   - munmap
+ - iFpp:
++  - __libc_ns_makecanon
++  - __libc_ns_samename
+   - __vprintf_chk
+   - dl_iterate_phdr
++  - dn_skipname
+   - execv
+   - execvp
+   - lstat
+   - lstat64
++  - pthread_getattr_np
++  - random_r
++  - rename
+   - sigaltstack
+   - stat
+   - stat64
++  - statfs
++  - statvfs
+   - swapcontext
+   - tss_create
++  - utimes
+ - iFpV:
+   - __isoc23_scanf
+   - __isoc99_scanf
+@@ -5577,6 +5655,8 @@ wrappedlibc:
+   - scanf
+   - wprintf
+   - wscanf
++- iFpO:
++  - __open64_2
+ - iFpA:
+   - __isoc23_vscanf
+   - __isoc99_vscanf
+@@ -5584,20 +5664,35 @@ wrappedlibc:
+   - vscanf
+   - vwprintf
+   - vwscanf
++- iFSi:
++  - __overflow
+ - iFSp:
+   - _IO_file_stat
++- dFpp:
++  - strtof64
++- LFpp:
++  - __wctype_l
+ - pFip:
++  - __nl_langinfo_l
+   - __sysv_signal
+   - bsd_signal
++  - nl_langinfo_l
+   - signal
+   - sigset
+   - sysv_signal
+ - pFpi:
+   - __libc_dlopen_mode
++  - __rawmemchr
+   - backtrace_symbols
++- pFpL:
++  - __res_get_nsaddr
+ - pFpp:
++  - __gmtime_r
+   - __libc_dlsym
+   - __realpath_chk
++  - bind_textdomain_codeset
++  - bindtextdomain
++  - dgettext
+   - realpath
+ - SFpp:
+   - fopen
+@@ -5616,11 +5711,15 @@ wrappedlibc:
+   - backtrace_symbols_fd
+ - vFpup:
+   - _ITM_addUserCommitAction
++- vFpLL:
++  - __explicit_bzero_chk
+ - vFppL:
+   - _ITM_memcpyRnWt
+   - _ITM_memcpyRtWn
+ - vFppV:
+   - argp_error
++- iFiii:
++  - socket
+ - iFiiu:
+   - pidfd_getfd
+ - iFiip:
+@@ -5636,8 +5735,14 @@ wrappedlibc:
+   - ioctl
+   - sched_getaffinity
+   - sched_setaffinity
++- iFipi:
++  - unlinkat
+ - iFipu:
++  - bind
+   - fspick
++  - mkdirat
++- iFipL:
++  - __getgroups_chk
+ - iFipp:
+   - __lxstat
+   - __lxstat64
+@@ -5645,13 +5750,18 @@ wrappedlibc:
+   - __xstat
+   - __xstat64
+   - getopt
++  - getsockname
+   - register_printf_specifier
+   - sigaction
+ - iFipV:
+   - __printf_chk
+   - dprintf
++- iFipO:
++  - __openat64_2
+ - iFipA:
+   - vdprintf
++- iFuLL:
++  - __iswctype_l
+ - iFpLi:
+   - mprotect
+ - iFpLp:
+@@ -5659,11 +5769,15 @@ wrappedlibc:
+ - iFppi:
+   - ftw
+   - ftw64
++- iFppL:
++  - bcmp
+ - iFppp:
+   - __cxa_atexit
+   - __cxa_thread_atexit_impl
++  - __strcoll_l
+   - __vfprintf_chk
+   - __vsscanf
++  - __wcscoll_l
+   - execve
+   - execvpe
+ - iFppV:
+@@ -5688,6 +5802,8 @@ wrappedlibc:
+   - vsprintf
+   - vsscanf
+   - vswscanf
++- iFpOu:
++  - shm_open
+ - iFpON:
+   - __open
+   - open
+@@ -5702,17 +5818,35 @@ wrappedlibc:
+   - vfscanf
+   - vfwprintf
+   - vfwscanf
++- fFppp:
++  - __strtof_l
++- dFppp:
++  - __strtod_l
+ - lFipV:
+   - __wprintf_chk
+ - lFppL:
+   - readlink
++- LFpLp:
++  - __mbrlen
++  - parse_printf_format
+ - LFppL:
+   - strlcat
+   - strlcpy
++- pFipL:
++  - __strerror_r
++  - __xpg_strerror_r
++  - strerror_r
++- pFipp:
++  - __newlocale
++  - newlocale
+ - pFpip:
+   - fts64_open
+   - fts_open
++- pFppi:
++  - dcgettext
+ - pFppp:
++  - __res_context_hostalias
++  - __strtok_r
+   - tdelete
+   - tfind
+   - tsearch
+@@ -5727,6 +5861,8 @@ wrappedlibc:
+   - qsort
+ - vFppiV:
+   - makecontext
++- vFppup:
++  - __assert_fail
+ - vFpppp:
+   - __libc_init
+ - iFiiip:
+@@ -5741,6 +5877,7 @@ wrappedlibc:
+   - __vdprintf_chk
+ - iFipii:
+   - epoll_wait
++  - faccessat
+ - iFipup:
+   - __xmknod
+ - iFippi:
+@@ -5748,6 +5885,11 @@ wrappedlibc:
+   - fstatat64
+ - iFippL:
+   - __inet_pton_chk
++- iFipON:
++  - openat
++  - openat64
++- iFupLp:
++  - initstate_r
+ - iFpipp:
+   - __vasprintf_chk
+   - glob
+@@ -5758,6 +5900,10 @@ wrappedlibc:
+   - __fwprintf_chk
+ - iFpipA:
+   - __vfwprintf_chk
++- iFpLii:
++  - pkey_mprotect
++- iFpLpd:
++  - strfromf64
+ - iFpLpV:
+   - __snprintf
+   - snprintf
+@@ -5770,6 +5916,7 @@ wrappedlibc:
+   - nftw
+   - nftw64
+ - iFpppp:
++  - __libc_res_queriesmatch
+   - __register_atfork
+   - __vsprintf_chk
+   - scandir
+@@ -5778,12 +5925,30 @@ wrappedlibc:
+   - readlinkat
+ - lFuipp:
+   - ptrace
++- lFppiS:
++  - __getdelim
+ - lFppLL:
+   - __readlink_chk
++- LFppLL:
++  - __mbstowcs_chk
++  - __strxfrm_l
++  - __wcsxfrm_l
++- pFpLip:
++  - __fgets_chk
++- pFpLiS:
++  - __fgets_unlocked_chk
++- pFppLL:
++  - __wcsncpy_chk
++  - __wmemcpy_chk
++  - __wmemmove_chk
+ - vFpiipV:
+   - argp_failure
+ - vFpLLpp:
+   - qsort_r
++- iFiiipu:
++  - setsockopt
++- iFiiipp:
++  - getsockopt
+ - iFiipup:
+   - __xmknodat
+ - iFiippi:
+@@ -5803,23 +5968,41 @@ wrappedlibc:
+   - epoll_pwait2
+ - iFipupL:
+   - mount_setattr
++- iFippLp:
++  - getprotobynumber_r
++- iFipppi:
++  - name_to_handle_at
+ - iFipppp:
+   - getopt_long
+   - getopt_long_only
+   - scandirat
+   - scandirat64
+ - iFpiipp:
++  - __libc_res_nameinquery
+   - _obstack_begin
+ - iFpilpV:
+   - __sprintf_chk
+ - iFpuppp:
+   - __vswprintf_chk
++- iFpppLp:
++  - getprotobyname_r
++- iFppppi:
++  - __libc_dn_expand
+ - lFippLL:
+   - __readlinkat_chk
++- LFpLLLp:
++  - __fread_chk
++  - __fread_unlocked_chk
++- LFpLppL:
++  - __strftime_l
++- LFpLppp:
++  - __wcsftime_l
+ - pFpLLiN:
+   - mremap
+ - pFppLLp:
+   - bsearch
++- pFpppLi:
++  - dcngettext
+ - pFpppLp:
+   - lfind
+   - lsearch
+@@ -5835,6 +6018,8 @@ wrappedlibc:
+ - iFpLiLpV:
+   - __snprintf_chk
+   - __swprintf_chk
++- iFppppLp:
++  - getservbyname_r
+ - iFpppppp:
+   - posix_spawn
+   - posix_spawnp
+@@ -5848,6 +6033,9 @@ wrappedlibc:
+   - __libc_start_main
+ - iFppipppp:
+   - clone
++- iFpppiippp:
++  - __res_context_query
++  - __res_context_search
+ wrappedlibcmusl:
+ wrappedlibcrypt:
+ wrappedlibcups:
+@@ -6301,7 +6489,11 @@ wrappedlibpthread:
+   - fork
+ - iFu:
+   - pthread_key_delete
++- iFL:
++  - pthread_cancel
+ - iFp:
++  - __pthread_mutex_lock
++  - __pthread_mutex_trylock
+   - __pthread_mutexattr_destroy
+   - __pthread_mutexattr_init
+   - pthread_attr_destroy
+@@ -6317,12 +6509,16 @@ wrappedlibpthread:
+   - pthread_condattr_destroy
+   - pthread_condattr_init
+   - pthread_getattr_default_np
++  - pthread_mutex_lock
++  - pthread_mutex_trylock
+   - pthread_mutexattr_destroy
+   - pthread_mutexattr_init
+   - pthread_setattr_default_np
+ - vFpi:
+   - _pthread_cleanup_pop
+   - _pthread_cleanup_pop_restore
++- iFip:
++  - pthread_setcanceltype
+ - iFpi:
+   - __pthread_mutexattr_settype
+   - pthread_attr_setdetachstate
+@@ -6369,6 +6565,7 @@ wrappedlibpthread:
+   - pthread_getattr_np
+   - pthread_key_create
+   - pthread_mutex_init
++  - pthread_mutex_timedlock
+   - pthread_mutexattr_getkind_np
+   - pthread_mutexattr_getprotocol
+   - pthread_mutexattr_getrobust
+@@ -6434,10 +6631,14 @@ wrappedlibrt:
+   - aio_read64
+   - aio_write
+   - aio_write64
++  - shm_unlink
+ - iFip:
+   - aio_cancel
++  - mq_getattr
+ - iFipp:
+   - timer_create
++- iFpOu:
++  - shm_open
+ - iFipip:
+   - lio_listio
+ wrappedlibsm:
+diff --git a/src/wrapped/generated/wrappedlibctypes.h b/src/wrapped/generated/wrappedlibctypes.h
+index d01566c8e..8713b0839 100644
+--- a/src/wrapped/generated/wrappedlibctypes.h
++++ b/src/wrapped/generated/wrappedlibctypes.h
+@@ -16,13 +16,17 @@ typedef void (*vFi_t)(int32_t);
+ typedef void (*vFp_t)(void*);
+ typedef int32_t (*iFv_t)(void);
+ typedef int32_t (*iFi_t)(int32_t);
++typedef int32_t (*iFL_t)(uintptr_t);
+ typedef int32_t (*iFp_t)(void*);
++typedef int32_t (*iFS_t)(void*);
+ typedef uint8_t (*CFp_t)(void*);
+ typedef uint32_t (*uFp_t)(void*);
+ typedef uint64_t (*UFp_t)(void*);
+ typedef intptr_t (*lFv_t)(void);
+ typedef intptr_t (*lFi_t)(int32_t);
+ typedef uintptr_t (*LFL_t)(uintptr_t);
++typedef void* (*pFv_t)(void);
++typedef void* (*pFi_t)(int32_t);
+ typedef void* (*pFL_t)(uintptr_t);
+ typedef void* (*pFp_t)(void*);
+ typedef void (*vFpi_t)(void*, int32_t);
+@@ -32,16 +36,23 @@ typedef void (*vFpV_t)(void*, ...);
+ typedef void (*vFpA_t)(void*, va_list);
+ typedef int32_t (*iFiu_t)(int32_t, uint32_t);
+ typedef int32_t (*iFip_t)(int32_t, void*);
++typedef int32_t (*iFuu_t)(uint32_t, uint32_t);
+ typedef int32_t (*iFup_t)(uint32_t, void*);
+ typedef int32_t (*iFpi_t)(void*, int32_t);
+ typedef int32_t (*iFpu_t)(void*, uint32_t);
++typedef int32_t (*iFpl_t)(void*, intptr_t);
+ typedef int32_t (*iFpL_t)(void*, uintptr_t);
+ typedef int32_t (*iFpp_t)(void*, void*);
+ typedef int32_t (*iFpV_t)(void*, ...);
++typedef int32_t (*iFpO_t)(void*, int32_t);
+ typedef int32_t (*iFpA_t)(void*, va_list);
++typedef int32_t (*iFSi_t)(void*, int32_t);
+ typedef int32_t (*iFSp_t)(void*, void*);
++typedef double (*dFpp_t)(void*, void*);
++typedef uintptr_t (*LFpp_t)(void*, void*);
+ typedef void* (*pFip_t)(int32_t, void*);
+ typedef void* (*pFpi_t)(void*, int32_t);
++typedef void* (*pFpL_t)(void*, uintptr_t);
+ typedef void* (*pFpp_t)(void*, void*);
+ typedef void* (*SFpp_t)(void*, void*);
+ typedef unsigned __int128 (*HFHH_t)(unsigned __int128, unsigned __int128);
+@@ -49,36 +60,51 @@ typedef void (*vFipV_t)(int32_t, void*, ...);
+ typedef void (*vFipA_t)(int32_t, void*, va_list);
+ typedef void (*vFpii_t)(void*, int32_t, int32_t);
+ typedef void (*vFpup_t)(void*, uint32_t, void*);
++typedef void (*vFpLL_t)(void*, uintptr_t, uintptr_t);
+ typedef void (*vFppL_t)(void*, void*, uintptr_t);
+ typedef void (*vFppV_t)(void*, void*, ...);
++typedef int32_t (*iFiii_t)(int32_t, int32_t, int32_t);
+ typedef int32_t (*iFiiu_t)(int32_t, int32_t, uint32_t);
+ typedef int32_t (*iFiip_t)(int32_t, int32_t, void*);
+ typedef int32_t (*iFiiN_t)(int32_t, int32_t, ...);
+ typedef int32_t (*iFiuu_t)(int32_t, uint32_t, uint32_t);
+ typedef int32_t (*iFiLp_t)(int32_t, uintptr_t, void*);
++typedef int32_t (*iFipi_t)(int32_t, void*, int32_t);
+ typedef int32_t (*iFipu_t)(int32_t, void*, uint32_t);
++typedef int32_t (*iFipL_t)(int32_t, void*, uintptr_t);
+ typedef int32_t (*iFipp_t)(int32_t, void*, void*);
+ typedef int32_t (*iFipV_t)(int32_t, void*, ...);
++typedef int32_t (*iFipO_t)(int32_t, void*, int32_t);
+ typedef int32_t (*iFipA_t)(int32_t, void*, va_list);
++typedef int32_t (*iFuLL_t)(uint32_t, uintptr_t, uintptr_t);
+ typedef int32_t (*iFpLi_t)(void*, uintptr_t, int32_t);
+ typedef int32_t (*iFpLp_t)(void*, uintptr_t, void*);
+ typedef int32_t (*iFppi_t)(void*, void*, int32_t);
++typedef int32_t (*iFppL_t)(void*, void*, uintptr_t);
+ typedef int32_t (*iFppp_t)(void*, void*, void*);
+ typedef int32_t (*iFppV_t)(void*, void*, ...);
+ typedef int32_t (*iFppA_t)(void*, void*, va_list);
++typedef int32_t (*iFpOu_t)(void*, int32_t, uint32_t);
+ typedef int32_t (*iFpON_t)(void*, int32_t, ...);
+ typedef int32_t (*iFSpV_t)(void*, void*, ...);
+ typedef int32_t (*iFSpA_t)(void*, void*, va_list);
++typedef float (*fFppp_t)(void*, void*, void*);
++typedef double (*dFppp_t)(void*, void*, void*);
+ typedef intptr_t (*lFipV_t)(int32_t, void*, ...);
+ typedef intptr_t (*lFppL_t)(void*, void*, uintptr_t);
++typedef uintptr_t (*LFpLp_t)(void*, uintptr_t, void*);
+ typedef uintptr_t (*LFppL_t)(void*, void*, uintptr_t);
++typedef void* (*pFipL_t)(int32_t, void*, uintptr_t);
++typedef void* (*pFipp_t)(int32_t, void*, void*);
+ typedef void* (*pFpip_t)(void*, int32_t, void*);
++typedef void* (*pFppi_t)(void*, void*, int32_t);
+ typedef void* (*pFppp_t)(void*, void*, void*);
+ typedef void* (*pFppV_t)(void*, void*, ...);
+ typedef void (*vFiipV_t)(int32_t, int32_t, void*, ...);
+ typedef void (*vFiipA_t)(int32_t, int32_t, void*, va_list);
+ typedef void (*vFpLLp_t)(void*, uintptr_t, uintptr_t, void*);
+ typedef void (*vFppiV_t)(void*, void*, int32_t, ...);
++typedef void (*vFppup_t)(void*, void*, uint32_t, void*);
+ typedef void (*vFpppp_t)(void*, void*, void*, void*);
+ typedef int32_t (*iFiiip_t)(int32_t, int32_t, int32_t, void*);
+ typedef int32_t (*iFiiiN_t)(int32_t, int32_t, int32_t, ...);
+@@ -89,18 +115,29 @@ typedef int32_t (*iFipii_t)(int32_t, void*, int32_t, int32_t);
+ typedef int32_t (*iFipup_t)(int32_t, void*, uint32_t, void*);
+ typedef int32_t (*iFippi_t)(int32_t, void*, void*, int32_t);
+ typedef int32_t (*iFippL_t)(int32_t, void*, void*, uintptr_t);
++typedef int32_t (*iFipON_t)(int32_t, void*, int32_t, ...);
++typedef int32_t (*iFupLp_t)(uint32_t, void*, uintptr_t, void*);
+ typedef int32_t (*iFpipp_t)(void*, int32_t, void*, void*);
+ typedef int32_t (*iFpipV_t)(void*, int32_t, void*, ...);
+ typedef int32_t (*iFpipA_t)(void*, int32_t, void*, va_list);
++typedef int32_t (*iFpLii_t)(void*, uintptr_t, int32_t, int32_t);
++typedef int32_t (*iFpLpd_t)(void*, uintptr_t, void*, double);
+ typedef int32_t (*iFpLpV_t)(void*, uintptr_t, void*, ...);
+ typedef int32_t (*iFpLpA_t)(void*, uintptr_t, void*, va_list);
+ typedef int32_t (*iFppii_t)(void*, void*, int32_t, int32_t);
+ typedef int32_t (*iFpppp_t)(void*, void*, void*, void*);
+ typedef intptr_t (*lFippL_t)(int32_t, void*, void*, uintptr_t);
+ typedef intptr_t (*lFuipp_t)(uint32_t, int32_t, void*, void*);
++typedef intptr_t (*lFppiS_t)(void*, void*, int32_t, void*);
+ typedef intptr_t (*lFppLL_t)(void*, void*, uintptr_t, uintptr_t);
++typedef uintptr_t (*LFppLL_t)(void*, void*, uintptr_t, uintptr_t);
++typedef void* (*pFpLip_t)(void*, uintptr_t, int32_t, void*);
++typedef void* (*pFpLiS_t)(void*, uintptr_t, int32_t, void*);
++typedef void* (*pFppLL_t)(void*, void*, uintptr_t, uintptr_t);
+ typedef void (*vFpiipV_t)(void*, int32_t, int32_t, void*, ...);
+ typedef void (*vFpLLpp_t)(void*, uintptr_t, uintptr_t, void*, void*);
++typedef int32_t (*iFiiipu_t)(int32_t, int32_t, int32_t, void*, uint32_t);
++typedef int32_t (*iFiiipp_t)(int32_t, int32_t, int32_t, void*, void*);
+ typedef int32_t (*iFiipup_t)(int32_t, int32_t, void*, uint32_t, void*);
+ typedef int32_t (*iFiippi_t)(int32_t, int32_t, void*, void*, int32_t);
+ typedef int32_t (*iFiuppi_t)(int32_t, uint32_t, void*, void*, int32_t);
+@@ -110,25 +147,35 @@ typedef int32_t (*iFipiup_t)(int32_t, void*, int32_t, uint32_t, void*);
+ typedef int32_t (*iFipipu_t)(int32_t, void*, int32_t, void*, uint32_t);
+ typedef int32_t (*iFipipp_t)(int32_t, void*, int32_t, void*, void*);
+ typedef int32_t (*iFipupL_t)(int32_t, void*, uint32_t, void*, uintptr_t);
++typedef int32_t (*iFippLp_t)(int32_t, void*, void*, uintptr_t, void*);
++typedef int32_t (*iFipppi_t)(int32_t, void*, void*, void*, int32_t);
+ typedef int32_t (*iFipppp_t)(int32_t, void*, void*, void*, void*);
+ typedef int32_t (*iFpiipp_t)(void*, int32_t, int32_t, void*, void*);
+ typedef int32_t (*iFpilpV_t)(void*, int32_t, intptr_t, void*, ...);
+ typedef int32_t (*iFpuppp_t)(void*, uint32_t, void*, void*, void*);
++typedef int32_t (*iFpppLp_t)(void*, void*, void*, uintptr_t, void*);
++typedef int32_t (*iFppppi_t)(void*, void*, void*, void*, int32_t);
+ typedef intptr_t (*lFippLL_t)(int32_t, void*, void*, uintptr_t, uintptr_t);
++typedef uintptr_t (*LFpLLLp_t)(void*, uintptr_t, uintptr_t, uintptr_t, void*);
++typedef uintptr_t (*LFpLppL_t)(void*, uintptr_t, void*, void*, uintptr_t);
++typedef uintptr_t (*LFpLppp_t)(void*, uintptr_t, void*, void*, void*);
+ typedef void* (*pFpLLiN_t)(void*, uintptr_t, uintptr_t, int32_t, ...);
+ typedef void* (*pFppLLp_t)(void*, void*, uintptr_t, uintptr_t, void*);
++typedef void* (*pFpppLi_t)(void*, void*, void*, uintptr_t, int32_t);
+ typedef void* (*pFpppLp_t)(void*, void*, void*, uintptr_t, void*);
+ typedef void (*vFiipupV_t)(int32_t, int32_t, void*, uint32_t, void*, ...);
+ typedef int32_t (*iFpipupp_t)(void*, int32_t, void*, uint32_t, void*, void*);
+ typedef int32_t (*iFpipppL_t)(void*, int32_t, void*, void*, void*, uintptr_t);
+ typedef int32_t (*iFpLiLpp_t)(void*, uintptr_t, int32_t, uintptr_t, void*, void*);
+ typedef int32_t (*iFpLiLpV_t)(void*, uintptr_t, int32_t, uintptr_t, void*, ...);
++typedef int32_t (*iFppppLp_t)(void*, void*, void*, void*, uintptr_t, void*);
+ typedef int32_t (*iFpppppp_t)(void*, void*, void*, void*, void*, void*);
+ typedef intptr_t (*lFipLpLL_t)(int32_t, void*, uintptr_t, void*, uintptr_t, uintptr_t);
+ typedef void* (*pFpLiiiI_t)(void*, uintptr_t, int32_t, int32_t, int32_t, int64_t);
+ typedef void* (*pFpLiiil_t)(void*, uintptr_t, int32_t, int32_t, int32_t, intptr_t);
+ typedef int32_t (*iFpippppp_t)(void*, int32_t, void*, void*, void*, void*, void*);
+ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*);
++typedef int32_t (*iFpppiippp_t)(void*, void*, void*, int32_t, int32_t, void*, void*, void*);
+ 
+ #define SUPER() ADDED_FUNCTIONS() \
+ 	GO(_Jv_RegisterClasses, vFv_t) \
+@@ -139,32 +186,76 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(_ITM_deregisterTMCloneTable, vFp_t) \
+ 	GO(_ZGTtdlPv, vFp_t) \
+ 	GO(__cxa_finalize, vFp_t) \
++	GO(__freelocale, vFp_t) \
++	GO(__resolv_context_put, vFp_t) \
++	GO(freelocale, vFp_t) \
++	GO(__res_init, iFv_t) \
+ 	GO(fork, iFv_t) \
++	GO(getdtablesize, iFv_t) \
+ 	GO(sched_getcpu, iFv_t) \
+ 	GO(vfork, iFv_t) \
+ 	GO(iopl, iFi_t) \
++	GO(pkey_free, iFi_t) \
++	GO(pkey_get, iFi_t) \
++	GO(malloc_trim, iFL_t) \
++	GO(pthread_cancel, iFL_t) \
+ 	GO(__libc_dlclose, iFp_t) \
++	GO(__underflow, iFp_t) \
+ 	GO(_setjmp, iFp_t) \
+ 	GO(atexit, iFp_t) \
++	GO(chdir, iFp_t) \
++	GO(fts64_close, iFp_t) \
+ 	GO(getcontext, iFp_t) \
++	GO(mkstemp, iFp_t) \
++	GO(mkstemp64, iFp_t) \
+ 	GO(register_printf_type, iFp_t) \
++	GO(res_dnok, iFp_t) \
++	GO(res_hnok, iFp_t) \
++	GO(rmdir, iFp_t) \
+ 	GO(setcontext, iFp_t) \
+ 	GO(setjmp, iFp_t) \
++	GO(shm_unlink, iFp_t) \
++	GO(sigisemptyset, iFp_t) \
+ 	GO(stime, iFp_t) \
+ 	GO(uname, iFp_t) \
++	GO(unlink, iFp_t) \
++	GO(__uflow, iFS_t) \
+ 	GO(_ITM_RU1, CFp_t) \
+ 	GO(_ITM_RU4, uFp_t) \
+ 	GO(_ITM_RU8, UFp_t) \
+ 	GO(syscall, lFv_t) \
+ 	GO(__sysconf, lFi_t) \
+ 	GO(sysconf, lFi_t) \
++	GO(__fdelt_chk, LFL_t) \
+ 	GO(getauxval, LFL_t) \
++	GO(__ctype_b_loc, pFv_t) \
++	GO(__ctype_tolower_loc, pFv_t) \
++	GO(__ctype_toupper_loc, pFv_t) \
++	GO(__errno_location, pFv_t) \
++	GO(__h_errno_location, pFv_t) \
++	GO(__res_state, pFv_t) \
++	GO(__resolv_context_get, pFv_t) \
++	GO(get_current_dir_name, pFv_t) \
++	GO(gnu_get_libc_version, pFv_t) \
++	GO(nl_langinfo, pFi_t) \
+ 	GO(_ZGTtnaX, pFL_t) \
+ 	GO(_ZGTtnam, pFL_t) \
+ 	GO(__deregister_frame_info, pFp_t) \
++	GO(__duplocale, pFp_t) \
++	GO(__resolv_context_get_override, pFp_t) \
++	GO(__strdup, pFp_t) \
++	GO(__uselocale, pFp_t) \
++	GO(__xpg_basename, pFp_t) \
++	GO(duplocale, pFp_t) \
++	GO(gettext, pFp_t) \
+ 	GO(mallinfo, pFp_t) \
+ 	GO(mallinfo2, pFp_t) \
++	GO(mkdtemp, pFp_t) \
++	GO(opendir, pFp_t) \
++	GO(textdomain, pFp_t) \
++	GO(uselocale, pFp_t) \
+ 	GO(__longjmp_chk, vFpi_t) \
++	GO(__res_iclose, vFpi_t) \
+ 	GO(_longjmp, vFpi_t) \
+ 	GO(_obstack_newchunk, vFpi_t) \
+ 	GO(longjmp, vFpi_t) \
+@@ -180,26 +271,51 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(vwarn, vFpA_t) \
+ 	GO(vwarnx, vFpA_t) \
+ 	GO(pidfd_open, iFiu_t) \
++	GO(pkey_set, iFiu_t) \
++	GO(__towlower_l, iFip_t) \
++	GO(__towupper_l, iFip_t) \
+ 	GO(fstat, iFip_t) \
+ 	GO(fstat64, iFip_t) \
++	GO(mq_getattr, iFip_t) \
++	GO(pthread_setcanceltype, iFip_t) \
++	GO(pkey_alloc, iFuu_t) \
+ 	GO(setrlimit, iFup_t) \
+ 	GO(__sigsetjmp, iFpi_t) \
++	GO(access, iFpi_t) \
+ 	GO(backtrace, iFpi_t) \
++	GO(eaccess, iFpi_t) \
++	GO(euidaccess, iFpi_t) \
++	GO(mkostemp, iFpi_t) \
++	GO(mkostemp64, iFpi_t) \
+ 	GO(sigsetjmp, iFpi_t) \
++	GO(chmod, iFpu_t) \
++	GO(creat, iFpu_t) \
++	GO(creat64, iFpu_t) \
+ 	GO(delete_module, iFpu_t) \
+ 	GO(fsopen, iFpu_t) \
++	GO(mkdir, iFpu_t) \
++	GO(truncate, iFpl_t) \
+ 	GO(munmap, iFpL_t) \
++	GO(__libc_ns_makecanon, iFpp_t) \
++	GO(__libc_ns_samename, iFpp_t) \
+ 	GO(__vprintf_chk, iFpp_t) \
+ 	GO(dl_iterate_phdr, iFpp_t) \
++	GO(dn_skipname, iFpp_t) \
+ 	GO(execv, iFpp_t) \
+ 	GO(execvp, iFpp_t) \
+ 	GO(lstat, iFpp_t) \
+ 	GO(lstat64, iFpp_t) \
++	GO(pthread_getattr_np, iFpp_t) \
++	GO(random_r, iFpp_t) \
++	GO(rename, iFpp_t) \
+ 	GO(sigaltstack, iFpp_t) \
+ 	GO(stat, iFpp_t) \
+ 	GO(stat64, iFpp_t) \
++	GO(statfs, iFpp_t) \
++	GO(statvfs, iFpp_t) \
+ 	GO(swapcontext, iFpp_t) \
+ 	GO(tss_create, iFpp_t) \
++	GO(utimes, iFpp_t) \
+ 	GO(__isoc23_scanf, iFpV_t) \
+ 	GO(__isoc99_scanf, iFpV_t) \
+ 	GO(execl, iFpV_t) \
+@@ -209,22 +325,34 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(scanf, iFpV_t) \
+ 	GO(wprintf, iFpV_t) \
+ 	GO(wscanf, iFpV_t) \
++	GO(__open64_2, iFpO_t) \
+ 	GO(__isoc23_vscanf, iFpA_t) \
+ 	GO(__isoc99_vscanf, iFpA_t) \
+ 	GO(vprintf, iFpA_t) \
+ 	GO(vscanf, iFpA_t) \
+ 	GO(vwprintf, iFpA_t) \
+ 	GO(vwscanf, iFpA_t) \
++	GO(__overflow, iFSi_t) \
+ 	GO(_IO_file_stat, iFSp_t) \
++	GO(strtof64, dFpp_t) \
++	GO(__wctype_l, LFpp_t) \
++	GO(__nl_langinfo_l, pFip_t) \
+ 	GO(__sysv_signal, pFip_t) \
+ 	GO(bsd_signal, pFip_t) \
++	GO(nl_langinfo_l, pFip_t) \
+ 	GO(signal, pFip_t) \
+ 	GO(sigset, pFip_t) \
+ 	GO(sysv_signal, pFip_t) \
+ 	GO(__libc_dlopen_mode, pFpi_t) \
++	GO(__rawmemchr, pFpi_t) \
+ 	GO(backtrace_symbols, pFpi_t) \
++	GO(__res_get_nsaddr, pFpL_t) \
++	GO(__gmtime_r, pFpp_t) \
+ 	GO(__libc_dlsym, pFpp_t) \
+ 	GO(__realpath_chk, pFpp_t) \
++	GO(bind_textdomain_codeset, pFpp_t) \
++	GO(bindtextdomain, pFpp_t) \
++	GO(dgettext, pFpp_t) \
+ 	GO(realpath, pFpp_t) \
+ 	GO(fopen, SFpp_t) \
+ 	GO(fopen64, SFpp_t) \
+@@ -237,9 +365,11 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(vsyslog, vFipA_t) \
+ 	GO(backtrace_symbols_fd, vFpii_t) \
+ 	GO(_ITM_addUserCommitAction, vFpup_t) \
++	GO(__explicit_bzero_chk, vFpLL_t) \
+ 	GO(_ITM_memcpyRnWt, vFppL_t) \
+ 	GO(_ITM_memcpyRtWn, vFppL_t) \
+ 	GO(argp_error, vFppV_t) \
++	GO(socket, iFiii_t) \
+ 	GO(pidfd_getfd, iFiiu_t) \
+ 	GO(__fxstat, iFiip_t) \
+ 	GO(__fxstat64, iFiip_t) \
+@@ -250,26 +380,36 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(ioctl, iFiLp_t) \
+ 	GO(sched_getaffinity, iFiLp_t) \
+ 	GO(sched_setaffinity, iFiLp_t) \
++	GO(unlinkat, iFipi_t) \
++	GO(bind, iFipu_t) \
+ 	GO(fspick, iFipu_t) \
++	GO(mkdirat, iFipu_t) \
++	GO(__getgroups_chk, iFipL_t) \
+ 	GO(__lxstat, iFipp_t) \
+ 	GO(__lxstat64, iFipp_t) \
+ 	GO(__sigaction, iFipp_t) \
+ 	GO(__xstat, iFipp_t) \
+ 	GO(__xstat64, iFipp_t) \
+ 	GO(getopt, iFipp_t) \
++	GO(getsockname, iFipp_t) \
+ 	GO(register_printf_specifier, iFipp_t) \
+ 	GO(sigaction, iFipp_t) \
+ 	GO(__printf_chk, iFipV_t) \
+ 	GO(dprintf, iFipV_t) \
++	GO(__openat64_2, iFipO_t) \
+ 	GO(vdprintf, iFipA_t) \
++	GO(__iswctype_l, iFuLL_t) \
+ 	GO(mprotect, iFpLi_t) \
+ 	GO(init_module, iFpLp_t) \
+ 	GO(ftw, iFppi_t) \
+ 	GO(ftw64, iFppi_t) \
++	GO(bcmp, iFppL_t) \
+ 	GO(__cxa_atexit, iFppp_t) \
+ 	GO(__cxa_thread_atexit_impl, iFppp_t) \
++	GO(__strcoll_l, iFppp_t) \
+ 	GO(__vfprintf_chk, iFppp_t) \
+ 	GO(__vsscanf, iFppp_t) \
++	GO(__wcscoll_l, iFppp_t) \
+ 	GO(execve, iFppp_t) \
+ 	GO(execvpe, iFppp_t) \
+ 	GO(__asprintf, iFppV_t) \
+@@ -292,6 +432,7 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(vsprintf, iFppA_t) \
+ 	GO(vsscanf, iFppA_t) \
+ 	GO(vswscanf, iFppA_t) \
++	GO(shm_open, iFpOu_t) \
+ 	GO(__open, iFpON_t) \
+ 	GO(open, iFpON_t) \
+ 	GO(open64, iFpON_t) \
+@@ -303,12 +444,24 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(vfscanf, iFSpA_t) \
+ 	GO(vfwprintf, iFSpA_t) \
+ 	GO(vfwscanf, iFSpA_t) \
++	GO(__strtof_l, fFppp_t) \
++	GO(__strtod_l, dFppp_t) \
+ 	GO(__wprintf_chk, lFipV_t) \
+ 	GO(readlink, lFppL_t) \
++	GO(__mbrlen, LFpLp_t) \
++	GO(parse_printf_format, LFpLp_t) \
+ 	GO(strlcat, LFppL_t) \
+ 	GO(strlcpy, LFppL_t) \
++	GO(__strerror_r, pFipL_t) \
++	GO(__xpg_strerror_r, pFipL_t) \
++	GO(strerror_r, pFipL_t) \
++	GO(__newlocale, pFipp_t) \
++	GO(newlocale, pFipp_t) \
+ 	GO(fts64_open, pFpip_t) \
+ 	GO(fts_open, pFpip_t) \
++	GO(dcgettext, pFppi_t) \
++	GO(__res_context_hostalias, pFppp_t) \
++	GO(__strtok_r, pFppp_t) \
+ 	GO(tdelete, pFppp_t) \
+ 	GO(tfind, pFppp_t) \
+ 	GO(tsearch, pFppp_t) \
+@@ -318,6 +471,7 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(__vsyslog_chk, vFiipA_t) \
+ 	GO(qsort, vFpLLp_t) \
+ 	GO(makecontext, vFppiV_t) \
++	GO(__assert_fail, vFppup_t) \
+ 	GO(__libc_init, vFpppp_t) \
+ 	GO(epoll_ctl, iFiiip_t) \
+ 	GO(semctl, iFiiiN_t) \
+@@ -325,10 +479,14 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(__dprintf_chk, iFiipV_t) \
+ 	GO(__vdprintf_chk, iFiipA_t) \
+ 	GO(epoll_wait, iFipii_t) \
++	GO(faccessat, iFipii_t) \
+ 	GO(__xmknod, iFipup_t) \
+ 	GO(fstatat, iFippi_t) \
+ 	GO(fstatat64, iFippi_t) \
+ 	GO(__inet_pton_chk, iFippL_t) \
++	GO(openat, iFipON_t) \
++	GO(openat64, iFipON_t) \
++	GO(initstate_r, iFupLp_t) \
+ 	GO(__vasprintf_chk, iFpipp_t) \
+ 	GO(glob, iFpipp_t) \
+ 	GO(glob64, iFpipp_t) \
+@@ -336,6 +494,8 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(__fprintf_chk, iFpipV_t) \
+ 	GO(__fwprintf_chk, iFpipV_t) \
+ 	GO(__vfwprintf_chk, iFpipA_t) \
++	GO(pkey_mprotect, iFpLii_t) \
++	GO(strfromf64, iFpLpd_t) \
+ 	GO(__snprintf, iFpLpV_t) \
+ 	GO(snprintf, iFpLpV_t) \
+ 	GO(swprintf, iFpLpV_t) \
+@@ -344,15 +504,27 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(vswprintf, iFpLpA_t) \
+ 	GO(nftw, iFppii_t) \
+ 	GO(nftw64, iFppii_t) \
++	GO(__libc_res_queriesmatch, iFpppp_t) \
+ 	GO(__register_atfork, iFpppp_t) \
+ 	GO(__vsprintf_chk, iFpppp_t) \
+ 	GO(scandir, iFpppp_t) \
+ 	GO(scandir64, iFpppp_t) \
+ 	GO(readlinkat, lFippL_t) \
+ 	GO(ptrace, lFuipp_t) \
++	GO(__getdelim, lFppiS_t) \
+ 	GO(__readlink_chk, lFppLL_t) \
++	GO(__mbstowcs_chk, LFppLL_t) \
++	GO(__strxfrm_l, LFppLL_t) \
++	GO(__wcsxfrm_l, LFppLL_t) \
++	GO(__fgets_chk, pFpLip_t) \
++	GO(__fgets_unlocked_chk, pFpLiS_t) \
++	GO(__wcsncpy_chk, pFppLL_t) \
++	GO(__wmemcpy_chk, pFppLL_t) \
++	GO(__wmemmove_chk, pFppLL_t) \
+ 	GO(argp_failure, vFpiipV_t) \
+ 	GO(qsort_r, vFpLLpp_t) \
++	GO(setsockopt, iFiiipu_t) \
++	GO(getsockopt, iFiiipp_t) \
+ 	GO(__xmknodat, iFiipup_t) \
+ 	GO(__fxstatat, iFiippi_t) \
+ 	GO(__fxstatat64, iFiippi_t) \
+@@ -363,16 +535,26 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(move_mount, iFipipu_t) \
+ 	GO(epoll_pwait2, iFipipp_t) \
+ 	GO(mount_setattr, iFipupL_t) \
++	GO(getprotobynumber_r, iFippLp_t) \
++	GO(name_to_handle_at, iFipppi_t) \
+ 	GO(getopt_long, iFipppp_t) \
+ 	GO(getopt_long_only, iFipppp_t) \
+ 	GO(scandirat, iFipppp_t) \
+ 	GO(scandirat64, iFipppp_t) \
++	GO(__libc_res_nameinquery, iFpiipp_t) \
+ 	GO(_obstack_begin, iFpiipp_t) \
+ 	GO(__sprintf_chk, iFpilpV_t) \
+ 	GO(__vswprintf_chk, iFpuppp_t) \
++	GO(getprotobyname_r, iFpppLp_t) \
++	GO(__libc_dn_expand, iFppppi_t) \
+ 	GO(__readlinkat_chk, lFippLL_t) \
++	GO(__fread_chk, LFpLLLp_t) \
++	GO(__fread_unlocked_chk, LFpLLLp_t) \
++	GO(__strftime_l, LFpLppL_t) \
++	GO(__wcsftime_l, LFpLppp_t) \
+ 	GO(mremap, pFpLLiN_t) \
+ 	GO(bsearch, pFppLLp_t) \
++	GO(dcngettext, pFpppLi_t) \
+ 	GO(lfind, pFpppLp_t) \
+ 	GO(lsearch, pFpppLp_t) \
+ 	GO(error_at_line, vFiipupV_t) \
+@@ -382,12 +564,15 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
+ 	GO(__vsnprintf_chk, iFpLiLpp_t) \
+ 	GO(__snprintf_chk, iFpLiLpV_t) \
+ 	GO(__swprintf_chk, iFpLiLpV_t) \
++	GO(getservbyname_r, iFppppLp_t) \
+ 	GO(posix_spawn, iFpppppp_t) \
+ 	GO(posix_spawnp, iFpppppp_t) \
+ 	GO(process_vm_writev, lFipLpLL_t) \
+ 	GO(mmap64, pFpLiiiI_t) \
+ 	GO(mmap, pFpLiiil_t) \
+ 	GO(__libc_start_main, iFpippppp_t) \
+-	GO(clone, iFppipppp_t)
++	GO(clone, iFppipppp_t) \
++	GO(__res_context_query, iFpppiippp_t) \
++	GO(__res_context_search, iFpppiippp_t)
+ 
+ #endif // __wrappedlibcTYPES_H_
+diff --git a/src/wrapped/generated/wrappedlibpthreadtypes.h b/src/wrapped/generated/wrappedlibpthreadtypes.h
+index a93439a83..81f3e86ac 100644
+--- a/src/wrapped/generated/wrappedlibpthreadtypes.h
++++ b/src/wrapped/generated/wrappedlibpthreadtypes.h
+@@ -14,8 +14,10 @@
+ typedef void (*vFp_t)(void*);
+ typedef int32_t (*iFv_t)(void);
+ typedef int32_t (*iFu_t)(uint32_t);
++typedef int32_t (*iFL_t)(uintptr_t);
+ typedef int32_t (*iFp_t)(void*);
+ typedef void (*vFpi_t)(void*, int32_t);
++typedef int32_t (*iFip_t)(int32_t, void*);
+ typedef int32_t (*iFpi_t)(void*, int32_t);
+ typedef int32_t (*iFpL_t)(void*, uintptr_t);
+ typedef int32_t (*iFpp_t)(void*, void*);
+@@ -33,6 +35,9 @@ typedef int32_t (*iFpppp_t)(void*, void*, void*, void*);
+ 	GO(__pthread_unwind_next, vFp_t) \
+ 	GO(fork, iFv_t) \
+ 	GO(pthread_key_delete, iFu_t) \
++	GO(pthread_cancel, iFL_t) \
++	GO(__pthread_mutex_lock, iFp_t) \
++	GO(__pthread_mutex_trylock, iFp_t) \
+ 	GO(__pthread_mutexattr_destroy, iFp_t) \
+ 	GO(__pthread_mutexattr_init, iFp_t) \
+ 	GO(pthread_attr_destroy, iFp_t) \
+@@ -48,11 +53,14 @@ typedef int32_t (*iFpppp_t)(void*, void*, void*, void*);
+ 	GO(pthread_condattr_destroy, iFp_t) \
+ 	GO(pthread_condattr_init, iFp_t) \
+ 	GO(pthread_getattr_default_np, iFp_t) \
++	GO(pthread_mutex_lock, iFp_t) \
++	GO(pthread_mutex_trylock, iFp_t) \
+ 	GO(pthread_mutexattr_destroy, iFp_t) \
+ 	GO(pthread_mutexattr_init, iFp_t) \
+ 	GO(pthread_setattr_default_np, iFp_t) \
+ 	GO(_pthread_cleanup_pop, vFpi_t) \
+ 	GO(_pthread_cleanup_pop_restore, vFpi_t) \
++	GO(pthread_setcanceltype, iFip_t) \
+ 	GO(__pthread_mutexattr_settype, iFpi_t) \
+ 	GO(pthread_attr_setdetachstate, iFpi_t) \
+ 	GO(pthread_attr_setinheritsched, iFpi_t) \
+@@ -96,6 +104,7 @@ typedef int32_t (*iFpppp_t)(void*, void*, void*, void*);
+ 	GO(pthread_getattr_np, iFpp_t) \
+ 	GO(pthread_key_create, iFpp_t) \
+ 	GO(pthread_mutex_init, iFpp_t) \
++	GO(pthread_mutex_timedlock, iFpp_t) \
+ 	GO(pthread_mutexattr_getkind_np, iFpp_t) \
+ 	GO(pthread_mutexattr_getprotocol, iFpp_t) \
+ 	GO(pthread_mutexattr_getrobust, iFpp_t) \
+diff --git a/src/wrapped/generated/wrappedlibrttypes.h b/src/wrapped/generated/wrappedlibrttypes.h
+index 1b1d12401..347570300 100644
+--- a/src/wrapped/generated/wrappedlibrttypes.h
++++ b/src/wrapped/generated/wrappedlibrttypes.h
+@@ -14,6 +14,7 @@
+ typedef int32_t (*iFp_t)(void*);
+ typedef int32_t (*iFip_t)(int32_t, void*);
+ typedef int32_t (*iFipp_t)(int32_t, void*, void*);
++typedef int32_t (*iFpOu_t)(void*, int32_t, uint32_t);
+ typedef int32_t (*iFipip_t)(int32_t, void*, int32_t, void*);
+ 
+ #define SUPER() ADDED_FUNCTIONS() \
+@@ -21,8 +22,11 @@ typedef int32_t (*iFipip_t)(int32_t, void*, int32_t, void*);
+ 	GO(aio_read64, iFp_t) \
+ 	GO(aio_write, iFp_t) \
+ 	GO(aio_write64, iFp_t) \
++	GO(shm_unlink, iFp_t) \
+ 	GO(aio_cancel, iFip_t) \
++	GO(mq_getattr, iFip_t) \
+ 	GO(timer_create, iFipp_t) \
++	GO(shm_open, iFpOu_t) \
+ 	GO(lio_listio, iFipip_t)
+ 
+ #endif // __wrappedlibrtTYPES_H_
+diff --git a/src/wrapped/generated/wrapper.c b/src/wrapped/generated/wrapper.c
+index d1ac4cfdf..eefa51ea1 100644
+--- a/src/wrapped/generated/wrapper.c
++++ b/src/wrapped/generated/wrapper.c
+@@ -1029,6 +1029,7 @@ typedef void (*vFEpuV_t)(x64emu_t*, void*, uint32_t, void*);
+ typedef void (*vFEpuA_t)(x64emu_t*, void*, uint32_t, void*);
+ typedef void (*vFEpUp_t)(x64emu_t*, void*, uint64_t, void*);
+ typedef void (*vFEpLi_t)(x64emu_t*, void*, uintptr_t, int32_t);
++typedef void (*vFEpLL_t)(x64emu_t*, void*, uintptr_t, uintptr_t);
+ typedef void (*vFEpLp_t)(x64emu_t*, void*, uintptr_t, void*);
+ typedef void (*vFEppp_t)(x64emu_t*, void*, void*, void*);
+ typedef void (*vFEppV_t)(x64emu_t*, void*, void*, void*);
+@@ -3541,6 +3542,7 @@ typedef int32_t (*iFppLpLpLi_t)(void*, void*, uintptr_t, void*, uintptr_t, void*
+ typedef int32_t (*iFppLpLpLp_t)(void*, void*, uintptr_t, void*, uintptr_t, void*, uintptr_t, void*);
+ typedef int32_t (*iFpppiiipi_t)(void*, void*, void*, int32_t, int32_t, int32_t, void*, int32_t);
+ typedef int32_t (*iFpppiiipp_t)(void*, void*, void*, int32_t, int32_t, int32_t, void*, void*);
++typedef int32_t (*iFpppiippp_t)(void*, void*, void*, int32_t, int32_t, void*, void*, void*);
+ typedef int32_t (*iFpppipipi_t)(void*, void*, void*, int32_t, void*, int32_t, void*, int32_t);
+ typedef int32_t (*iFppppiiup_t)(void*, void*, void*, void*, int32_t, int32_t, uint32_t, void*);
+ typedef int32_t (*iFppppiipp_t)(void*, void*, void*, void*, int32_t, int32_t, void*, void*);
+@@ -5284,6 +5286,7 @@ void vFEpuV(x64emu_t *emu, uintptr_t fcn) { vFEpuV_t fn = (vFEpuV_t)fcn; fn(emu,
+ void vFEpuA(x64emu_t *emu, uintptr_t fcn) { vFEpuA_t fn = (vFEpuA_t)fcn; fn(emu, (void*)R_RDI, (uint32_t)R_RSI, (void*)R_RDX); }
+ void vFEpUp(x64emu_t *emu, uintptr_t fcn) { vFEpUp_t fn = (vFEpUp_t)fcn; fn(emu, (void*)R_RDI, (uint64_t)R_RSI, (void*)R_RDX); }
+ void vFEpLi(x64emu_t *emu, uintptr_t fcn) { vFEpLi_t fn = (vFEpLi_t)fcn; fn(emu, (void*)R_RDI, (uintptr_t)R_RSI, (int32_t)R_RDX); }
++void vFEpLL(x64emu_t *emu, uintptr_t fcn) { vFEpLL_t fn = (vFEpLL_t)fcn; fn(emu, (void*)R_RDI, (uintptr_t)R_RSI, (uintptr_t)R_RDX); }
+ void vFEpLp(x64emu_t *emu, uintptr_t fcn) { vFEpLp_t fn = (vFEpLp_t)fcn; fn(emu, (void*)R_RDI, (uintptr_t)R_RSI, (void*)R_RDX); }
+ void vFEppp(x64emu_t *emu, uintptr_t fcn) { vFEppp_t fn = (vFEppp_t)fcn; fn(emu, (void*)R_RDI, (void*)R_RSI, (void*)R_RDX); }
+ void vFEppV(x64emu_t *emu, uintptr_t fcn) { vFEppV_t fn = (vFEppV_t)fcn; fn(emu, (void*)R_RDI, (void*)R_RSI, (void*)(R_RSP + 8)); }
+@@ -7796,6 +7799,7 @@ void iFppLpLpLi(x64emu_t *emu, uintptr_t fcn) { iFppLpLpLi_t fn = (iFppLpLpLi_t)
+ void iFppLpLpLp(x64emu_t *emu, uintptr_t fcn) { iFppLpLpLp_t fn = (iFppLpLpLp_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (uintptr_t)R_RDX, (void*)R_RCX, (uintptr_t)R_R8, (void*)R_R9, *(uintptr_t*)(R_RSP + 8), *(void**)(R_RSP + 16)); }
+ void iFpppiiipi(x64emu_t *emu, uintptr_t fcn) { iFpppiiipi_t fn = (iFpppiiipi_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(int32_t*)(R_RSP + 16)); }
+ void iFpppiiipp(x64emu_t *emu, uintptr_t fcn) { iFpppiiipp_t fn = (iFpppiiipp_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16)); }
++void iFpppiippp(x64emu_t *emu, uintptr_t fcn) { iFpppiippp_t fn = (iFpppiippp_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (void*)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16)); }
+ void iFpppipipi(x64emu_t *emu, uintptr_t fcn) { iFpppipipi_t fn = (iFpppipipi_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (int32_t)R_RCX, (void*)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(int32_t*)(R_RSP + 16)); }
+ void iFppppiiup(x64emu_t *emu, uintptr_t fcn) { iFppppiiup_t fn = (iFppppiiup_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (void*)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(uint32_t*)(R_RSP + 8), *(void**)(R_RSP + 16)); }
+ void iFppppiipp(x64emu_t *emu, uintptr_t fcn) { iFppppiipp_t fn = (iFppppiipp_t)fcn; R_RAX=(int)fn((void*)R_RDI, (void*)R_RSI, (void*)R_RDX, (void*)R_RCX, (int32_t)R_R8, (int32_t)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16)); }
+diff --git a/src/wrapped/generated/wrapper.h b/src/wrapped/generated/wrapper.h
+index bc0112979..f7ab979b1 100644
+--- a/src/wrapped/generated/wrapper.h
++++ b/src/wrapped/generated/wrapper.h
+@@ -1035,6 +1035,7 @@ void vFEpuV(x64emu_t *emu, uintptr_t fnc);
+ void vFEpuA(x64emu_t *emu, uintptr_t fnc);
+ void vFEpUp(x64emu_t *emu, uintptr_t fnc);
+ void vFEpLi(x64emu_t *emu, uintptr_t fnc);
++void vFEpLL(x64emu_t *emu, uintptr_t fnc);
+ void vFEpLp(x64emu_t *emu, uintptr_t fnc);
+ void vFEppp(x64emu_t *emu, uintptr_t fnc);
+ void vFEppV(x64emu_t *emu, uintptr_t fnc);
+@@ -3550,6 +3551,7 @@ void iFppLpLpLi(x64emu_t *emu, uintptr_t fnc);
+ void iFppLpLpLp(x64emu_t *emu, uintptr_t fnc);
+ void iFpppiiipi(x64emu_t *emu, uintptr_t fnc);
+ void iFpppiiipp(x64emu_t *emu, uintptr_t fnc);
++void iFpppiippp(x64emu_t *emu, uintptr_t fnc);
+ void iFpppipipi(x64emu_t *emu, uintptr_t fnc);
+ void iFppppiiup(x64emu_t *emu, uintptr_t fnc);
+ void iFppppiipp(x64emu_t *emu, uintptr_t fnc);
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index c995a0cc5..85d734747 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -160,6 +160,9 @@ static void my_wrap_error_print_progname(void)
+     }
+ 
+ #include "wrappercallback.h"
++#ifdef ANDROID
++#include "androidpath.h"
++#endif
+ 
+ static int regs_abi[] = {_DI, _SI, _DX, _CX, _R8, _R9};
+ void* getVargN(x64emu_t *emu, int n)
+@@ -1673,6 +1676,9 @@ EXPORT int my___fxstat64(x64emu_t *emu, int vers, int fd, void* buf) __attribute
+ 
+ EXPORT int my_statx(x64emu_t* emu, int dirfd, void* path, int flags, uint32_t mask, void* buf)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(path);
++#endif
+     if(my->statx)
+         return my->statx(dirfd, path, flags, mask, buf);
+     #ifdef __NR_statx
+@@ -1704,6 +1710,9 @@ EXPORT int my___xmknodat(x64emu_t* emu, int v, int dirfd, char* path, uint32_t m
+ 
+ EXPORT int my___xstat(x64emu_t* emu, int v, void* path, void* buf)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(path);
++#endif
+     (void)emu; (void)v;
+     struct stat64 st;
+     int r = stat64((const char*)path, buf?&st:buf);
+@@ -1715,6 +1724,9 @@ EXPORT int my___xstat64(x64emu_t* emu, int v, void* path, void* buf) __attribute
+ 
+ EXPORT int my___lxstat(x64emu_t* emu, int v, void* name, void* buf)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(name);
++#endif
+     (void)emu; (void)v;
+     struct stat64 st;
+     int r = lstat64((const char*)name, buf?&st:buf);
+@@ -1726,6 +1738,9 @@ EXPORT int my___lxstat64(x64emu_t* emu, int v, void* name, void* buf) __attribut
+ 
+ EXPORT int my___fxstatat(x64emu_t* emu, int v, int d, void* path, void* buf, int flags)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(path);
++#endif
+     (void)emu; (void)v;
+     struct  stat64 st;
+     int r = fstatat64(d, path, &st, flags);
+@@ -1737,6 +1752,9 @@ EXPORT int my___fxstatat64(x64emu_t* emu, int v, int d, void* path, void* buf, i
+ 
+ EXPORT int my_stat(x64emu_t *emu, void* filename, void* buf)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(filename);
++#endif
+     (void)emu;
+     struct stat st;
+     int r = stat(filename, &st);
+@@ -1748,6 +1766,9 @@ EXPORT int my_stat64(x64emu_t *emu, void* filename, void* buf) __attribute__((al
+ 
+ EXPORT int my_lstat(x64emu_t *emu, void* filename, void* buf)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(filename);
++#endif
+     (void)emu;
+     struct stat st;
+     int r = lstat(filename, &st);
+@@ -1770,6 +1791,9 @@ EXPORT int my_fstat64(x64emu_t* emu, int fd, void* buf) __attribute__((alias("my
+ 
+ EXPORT int my_fstatat(x64emu_t *emu, int fd, const char* path, void* buf, int flags)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(path);
++#endif
+     (void)emu;
+     struct stat st;
+     int r = fstatat(fd, path, &st, flags);
+@@ -2276,6 +2300,9 @@ static int shm_unlink(const char *name) {
+ #define TMP_CPUCACHE_SIZE "box64_cpucachesize"
+ EXPORT int32_t my_open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(pathname);
++#endif
+     if(isProcSelf((const char*) pathname, "cmdline")) {
+         // special case for self command line...
+         #if 0
+@@ -2419,6 +2446,9 @@ EXPORT int32_t my___open(x64emu_t* emu, void* pathname, int32_t flags, uint32_t
+ 
+ EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t mode)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(pathname);
++#endif
+     if(isProcSelf((const char*)pathname, "cmdline")) {
+         // special case for self command line...
+         #if 0
+@@ -2510,6 +2540,9 @@ EXPORT int32_t my_open64(x64emu_t* emu, void* pathname, int32_t flags, uint32_t
+ 
+ EXPORT FILE* my_fopen64(x64emu_t* emu, const char* path, const char* mode)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(path);
++#endif
+     if(isProcSelf((const char*)path, "cmdline")) {
+         int tmp = shm_open(TMP_CMDLINE, O_RDWR | O_CREAT, S_IRWXU);
+         if(tmp<0) return fopen64(path, mode);
+@@ -3455,8 +3488,17 @@ void InitCpuModel()
+ #endif
+ 
+ #ifdef ANDROID
++#include "wrappedlibc_androidcompat.h"
++EXPORT const unsigned short int *my___ctype_b;
++EXPORT const int32_t *my___ctype_tolower;
++EXPORT const int32_t *my___ctype_toupper;
++
+ void ctSetup()
+ {
++    ct_init();
++    my___ctype_b = ct_b_ptr;
++    my___ctype_tolower = ct_lower_ptr;
++    my___ctype_toupper = ct_upper_ptr;
+ }
+ #else
+ EXPORT const unsigned short int *my___ctype_b;
+@@ -3554,6 +3596,9 @@ EXPORT void my___explicit_bzero_chk(x64emu_t* emu, void* dst, uint32_t len, uint
+ 
+ EXPORT void* my_realpath(x64emu_t* emu, void* path, void* resolved_path)
+ {
++#ifdef ANDROID
++    ANDROID_FIXPATH(path);
++#endif
+     if(path && isProcSelf(path, "exe")) {
+         return realpath(emu->context->fullpath, resolved_path);
+     }
+@@ -3788,11 +3833,23 @@ EXPORT void* my_mallinfo(x64emu_t* emu, void* p)
+         inited = 1;
+         f = (mallinfo_fnc)dlsym(my_lib->w.lib, "mallinfo");
+     }
++#ifdef ANDROID
++    // glibc's struct mallinfo is ten ints (40 bytes), bionic's ten size_t (80 bytes): the guest's buffer is the first one
++    int* out = (int*)p;
++    memset(out, 0, 10*sizeof(int));
++    if(f) {
++        struct mallinfo mi = f();
++        size_t* in = (size_t*)&mi;
++        for(int i=0; i<10 && i<(int)(sizeof(mi)/sizeof(size_t)); ++i) out[i] = (int)in[i];
++    }
++    return p;
++#else
+     if(f)
+         *(struct mallinfo*)p=f();
+     else
+         memset(p, 0, sizeof(struct mallinfo));
+     return p;
++#endif
+ }
+ 
+ struct my_mallinfo2_s {
+@@ -4851,7 +4908,57 @@ __attribute__((weak)) int dn_skipname(const unsigned char* ptr, const unsigned c
+ #ifndef _SC_NPROCESSORS_CONF
+ #define _SC_NPROCESSORS_CONF    83
+ #endif
++#ifdef ANDROID
++// the x86 program numbers its names the glibc way (_SC_NPROCESSORS_CONF is 83, bionic's is 0x60, ...)
++static int androidSysconfName(int what)
++{
++    switch(what) {
++        case 0: return _SC_ARG_MAX;
++        case 1: return _SC_CHILD_MAX;
++        case 2: return _SC_CLK_TCK;
++        case 3: return _SC_NGROUPS_MAX;
++        case 4: return _SC_OPEN_MAX;
++        case 5: return _SC_STREAM_MAX;
++        case 6: return _SC_TZNAME_MAX;
++        case 30: return _SC_PAGESIZE;
++        case 43: return _SC_LINE_MAX;
++        case 60: return _SC_IOV_MAX;
++        case 67: return _SC_THREADS;
++        case 69: return _SC_GETGR_R_SIZE_MAX;
++        case 70: return _SC_GETPW_R_SIZE_MAX;
++        case 71: return _SC_LOGIN_NAME_MAX;
++        case 72: return _SC_TTY_NAME_MAX;
++        case 74: return _SC_THREAD_KEYS_MAX;
++        case 75: return _SC_THREAD_STACK_MIN;
++        case 76: return _SC_THREAD_THREADS_MAX;
++        case 83: return _SC_NPROCESSORS_CONF;
++        case 84: return _SC_NPROCESSORS_ONLN;
++        case 85: return _SC_PHYS_PAGES;
++        case 86: return _SC_AVPHYS_PAGES;
++        case 87: return _SC_ATEXIT_MAX;
++        case 149: return _SC_MONOTONIC_CLOCK;
++        case 180: return _SC_HOST_NAME_MAX;
++        case 185: return _SC_LEVEL1_ICACHE_SIZE;
++        case 186: return _SC_LEVEL1_ICACHE_ASSOC;
++        case 187: return _SC_LEVEL1_ICACHE_LINESIZE;
++        case 188: return _SC_LEVEL1_DCACHE_SIZE;
++        case 189: return _SC_LEVEL1_DCACHE_ASSOC;
++        case 190: return _SC_LEVEL1_DCACHE_LINESIZE;
++        case 191: return _SC_LEVEL2_CACHE_SIZE;
++        case 192: return _SC_LEVEL2_CACHE_ASSOC;
++        case 193: return _SC_LEVEL2_CACHE_LINESIZE;
++        case 194: return _SC_LEVEL3_CACHE_SIZE;
++        case 195: return _SC_LEVEL3_CACHE_ASSOC;
++        case 196: return _SC_LEVEL3_CACHE_LINESIZE;
++    }
++    return -1;
++}
++#endif
+ EXPORT long my_sysconf(x64emu_t* emu, int what) {
++#ifdef ANDROID
++    what = androidSysconfName(what);
++    if(what<0) { errno = EINVAL; return -1; }
++#endif
+     if(what==_SC_NPROCESSORS_ONLN) {
+         return box64_sysinfo.box64_ncpu;
+     }
+diff --git a/src/wrapped/wrappedlibc_androidcompat.h b/src/wrapped/wrappedlibc_androidcompat.h
+new file mode 100644
+index 000000000..9850ab76f
+--- /dev/null
++++ b/src/wrapped/wrappedlibc_androidcompat.h
+@@ -0,0 +1,373 @@
++// Box64 on Android (bionic): the glibc-only functions an x86-64 program's libraries import from libc.so.6.
++// bionic has no __errno_location, __ctype_b_loc, __assert_fail, gettext... (it has __errno, _ctype_, __assert2, no libintl), and the wrapper
++// looks every name of libc.so.6 up in the native libc, so a library that links against one of them fails to load.
++// Each function here is mapped by a GOM entry in wrappedlibc_private.h (names my_<name>, no emulator argument).
++#include <errno.h>
++#include <langinfo.h>
++#include <fcntl.h>
++#include <locale.h>
++#include <pthread.h>
++#include <sched.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++#include <unistd.h>
++#include <wchar.h>
++#include <wctype.h>
++#include <ctype.h>
++#include <limits.h>
++#include <stdio.h>
++#include <signal.h>
++#include <assert.h>
++extern void __assert2(const char*, int, const char*, const char*);
++
++EXPORT void* my___errno_location(void) { return __errno(); }
++
++static int my___h_errno_value = 0;
++EXPORT void* my___h_errno_location(void) { return &my___h_errno_value; }
++
++// glibc's character tables: indexed from -128 to 255, the C locale's classes; the pointer a caller gets points at index 0.
++static unsigned short ct_b_store[384];
++static int32_t ct_lower_store[384];
++static int32_t ct_upper_store[384];
++static const unsigned short* ct_b_ptr = NULL;
++static const int32_t* ct_lower_ptr = NULL;
++static const int32_t* ct_upper_ptr = NULL;
++
++static void ct_init(void)
++{
++    if(ct_b_ptr) return;
++    for(int c=-128; c<256; ++c) {
++        unsigned short b = 0;
++        int32_t lo = c, up = c;
++        if(c>=0 && c<128) {
++            // glibc (little endian): _ISupper 0x100, _ISlower 0x200, _ISalpha 0x400, _ISdigit 0x800, _ISxdigit 0x1000, _ISspace 0x2000,
++            // _ISprint 0x4000, _ISgraph 0x8000, _ISblank 0x1, _IScntrl 0x2, _ISpunct 0x4, _ISalnum 0x8
++            if(isupper(c))  b |= 0x100;
++            if(islower(c))  b |= 0x200;
++            if(isalpha(c))  b |= 0x400;
++            if(isdigit(c))  b |= 0x800;
++            if(isxdigit(c)) b |= 0x1000;
++            if(isspace(c))  b |= 0x2000;
++            if(isprint(c))  b |= 0x4000;
++            if(isgraph(c))  b |= 0x8000;
++            if(c==' ' || c=='\t') b |= 0x1;
++            if(iscntrl(c))  b |= 0x2;
++            if(ispunct(c))  b |= 0x4;
++            if(isalnum(c))  b |= 0x8;
++            lo = tolower(c);
++            up = toupper(c);
++        }
++        ct_b_store[c+128] = b;
++        ct_lower_store[c+128] = lo;
++        ct_upper_store[c+128] = up;
++    }
++    ct_lower_ptr = ct_lower_store+128;
++    ct_upper_ptr = ct_upper_store+128;
++    ct_b_ptr = ct_b_store+128;
++}
++EXPORT void* my___ctype_b_loc(void) { ct_init(); return (void*)&ct_b_ptr; }
++EXPORT void* my___ctype_tolower_loc(void) { ct_init(); return (void*)&ct_lower_ptr; }
++EXPORT void* my___ctype_toupper_loc(void) { ct_init(); return (void*)&ct_upper_ptr; }
++
++EXPORT void my___assert_fail(const char* assertion, const char* file, unsigned int line, const char* function)
++{
++    __assert2(file, (int)line, function?function:"", assertion);
++}
++EXPORT unsigned long my___fdelt_chk(unsigned long d)
++{
++    if(d >= 1024) abort();
++    return d / (8*sizeof(long));
++}
++EXPORT int my_bcmp(const void* a, const void* b, size_t n) { return memcmp(a, b, n); }
++EXPORT void* my___rawmemchr(const void* s, int c)
++{
++    const unsigned char* p = (const unsigned char*)s;
++    while(*p != (unsigned char)c) ++p;
++    return (void*)p;
++}
++EXPORT char* my___strdup(const char* s) { return strdup(s); }
++EXPORT char* my___strtok_r(char* s, const char* d, char** save) { return strtok_r(s, d, save); }
++EXPORT int my___open64_2(const char* path, int flags) { return open(path, flags); }
++EXPORT int my___openat64_2(int dirfd, const char* path, int flags) { return openat(dirfd, path, flags); }
++EXPORT struct tm* my___gmtime_r(const time_t* t, struct tm* r) { return gmtime_r(t, r); }
++EXPORT ssize_t my___getdelim(char** line, size_t* n, int delim, FILE* f) { return getdelim(line, n, delim, f); }
++EXPORT int my___overflow(FILE* f, int ch) { return fputc(ch, f); }
++EXPORT size_t my___mbrlen(const char* s, size_t n, mbstate_t* ps) { return mbrlen(s, n, ps); }
++EXPORT size_t my___mbstowcs_chk(wchar_t* dst, const char* src, size_t len, size_t dstlen) { (void)dstlen; return mbstowcs(dst, src, len); }
++EXPORT wchar_t* my___wcsncpy_chk(wchar_t* d, const wchar_t* s, size_t n, size_t dstlen) { (void)dstlen; return wcsncpy(d, s, n); }
++EXPORT wchar_t* my___wmemcpy_chk(wchar_t* d, const wchar_t* s, size_t n, size_t dstlen) { (void)dstlen; return wmemcpy(d, s, n); }
++EXPORT wchar_t* my___wmemmove_chk(wchar_t* d, const wchar_t* s, size_t n, size_t dstlen) { (void)dstlen; return wmemmove(d, s, n); }
++
++// locale: the C locale only. glibc's locale_t masks and names differ from bionic's, so the objects here are placeholders: libstdc++ asks for "C" and
++// only needs a non-null handle back.
++// glibc's locale_t is a struct whose ctype fields libstdc++ reads directly (ctype<char>::classic_table() takes __ctype_b from it)
++struct my_glibc_locale {
++    void* locales[13];
++    const unsigned short* ctype_b;
++    const int* ctype_tolower;
++    const int* ctype_toupper;
++    const char* names[13];
++};
++static struct my_glibc_locale my_locale_c;
++static void* my_locale_dummy_ptr(void)
++{
++    if(!my_locale_c.ctype_b) {
++        ct_init();
++        my_locale_c.ctype_b = ct_b_ptr;
++        my_locale_c.ctype_tolower = ct_lower_ptr;
++        my_locale_c.ctype_toupper = ct_upper_ptr;
++        for(int i=0; i<13; ++i) my_locale_c.names[i] = "C";
++    }
++    return &my_locale_c;
++}
++EXPORT long my___timezone = 0;
++EXPORT void* my___newlocale(int mask, const char* name, void* base)
++{
++    (void)mask;
++    if(!name || !*name || !strcmp(name, "C") || !strcmp(name, "POSIX") || !strncmp(name, "C.", 2) || !strncmp(name, "en_US", 5)) return base ? base : my_locale_dummy_ptr();
++    errno = ENOENT;
++    return NULL;
++}
++EXPORT void* my___uselocale(void* loc) { (void)loc; return my_locale_dummy_ptr(); }
++EXPORT void my___freelocale(void* loc) { (void)loc; }
++EXPORT void* my___duplocale(void* loc) { (void)loc; return my_locale_dummy_ptr(); }
++EXPORT void* my_newlocale(int mask, const char* name, void* base) { return my___newlocale(mask, name, base); }
++EXPORT void* my_uselocale(void* loc) { return my___uselocale(loc); }
++EXPORT void my_freelocale(void* loc) { (void)loc; }
++EXPORT void* my_duplocale(void* loc) { (void)loc; return my_locale_dummy_ptr(); }
++// glibc's nl_langinfo items (category << 16 | index) are not bionic's (a flat list): the common ones are translated
++static int androidLanginfoItem(int item)
++{
++    switch(item) {
++        case 14: return CODESET;
++        case 0x10000: return RADIXCHAR;
++        case 0x10001: return THOUSEP;
++        case 0x50000: return YESEXPR;
++        case 0x50001: return NOEXPR;
++        case 0x4000F: return CRNCYSTR;
++        case 0x20026: return AM_STR;
++        case 0x20027: return PM_STR;
++        case 0x20028: return D_T_FMT;
++        case 0x20029: return D_FMT;
++        case 0x2002A: return T_FMT;
++        case 0x2002B: return T_FMT_AMPM;
++    }
++    if(item>=0x20000 && item<0x20007) return ABDAY_1 + (item-0x20000);
++    if(item>=0x20007 && item<0x2000E) return DAY_1 + (item-0x20007);
++    if(item>=0x2000E && item<0x2001A) return ABMON_1 + (item-0x2000E);
++    if(item>=0x2001A && item<0x20026) return MON_1 + (item-0x2001A);
++    return -1;
++}
++EXPORT const char* my_nl_langinfo(int item) { int i = androidLanginfoItem(item); return i<0 ? "" : nl_langinfo(i); }
++EXPORT const char* my_nl_langinfo_l(int item, void* loc) { (void)loc; return my_nl_langinfo(item); }
++EXPORT const char* my___nl_langinfo_l(int item, void* loc) { (void)loc; return my_nl_langinfo(item); }
++EXPORT int my___strcoll_l(const char* a, const char* b, void* loc) { (void)loc; return strcmp(a, b); }
++EXPORT size_t my___strxfrm_l(char* d, const char* s, size_t n, void* loc)
++{
++    (void)loc;
++    size_t l = strlen(s);
++    if(d && n) { size_t c = l<n-1?l:n-1; memcpy(d, s, c); d[c] = 0; }
++    return l;
++}
++EXPORT double my___strtod_l(const char* s, char** e, void* loc) { (void)loc; return strtod(s, e); }
++EXPORT float my___strtof_l(const char* s, char** e, void* loc) { (void)loc; return strtof(s, e); }
++EXPORT double my_strtof64(const char* s, char** e) { return strtod(s, e); }
++EXPORT int my_strfromf64(char* d, size_t n, const char* fmt, double v) { return snprintf(d, n, "%.*g", 17, v); (void)fmt; }
++EXPORT size_t my___strftime_l(char* s, size_t max, const char* fmt, const struct tm* tm, void* loc) { (void)loc; return strftime(s, max, fmt, tm); }
++EXPORT int my___towlower_l(int c, void* loc) { (void)loc; return towlower(c); }
++EXPORT int my___towupper_l(int c, void* loc) { (void)loc; return towupper(c); }
++EXPORT int my___wcscoll_l(const wchar_t* a, const wchar_t* b, void* loc) { (void)loc; return wcscmp(a, b); }
++EXPORT size_t my___wcsxfrm_l(wchar_t* d, const wchar_t* s, size_t n, void* loc)
++{
++    (void)loc;
++    size_t l = wcslen(s);
++    if(d && n) { size_t c = l<n-1?l:n-1; wmemcpy(d, s, c); d[c] = 0; }
++    return l;
++}
++EXPORT size_t my___wcsftime_l(wchar_t* s, size_t max, const wchar_t* fmt, const struct tm* tm, void* loc) { (void)loc; return wcsftime(s, max, fmt, tm); }
++EXPORT unsigned long my___wctype_l(const char* name, void* loc) { (void)loc; return (unsigned long)wctype(name); }
++EXPORT int my___iswctype_l(unsigned int c, unsigned long t, void* loc) { (void)loc; return iswctype(c, (wctype_t)t); }
++
++// libintl: no translations
++EXPORT char* my_gettext(const char* msg) { return (char*)msg; }
++EXPORT char* my_dgettext(const char* d, const char* msg) { (void)d; return (char*)msg; }
++EXPORT char* my_dcgettext(const char* d, const char* msg, int cat) { (void)d; (void)cat; return (char*)msg; }
++EXPORT char* my_dcngettext(const char* d, const char* a, const char* b, unsigned long n, int cat) { (void)d; (void)cat; return (char*)(n==1?a:b); }
++EXPORT char* my_bindtextdomain(const char* d, const char* dir) { (void)d; return (char*)dir; }
++EXPORT char* my_bind_textdomain_codeset(const char* d, const char* cs) { (void)d; return (char*)cs; }
++
++EXPORT char* my___xpg_basename(char* path)
++{
++    if(!path || !*path) return (char*)".";
++    size_t l = strlen(path);
++    while(l>1 && path[l-1]=='/') path[--l] = 0;
++    char* s = strrchr(path, '/');
++    if(!s) return path;
++    if(l==1) return path;
++    return s+1;
++}
++// glibc's strerror_r (the GNU one) returns the message: bionic's is the XSI one returning an int
++EXPORT void* my_strerror_r(int e, char* buf, size_t n)
++{
++    if(!n) return buf;
++    if(strerror_r(e, buf, n)) snprintf(buf, n, "Unknown error %d", e);
++    return buf;
++}
++EXPORT void* my___strerror_r(int e, char* buf, size_t n) __attribute__((alias("my_strerror_r")));
++EXPORT void* my___xpg_strerror_r(int e, char* buf, size_t n) { return (void*)(long)strerror_r(e, buf, n); }
++EXPORT char* my_get_current_dir_name(void) { return getcwd(NULL, 0); }
++EXPORT int my_getdtablesize(void) { return (int)sysconf(_SC_OPEN_MAX); }
++EXPORT const char* my_gnu_get_libc_version(void) { return "2.39"; }
++EXPORT int my_malloc_trim(size_t pad) { (void)pad; return 0; }
++EXPORT unsigned long my_parse_printf_format(const char* fmt, unsigned long n, int* types) { (void)fmt; (void)n; (void)types; return 0; }
++EXPORT int my_sigisemptyset(const sigset_t* set)
++{
++    const unsigned long* w = (const unsigned long*)set;
++    for(size_t i=0; i<sizeof(sigset_t)/sizeof(unsigned long); ++i) if(w[i]) return 0;
++    return 1;
++}
++EXPORT int my_getprotobyname_r(const char* n, void* r, char* b, size_t l, void** res) { (void)n; (void)r; (void)b; (void)l; if(res) *res=NULL; return ENOENT; }
++EXPORT int my_getprotobynumber_r(int n, void* r, char* b, size_t l, void** res) { (void)n; (void)r; (void)b; (void)l; if(res) *res=NULL; return ENOENT; }
++EXPORT int my_initstate_r(unsigned int seed, char* st, size_t n, void* buf) { (void)seed; (void)st; (void)n; (void)buf; errno = ENOSYS; return -1; }
++EXPORT int my_random_r(void* buf, int* result) { (void)buf; *result = (int)random(); return 0; }
++
++// protection keys, file handles: the kernel of the phone says no
++EXPORT int my_pkey_alloc(unsigned int a, unsigned int b) { (void)a; (void)b; errno = ENOSYS; return -1; }
++EXPORT int my_pkey_free(int k) { (void)k; errno = ENOSYS; return -1; }
++EXPORT int my_pkey_get(int k) { (void)k; errno = ENOSYS; return -1; }
++EXPORT int my_pkey_set(int k, unsigned int r) { (void)k; (void)r; errno = ENOSYS; return -1; }
++EXPORT int my_pkey_mprotect(void* a, size_t l, int p, int k) { (void)k; return mprotect(a, l, p); }
++EXPORT int my_name_to_handle_at(int d, const char* p, void* h, int* m, int f) { (void)d; (void)p; (void)h; (void)m; (void)f; errno = ENOSYS; return -1; }
++
++// pthread cancellation and POSIX shared memory / message queues
++EXPORT int my_pthread_cancel(unsigned long t) { (void)t; return ENOSYS; }
++EXPORT int my_pthread_setcanceltype(int type, int* old) { (void)type; if(old) *old = 0; return 0; }
++EXPORT int my_shm_open(const char* name, int oflag, unsigned int mode)
++{
++    // Android has no /dev/shm: the segments live in a folder of the app ($BOX64_SHM_DIR, or $TMPDIR)
++    const char* base = getenv("BOX64_SHM_DIR");
++    if(!base) base = getenv("TMPDIR");
++    if(!base) base = "/data/local/tmp";
++    char path[PATH_MAX];
++    while(*name=='/') ++name;
++    snprintf(path, sizeof path, "%s/%s", base, name);
++    return open(path, oflag | O_CLOEXEC, mode);
++}
++EXPORT int my_shm_unlink(const char* name)
++{
++    const char* base = getenv("BOX64_SHM_DIR");
++    if(!base) base = getenv("TMPDIR");
++    if(!base) base = "/data/local/tmp";
++    char path[PATH_MAX];
++    while(*name=='/') ++name;
++    snprintf(path, sizeof path, "%s/%s", base, name);
++    return unlink(path);
++}
++EXPORT int my_mq_getattr(int q, void* a) { (void)q; (void)a; errno = ENOSYS; return -1; }
++
++// the resolver (libresolv's and libc's internals): the phone's own resolver is used by getaddrinfo; these only have to exist
++static char my_res_state_buf[1024];
++EXPORT void* my___res_state(void) { return my_res_state_buf; }
++EXPORT int my___res_init(void) { return 0; }
++EXPORT void my___res_iclose(void* s, int f) { (void)s; (void)f; }
++EXPORT int my_res_hnok(const char* s) { (void)s; return 1; }
++EXPORT int my_res_dnok(const char* s) { (void)s; return 1; }
++EXPORT int my___libc_ns_samename(const char* a, const char* b) { return strcasecmp(a, b) == 0; }
++EXPORT int my___libc_ns_makecanon(const char* a, char* b) { (void)a; (void)b; return -1; }
++EXPORT int my___res_context_query(void* a, const char* b, int c, int d, void* e, int f, void* g, void* h) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; errno = ENOSYS; return -1; }
++EXPORT int my___res_context_search(void* a, const char* b, int c, int d, void* e, int f, void* g, void* h) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; errno = ENOSYS; return -1; }
++EXPORT void* my___res_get_nsaddr(void* s, unsigned long n) { (void)s; (void)n; return NULL; }
++EXPORT void* my___resolv_context_get_override(void* s) { (void)s; return NULL; }
++EXPORT void* my___resolv_context_get(void) { return NULL; }
++EXPORT void my___resolv_context_put(void* c) { (void)c; }
++EXPORT char* my___res_context_hostalias(void* c, const char* n, char* b, unsigned long l) { (void)c; (void)n; (void)b; (void)l; return NULL; }
++EXPORT int my___libc_dn_expand(const void* a, const void* b, const void* c, char* d, int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return -1; }
++EXPORT int my___libc_res_nameinquery(const char* a, int b, int c, const void* d, const void* e) { (void)a; (void)b; (void)c; (void)d; (void)e; return 0; }
++EXPORT int my___libc_res_queriesmatch(const void* a, const void* b, const void* c, const void* d) { (void)a; (void)b; (void)c; (void)d; return 0; }
++
++// libpthread's entries whose implementation lives in a file the Android build leaves out
++EXPORT int my_pthread_getaffinity_np(x64emu_t* emu, unsigned long thread, unsigned long size, void* set)
++{
++    (void)emu; (void)thread;
++    return sched_getaffinity(0, size, (cpu_set_t*)set) == 0 ? 0 : errno;
++}
++
++// Android's app sandbox refuses the netlink "kobject uevent" socket libudev (and SDL through it) opens to watch for devices: a socket pair end stands
++// in for it, one that never has anything to read.
++#include <sys/socket.h>
++#include <linux/netlink.h>
++#define MY_FAKE_MAX 64
++static int my_fake_fds[MY_FAKE_MAX];
++static int my_fake_count = 0;
++static pthread_mutex_t my_fake_lock = PTHREAD_MUTEX_INITIALIZER;
++static int my_is_fake(int fd)
++{
++    int r = 0;
++    pthread_mutex_lock(&my_fake_lock);
++    for(int i=0; i<my_fake_count; ++i) if(my_fake_fds[i]==fd) { r = 1; break; }
++    pthread_mutex_unlock(&my_fake_lock);
++    return r;
++}
++EXPORT int my_socket(int domain, int type, int protocol)
++{
++    if(domain==AF_NETLINK && protocol==NETLINK_KOBJECT_UEVENT) {
++        int pair[2];
++        if(socketpair(AF_UNIX, SOCK_DGRAM | (type & (SOCK_NONBLOCK|SOCK_CLOEXEC)), 0, pair)==0) {
++            // the other end stays open (and unused), so a read sees "nothing yet" and not end-of-file
++            pthread_mutex_lock(&my_fake_lock);
++            if(my_fake_count<MY_FAKE_MAX) my_fake_fds[my_fake_count++] = pair[0];
++            pthread_mutex_unlock(&my_fake_lock);
++            return pair[0];
++        }
++    }
++    return socket(domain, type, protocol);
++}
++EXPORT int my_bind(int fd, const void* addr, unsigned int len)
++{
++    if(my_is_fake(fd)) return 0;
++    return bind(fd, (const struct sockaddr*)addr, len);
++}
++EXPORT int my_getsockname(int fd, void* addr, void* len)
++{
++    if(my_is_fake(fd)) {
++        struct sockaddr_nl nl;
++        memset(&nl, 0, sizeof nl);
++        nl.nl_family = AF_NETLINK;
++        nl.nl_pid = (unsigned)getpid();
++        socklen_t* l = (socklen_t*)len;
++        socklen_t n = *l < sizeof nl ? *l : sizeof nl;
++        memcpy(addr, &nl, n);
++        *l = sizeof nl;
++        return 0;
++    }
++    return getsockname(fd, (struct sockaddr*)addr, (socklen_t*)len);
++}
++EXPORT int my_setsockopt(int fd, int level, int name, const void* value, unsigned int len)
++{
++    if(my_is_fake(fd)) return 0;
++    return setsockopt(fd, level, name, value, len);
++}
++EXPORT int my_getsockopt(int fd, int level, int name, void* value, void* len)
++{
++    if(my_is_fake(fd) && level==SOL_SOCKET && (name==SO_RCVBUF || name==SO_SNDBUF) && value && *(socklen_t*)len>=sizeof(int)) {
++        *(int*)value = 1<<20;
++        *(socklen_t*)len = sizeof(int);
++        return 0;
++    }
++    return getsockopt(fd, level, name, value, (socklen_t*)len);
++}
++
++// glibc's stdio underflow hooks, the fortified helpers and a few more names the x86-64 libraries of the root filesystem (gtk, glib, pango) bind
++EXPORT int my___uflow(FILE* f) { return fgetc(f); }
++EXPORT int my___underflow(FILE* f) { int c = fgetc(f); if(c!=EOF) ungetc(c, f); return c; }
++EXPORT int my___getgroups_chk(int n, gid_t* list, size_t len) { return getgroups(n, list); }
++EXPORT void* my___fgets_unlocked_chk(char* buf, size_t len, int n, FILE* f) { return fgets_unlocked(buf, n, f); }
++EXPORT int my_getservbyname_r(const char* name, const char* proto, void* res, char* buf, size_t len, void** result) { if(result) *result = NULL; return ENOENT; }
++EXPORT void* my_textdomain(const char* domain) { return (void*)(domain ? domain : "messages"); }
++EXPORT int my_fts64_close(void* f) { return fts_close(f); }
++// the fortified stdio helpers take their arguments in another order in glibc than in bionic
++EXPORT size_t my___fread_chk(void* p, size_t plen, size_t size, size_t n, FILE* f) { return fread(p, size, n, f); }
++EXPORT size_t my___fread_unlocked_chk(void* p, size_t plen, size_t size, size_t n, FILE* f) { return fread_unlocked(p, size, n, f); }
++EXPORT void* my___fgets_chk(char* buf, size_t buflen, int n, FILE* f) { return fgets(buf, n, f); }
++
+diff --git a/src/wrapped/wrappedlibc_private.h b/src/wrapped/wrappedlibc_private.h
+index c147d76d7..13a344da8 100644
+--- a/src/wrapped/wrappedlibc_private.h
++++ b/src/wrapped/wrappedlibc_private.h
+@@ -8,7 +8,11 @@ GO(abort, vFv)
+ GO(abs, iFi)
+ GO(accept, iFipp)
+ GO(accept4, iFippi)
++#ifdef ANDROID
++GOWM(access, iFpi) //%noE
++#else
+ GOW(access, iFpi)
++#endif
+ GO(acct, iFp)
+ GOW(addmntent, iFSp)
+ GOW(addseverity, iFip)
+@@ -53,7 +57,11 @@ GOM(__asprintf, iFEppV)
+ GOWM(asprintf, iFEppV)
+ GOM(__asprintf_chk, iFEpipV)
+ GO(__assert, vFppi)
++#ifdef ANDROID
++GOM(__assert_fail, vFppup) //%noE
++#else
+ GO(__assert_fail, vFppup)
++#endif
+ GO(__assert_perror_fail, vFipup)
+ GOM(atexit, iFEp)
+ GO(atof, dFp)
+@@ -74,13 +82,29 @@ GOWM(backtrace_symbols, pFEpi)
+ //GO(__backtrace_symbols_fd, 
+ GOWM(backtrace_symbols_fd, vFEpii)
+ GOW(basename, pFp)
++#ifdef ANDROID
++GOM(bcmp, iFppL) //%noE
++#else
+ GO(bcmp, iFppL)
++#endif
+ GO(bcopy, vFppL)
+ //GO(bdflush, 
++#ifdef ANDROID
++GOWM(bind, iFipu) //%noE
++#else
+ GOW(bind, iFipu)
++#endif
+ GO(bindresvport, iFip)
++#ifdef ANDROID
++GOWM(bindtextdomain, pFpp) //%noE
++#else
+ GOW(bindtextdomain, pFpp)
++#endif
++#ifdef ANDROID
++GOWM(bind_textdomain_codeset, pFpp) //%noE
++#else
+ GOW(bind_textdomain_codeset, pFpp)
++#endif
+ GOW(brk, iFp)
+ //GO(__bsd_getpgrp, 
+ GO2(bsd_signal, pFEip, my_signal)
+@@ -111,11 +135,19 @@ GO(cfree, vFp)
+ GO(cfsetispeed, iFpu)
+ GO(cfsetospeed, iFpu)
+ GO(cfsetspeed, iFpu)
++#ifdef ANDROID
++GOWM(chdir, iFp) //%noE
++#else
+ GOW(chdir, iFp)
++#endif
+ DATA(__check_rhosts_file, 8)
+ //GO(chflags, 
+ //GO(__chk_fail, 
++#ifdef ANDROID
++GOWM(chmod, iFpu) //%noE
++#else
+ GOW(chmod, iFpu)
++#endif
+ GOW(chown, iFpuu)
+ GO(chroot, iFp)
+ GOW(clearenv, iFv)
+@@ -177,8 +209,16 @@ GOW(__connect, iFipu)
+ GOW(connect, iFipu)
+ GO(copy_file_range, lFipipLu)
+ //GO(__copy_grp, 
++#ifdef ANDROID
++GOWM(creat, iFpu) //%noE
++#else
+ GOW(creat, iFpu)
++#endif
++#ifdef ANDROID
++GOWM(creat64, iFpu) //%noE
++#else
+ GOW(creat64, iFpu)
++#endif
+ //GO(create_module, 
+ GO(ctermid, pFp)
+ GO(ctime, pFp)
+@@ -191,18 +231,30 @@ DATA(_ctype_, 8)
+ //DATA(__ctype32_b, 
+ //DATA(__ctype32_tolower, 
+ //DATA(__ctype32_toupper, 
+-#ifdef STATICBUILD
+-//DATA(__ctype_b, 8)
++#ifdef ANDROID
++DATAM(__ctype_b, 8)
+ #else
+ DATA(__ctype_b, 8)
+ #endif
++#ifdef ANDROID
++GOM(__ctype_b_loc, pFv) //%noE
++#else
+ GO(__ctype_b_loc, pFv)
++#endif
+ GO(__ctype_get_mb_cur_max, LFv)
+ //GO(__ctype_init, 
+ DATAM(__ctype_tolower, 8)
++#ifdef ANDROID
++GOM(__ctype_tolower_loc, pFv) //%noE
++#else
+ GO(__ctype_tolower_loc, pFv)
++#endif
+ DATAM(__ctype_toupper, 8)
++#ifdef ANDROID
++GOM(__ctype_toupper_loc, pFv) //%noE
++#else
+ GO(__ctype_toupper_loc, pFv)
++#endif
+ //DATAB(__curbrk, 
+ GO(cuserid, pFp)
+ GOM(__cxa_atexit, iFEppp)
+@@ -215,8 +267,16 @@ GO(daemon, iFii)
+ DATAB(__daylight, 4)
+ DATA(daylight, 4)
+ GO(__dcgettext, pFppi)
++#ifdef ANDROID
++GOWM(dcgettext, pFppi) //%noE
++#else
+ GOW(dcgettext, pFppi)
++#endif
++#ifdef ANDROID
++GOWM(dcngettext, pFpppLi) //%noE
++#else
+ GOW(dcngettext, pFpppLi)
++#endif
+ //GO(__default_morecore, 
+ #ifdef STATICBUILD
+ //GO(delete_module, 
+@@ -226,7 +286,11 @@ GOM(delete_module, iFEpu)
+ GO(des_setparity, vFp)
+ #endif
+ GO(__dgettext, pFpp)
++#ifdef ANDROID
++GOWM(dgettext, pFpp) //%noE
++#else
+ GOW(dgettext, pFpp)
++#endif
+ GO(difftime, dFll)
+ GO(dirfd, iFp)
+ GO(dirname, pFp)
+@@ -248,7 +312,11 @@ GO(_dl_mcount_wrapper_check, vFp)
+ //GO(_dl_sym, 
+ //GO(_dl_vsym, 
+ GOW(dngettext, pFpppL)
++#ifdef ANDROID
++GOWM(dn_skipname, iFEpp)
++#else
+ GOW(dn_skipname, iFpp)
++#endif
+ GOM(dprintf, iFEipV)
+ GOM(__dprintf_chk, iFEiipV)
+ GO(drand48, dFv)
+@@ -257,10 +325,22 @@ GOW(dup, iFi)
+ GO(__dup2, iFii)
+ GOW(dup2, iFii)
+ GOW(dup3, iFiiO)
++#ifdef ANDROID
++GOM(__duplocale, pFp) //%noE
++#else
+ GO(__duplocale, pFp)
++#endif
++#ifdef ANDROID
++GOWM(duplocale, pFp) //%noE
++#else
+ GOW(duplocale, pFp)
++#endif
+ GO(dysize, iFi)
++#ifdef ANDROID
++GOWM(eaccess, iFpi) //%noE
++#else
+ GOW(eaccess, iFpi)
++#endif
+ #ifdef STATICBUILD
+ //GO(ecb_crypt, 
+ #else
+@@ -315,7 +395,11 @@ GO(erand48, dFp)
+ GOW(erand48_r, iFppp)
+ GOM(err, vFEipV)
+ //DATAB(errno, 
++#ifdef ANDROID
++GOM(__errno_location, pFv) //%noE
++#else
+ GO(__errno_location, pFv)
++#endif
+ GOWM(error, vFEiipV)
+ GOWM(error_at_line, vFEiipupV)
+ //DATAB(error_message_count, 4)
+@@ -339,7 +423,11 @@ GO(ether_ntoa, pFp)
+ GO(ether_ntoa_r, pFpp)
+ GO(ether_ntohost, iFpp)
+ #endif
++#ifdef ANDROID
++GOWM(euidaccess, iFpi) //%noE
++#else
+ GOW(euidaccess, iFpi)
++#endif
+ GO(eventfd, iFui)
+ GO(eventfd_read, iFip)
+ GO(eventfd_write, iFiU)
+@@ -354,8 +442,12 @@ GOM(_exit, vFEi)
+ GOM(exit, vFEi)
+ GOW(_Exit, vFi)
+ GO(explicit_bzero, vFpL)
+-GO(__explicit_bzero_chk, vFpLL)
++GOM(__explicit_bzero_chk, vFEpLL)
++#ifdef ANDROID
++GOM(faccessat, iFipii) //%noE
++#else
+ GO(faccessat, iFipii)
++#endif
+ GOW(fallocate, iFiill)
+ GO(fallocate64, iFiiII)
+ GO(fanotify_init, iFuu)
+@@ -376,7 +468,11 @@ GOWM(fcntl64, iFEiiN)
+ GO(fcvt, pFdipp)
+ GO(fcvt_r, iFdipppL)
+ GO(fdatasync, iFi)
++#ifdef ANDROID
++GOM(__fdelt_chk, LFL) //%noE
++#else
+ GO(__fdelt_chk, LFL)
++#endif
+ //GO(__fdelt_warn, 
+ //GO(fdetach, 
+ GO(fdopen, SFip)
+@@ -402,7 +498,11 @@ GO(fgetpos64, iFSp)
+ GO(fgetpwent, pFS)
+ GOW(fgetpwent_r, iFSppLp)
+ GOW(fgets, pFpiS)
++#ifdef ANDROID
++GOM(__fgets_chk, pFpLip) //%noE
++#else
+ GO(__fgets_chk, pFpLip)
++#endif
+ #ifdef STATICBUILD
+ //GO(fgetsgent, 
+ //GOW(fgetsgent_r, 
+@@ -416,7 +516,7 @@ GOW(fgets_unlocked, pFpiS)
+ #ifdef STATICBUILD
+ //GO(__fgets_unlocked_chk,
+ #else
+-GO(__fgets_unlocked_chk, pFpLiS)
++GOM(__fgets_unlocked_chk, pFpLiS) //%noE
+ #endif
+ GOW(fgetwc, uFS)
+ GOW(fgetwc_unlocked, uFS)
+@@ -457,15 +557,31 @@ GO(fputws, iFpS)
+ GO(fputws_unlocked, iFpS)
+ GO(fread, LFpLLS)
+ GO(__freadable, iFp)
++#ifdef ANDROID
++GOM(__fread_chk, LFpLLLp) //%noE
++#else
+ GO(__fread_chk, LFpLLLp)
++#endif
+ GO(__freading, iFp)
+ GO(fread_unlocked, LFpLLS)
++#ifdef ANDROID
++GOM(__fread_unlocked_chk, LFpLLLp) //%noE
++#else
+ GO(__fread_unlocked_chk, LFpLLLp)
++#endif
+ GO(free, vFp)
+ GO(freeaddrinfo, vFp)
+ GOW(freeifaddrs, vFp)
++#ifdef ANDROID
++GOM(__freelocale, vFp) //%noE
++#else
+ GO(__freelocale, vFp)
++#endif
++#ifdef ANDROID
++GOWM(freelocale, vFp) //%noE
++#else
+ GOW(freelocale, vFp)
++#endif
+ GO(fremovexattr, iFip)
+ GO(freopen, SFppS)
+ GO(freopen64, SFppS)
+@@ -497,7 +613,11 @@ GO(ftruncate, iFil)
+ GO(ftruncate64, iFiI)
+ GOW(ftrylockfile, iFS)
+ GOW(fts64_children, pFpi)
++#ifdef ANDROID
++GOWM(fts64_close, iFp) //%noE
++#else
+ GOW(fts64_close, iFp)
++#endif
+ GOWM(fts64_open, pFEpip)
+ GOW(fts64_read, pFp)
+ GOW(fts64_set, iFppi)
+@@ -549,20 +669,32 @@ GO(getchar_unlocked, iFv)
+ GOWM(getcontext, iFEp)
+ GOW(getcpu, iFpp)
+ GOW(getc_unlocked, iFS)
++#ifdef ANDROID
++GOM(get_current_dir_name, pFv) //%noE
++#else
+ GO(get_current_dir_name, pFv)
++#endif
+ GO(getcwd, pFpL)
+ GO(__getcwd_chk, pFpLL)
+ GO(getdate, pFp)
+ //DATAB(getdate_err, 4)
+ GOW(getdate_r, iFpp)
++#ifdef ANDROID
++GOWM(__getdelim, lFppiS) //%noE
++#else
+ GOW(__getdelim, lFppiS)
++#endif
+ GO(getdelim, lFppiS)
+ GO(getdents64, lFipL)
+ GO(getdirentries, lFipLp)
+ GO(getdirentries64, lFipLp)
+ GO(getdomainname, iFpL)
+ //GO(__getdomainname_chk, 
++#ifdef ANDROID
++GOWM(getdtablesize, iFv) //%noE
++#else
+ GOW(getdtablesize, iFv)
++#endif
+ GOW(getegid, uFv)
+ GO(getentropy, iFpL)
+ GO(getenv, pFp)
+@@ -579,7 +711,11 @@ GO(getgrnam, pFp)
+ GO(getgrnam_r, iFpppLp)
+ GO(getgrouplist, iFpupp)
+ GOW(getgroups, iFip)
++#ifdef ANDROID
++GOM(__getgroups_chk, iFipL) //%noE
++#else
+ GO(__getgroups_chk, iFipL)
++#endif
+ GO(gethostbyaddr, pFpui)
+ GO(gethostbyaddr_r, iFpuippLpp)
+ GO(gethostbyname, pFp)
+@@ -651,9 +787,17 @@ GO(getpid, iFv)
+ GOW(getppid, iFv)
+ GOW(getpriority, iFuu)
+ GO(getprotobyname, pFp)
++#ifdef ANDROID
++GOM(getprotobyname_r, iFpppLp) //%noE
++#else
+ GO(getprotobyname_r, iFpppLp)
++#endif
+ GO(getprotobynumber, pFi)
++#ifdef ANDROID
++GOM(getprotobynumber_r, iFippLp) //%noE
++#else
+ GO(getprotobynumber_r, iFippLp)
++#endif
+ GO(getprotoent, pFv)
+ GO(getprotoent_r, iFppLp)
+ GOW(getpt, iFv)
+@@ -695,7 +839,11 @@ GOW(getrusage, iFip)
+ GO(getsecretkey, iFppp)
+ #endif
+ GO(getservbyname, pFpp)
++#ifdef ANDROID
++GOM(getservbyname_r, iFppppLp) //%noE
++#else
+ GO(getservbyname_r, iFppppLp)
++#endif
+ GO(getservbyport, pFip)
+ GO(getservbyport_r, iFipppLp)
+ GO(getservent, pFv)
+@@ -712,15 +860,27 @@ GO(getsgnam, pFp)
+ GO(getsgnam_r, iFpppLp)
+ #endif
+ GO(getsid, iFi)
++#ifdef ANDROID
++GOWM(getsockname, iFipp) //%noE
++#else
+ GOW(getsockname, iFipp)
++#endif
++#ifdef ANDROID
++GOWM(getsockopt, iFiiipp) //%noE
++#else
+ GOW(getsockopt, iFiiipp)
++#endif
+ GO(getsourcefilter, iFiupuppp)
+ GO(getspent, pFv)
+ GO(getspent_r, iFppLp)
+ GO(getspnam, pFp)
+ GO(getspnam_r, iFpppLp)
+ GO(getsubopt, iFppp)
++#ifdef ANDROID
++GOWM(gettext, pFp) //%noE
++#else
+ GOW(gettext, pFp)
++#endif
+ GOW(gettid, iFv)
+ GO(__gettimeofday, iFpp)
+ GO(gettimeofday, iFpp)
+@@ -757,13 +917,21 @@ GO(globfree, vFp)
+ GOW(globfree64, vFp)
+ GOW(glob_pattern_p, iFpi)
+ GO(gmtime, pFp)
++#ifdef ANDROID
++GOM(__gmtime_r, pFpp) //%noE
++#else
+ GO(__gmtime_r, pFpp)
++#endif
+ GOW(gmtime_r, pFpp)
+ GOW(gnu_dev_major, uFU)
+ GOW(gnu_dev_makedev, UFuu)
+ GOW(gnu_dev_minor, uFU)
+ GOW(gnu_get_libc_release, pFv)
++#ifdef ANDROID
++GOWM(gnu_get_libc_version, pFv) //%noE
++#else
+ GOW(gnu_get_libc_version, pFv)
++#endif
+ GO(grantpt, iFi)
+ GOW(group_member, iFu)
+ GOW(gsignal, iFi)
+@@ -775,7 +943,11 @@ GOW(hdestroy, vFv)
+ GOW(hdestroy_r, vFp)
+ //DATA(h_errlist, 
+ //DATAB(__h_errno, 
++#ifdef ANDROID
++GOM(__h_errno_location, pFv) //%noE
++#else
+ GO(__h_errno_location, pFv)
++#endif
+ GO(herror, vFp)
+ #ifdef STATICBUILD
+ //GO(host2netname, 
+@@ -838,7 +1010,11 @@ GOM(__inet_pton_chk, iFEippL)
+ GO(initgroups, iFpu)
+ GOM(init_module, iFEpLp)
+ GO(initstate, pFupL)
++#ifdef ANDROID
++GOM(initstate_r, iFupLp) //%noE
++#else
+ GO(initstate_r, iFupLp)
++#endif
+ GO(innetgr, iFpppp)
+ GO(inotify_add_watch, iFipu)
+ GO(inotify_init, iFv)
+@@ -1081,7 +1257,11 @@ GOW(iswcntrl, iFu)
+ GOW(iswcntrl_l, iFup)
+ //GO(__iswctype, 
+ GOW(iswctype, iFuL)
++#ifdef ANDROID
++GOM(__iswctype_l, iFuLL) //%noE
++#else
+ GO(__iswctype_l, iFuLL)
++#endif
+ GOW(iswctype_l, iFuLp)
+ GOW(iswdigit, iFu)
+ //GO(__iswdigit_l, 
+@@ -1263,12 +1443,20 @@ GO(malloc, pFL)
+ GOW(malloc_info, iFiS)
+ //GO(malloc_set_state, 
+ GOW(malloc_stats, vFv)
++#ifdef ANDROID
++GOM(malloc_trim, iFL) //%noE
++#else
+ GO(malloc_trim, iFL)
++#endif
+ GO(malloc_usable_size, LFp)
+ GOW(mallopt, iFii)
+ //DATAB(mallwatch, 
+ GO(mblen, iFpL)
++#ifdef ANDROID
++GOM(__mbrlen, LFpLp) //%noE
++#else
+ GO(__mbrlen, LFpLp)
++#endif
+ GO(mbrlen, LFpLp)
+ GO(mbrtoc16, LFppLp)
+ GOW(mbrtoc32, LFppLp)
+@@ -1280,7 +1468,11 @@ GO(__mbsnrtowcs_chk, LFppLLpL)
+ GO(mbsrtowcs, LFppLp)
+ GO(__mbsrtowcs_chk, LFppLpL)
+ GO(mbstowcs, LFppL)
++#ifdef ANDROID
++GOM(__mbstowcs_chk, LFppLL) //%noE
++#else
+ GO(__mbstowcs_chk, LFppLL)
++#endif
+ GO(mbtowc, iFppL)
+ //GOM(mcheck, iFp)
+ GO(mcheck_check_all, vFv)
+@@ -1309,19 +1501,47 @@ GO(__memset_chk, pFpiLL)
+ //GO(__mempcpy_small, 
+ //GO(__merge_grp, 
+ GO(mincore, iFpLp)
++#ifdef ANDROID
++GOWM(mkdir, iFpu) //%noE
++#else
+ GOW(mkdir, iFpu)
++#endif
++#ifdef ANDROID
++GOM(mkdirat, iFipu) //%noE
++#else
+ GO(mkdirat, iFipu)
++#endif
++#ifdef ANDROID
++GOM(mkdtemp, pFp) //%noE
++#else
+ GO(mkdtemp, pFp)
++#endif
+ GO(mkfifo, iFpu)
+ GO(mkfifoat, iFipu)
+ GO(mknod, iFpuU)
+ GO(mknodat, iFipuU)
++#ifdef ANDROID
++GOM(mkostemp, iFpi) //%noE
++#else
+ GO(mkostemp, iFpi)
++#endif
++#ifdef ANDROID
++GOWM(mkostemp64, iFpi) //%noE
++#else
+ GOW(mkostemp64, iFpi)
++#endif
+ GO(mkostemps, iFpii)
+ GOW(mkostemps64, iFpii)
++#ifdef ANDROID
++GOM(mkstemp, iFp) //%noE
++#else
+ GO(mkstemp, iFp)
++#endif
++#ifdef ANDROID
++GOWM(mkstemp64, iFp) //%noE
++#else
+ GOW(mkstemp64, iFp)
++#endif
+ GO(mkstemps, iFpi)
+ GOW(mkstemps64, iFpi)
+ GO(__mktemp, pFp)
+@@ -1375,7 +1595,11 @@ GO(munlockall, iFv)
+ //GO(__munmap, 
+ GOWM(munmap, iFEpL)
+ GO(muntrace, vFv)
++#ifdef ANDROID
++GOM(name_to_handle_at, iFipppi) //%noE
++#else
+ GO(name_to_handle_at, iFipppi)
++#endif
+ GO(__nanosleep, iFpp)
+ GOW(nanosleep, iFpp)
+ //GO(__nanosleep_nocancel, 
+@@ -1387,17 +1611,37 @@ GOW(nanosleep, iFpp)
+ GO(netname2host, iFppi)
+ GO(netname2user, iFppppp)
+ #endif
++#ifdef ANDROID
++GOM(__newlocale, pFipp) //%noE
++#else
+ GO(__newlocale, pFipp)
++#endif
++#ifdef ANDROID
++GOWM(newlocale, pFipp) //%noE
++#else
+ GOW(newlocale, pFipp)
++#endif
+ //GO(nfsservctl, 
+ GOM(nftw, iFEppii)
+ GOM(nftw64, iFEppii)
+ GOW(ngettext, pFppL)
+ GO(nice, iFi)
+ //DATAB(_nl_domain_bindings, 
++#ifdef ANDROID
++GOM(nl_langinfo, pFi) //%noE
++#else
+ GO(nl_langinfo, pFi)
++#endif
++#ifdef ANDROID
++GOM(__nl_langinfo_l, pFip) //%noE
++#else
+ GO(__nl_langinfo_l, pFip)
++#endif
++#ifdef ANDROID
++GOWM(nl_langinfo_l, pFip) //%noE
++#else
+ GOW(nl_langinfo_l, pFip)
++#endif
+ DATAB(_nl_msg_cat_cntr, 4)
+ GO(nrand48, lFp)
+ GOW(nrand48_r, iFppp)
+@@ -1447,16 +1691,36 @@ GOWM(open, iFEpON)
+ GO(__open_2, iFpO)
+ //GOW(__open64, 
+ GOWM(open64, iFEpON)
++#ifdef ANDROID
++GOM(__open64_2, iFpO) //%noE
++#else
+ GO(__open64_2, iFpO)
++#endif
+ //GO(__open64_nocancel, 
++#ifdef ANDROID
++GOWM(openat, iFipON) //%noE
++#else
+ GOW(openat, iFipON)
++#endif
+ GO(__openat_2, iFipO)
++#ifdef ANDROID
++GOWM(openat64, iFipON) //%noE
++#else
+ GOW(openat64, iFipON)
++#endif
++#ifdef ANDROID
++GOM(__openat64_2, iFipO) //%noE
++#else
+ GO(__openat64_2, iFipO)
++#endif
+ GO(open_by_handle_at, iFipi)
+ GOW(open_tree, iFipu)
+ //GO(__open_catalog, 
++#ifdef ANDROID
++GOWM(opendir, pFp) //%noE
++#else
+ GOW(opendir, pFp)
++#endif
+ GO(openlog, vFpii)
+ GOW(open_memstream, SFpp)
+ //GO(__open_nocancel, 
+@@ -1465,8 +1729,16 @@ DATA(optarg, 8)
+ DATA(opterr, 4)
+ DATA(optind, 4)
+ DATA(optopt, 4)
++#ifdef ANDROID
++GOM(__overflow, iFSi) //%noE
++#else
+ GO(__overflow, iFSi)
++#endif
++#ifdef ANDROID
++GOM(parse_printf_format, LFpLp) //%noE
++#else
+ GO(parse_printf_format, LFpLp)
++#endif
+ #ifdef STATICBUILD
+ //GO(passwd2des, 
+ #else
+@@ -1485,11 +1757,31 @@ GO(__pipe, iFp)
+ GOW(pipe, iFp)
+ GO(pipe2, iFpO)
+ //GO(pivot_root, 
++#ifdef ANDROID
++GOM(pkey_alloc, iFuu) //%noE
++#else
+ GO(pkey_alloc, iFuu)
++#endif
++#ifdef ANDROID
++GOM(pkey_free, iFi) //%noE
++#else
+ GO(pkey_free, iFi)
++#endif
++#ifdef ANDROID
++GOM(pkey_get, iFi) //%noE
++#else
+ GO(pkey_get, iFi)
++#endif
++#ifdef ANDROID
++GOM(pkey_mprotect, iFpLii) //%noE
++#else
+ GO(pkey_mprotect, iFpLii)
++#endif
++#ifdef ANDROID
++GOM(pkey_set, iFiu) //%noE
++#else
+ GO(pkey_set, iFiu)
++#endif
+ #ifdef STATICBUILD
+ //GO(pmap_getmaps, pFp)
+ //GO(pmap_getport, WFpLLu)
+@@ -1627,9 +1919,17 @@ GO(quotactl, iFipip)
+ GO(raise, iFi)
+ GO(rand, iFv)
+ GOW(random, lFv)
++#ifdef ANDROID
++GOWM(random_r, iFpp) //%noE
++#else
+ GOW(random_r, iFpp)
++#endif
+ GO(rand_r, iFp)
++#ifdef ANDROID
++GOM(__rawmemchr, pFpi) //%noE
++#else
+ GO(__rawmemchr, pFpi)
++#endif
+ GO(rawmemchr, pFpi)
+ GO(rcmd, iFpWpppp)
+ GO(rcmd_af, iFpWppppW)
+@@ -1681,7 +1981,11 @@ GOW(re_match_2, iFppipiipi)
+ GO(remove, iFp)
+ GO(removexattr, iFpp)
+ GO(remque, vFp)
++#ifdef ANDROID
++GOM(rename, iFpp) //%noE
++#else
+ GO(rename, iFpp)
++#endif
+ GOW(renameat, iFipip)
+ GOW(renameat2, iFipipu)
+ //DATAB(_res, 
+@@ -1690,22 +1994,46 @@ GOW(re_search_2, iFppipiiipi)
+ GOW(re_set_registers, vFppupp)
+ GOW(re_set_syntax, LFL)
+ //DATAB(_res_hconf, 
++#ifdef ANDROID
++GOM(__res_iclose, vFpi) //%noE
++#else
+ GO(__res_iclose, vFpi)
++#endif
++#ifdef ANDROID
++GOM(__res_init, iFv) //%noE
++#else
+ GO(__res_init, iFv)
++#endif
+ GO(__res_nclose, vFp)
+ GO(__res_ninit, iFp)
+ GO(res_nsearch, iFppiipi)
++#ifdef ANDROID
++GOM(__resolv_context_get, pFv) //%noE
++#else
+ //GO(__resolv_context_get, 
++#endif
++#ifdef ANDROID
++GOM(__resolv_context_get_override, pFp) //%noE
++#else
+ //GO(__resolv_context_get_override, 
++#endif
+ //GO(__resolv_context_get_preinit, 
++#ifdef ANDROID
++GOM(__resolv_context_put, vFp) //%noE
++#else
+ //GO(__resolv_context_put, 
++#endif
+ //DATA(__resp, 
+ #ifdef STATICBUILD
+ //GO(__res_randomid, 
+ #else
+ GO(__res_randomid, uFv)
+ #endif
++#ifdef ANDROID
++GOM(__res_state, pFv) //%noE
++#else
+ GO(__res_state, pFv)
++#endif
+ //DATAB(re_syntax_options, 8)
+ GOW(revoke, iFp)
+ GO(rewind, vFS)
+@@ -1714,7 +2042,11 @@ GO(rexec, iFpipppp)
+ GO(rexec_af, iFpippppW)
+ //DATAB(rexecoptions, 
+ GO(rindex, pFpi)
++#ifdef ANDROID
++GOWM(rmdir, iFp) //%noE
++#else
+ GOW(rmdir, iFp)
++#endif
+ #ifdef STATICBUILD
+ //DATAB(rpc_createerr, 
+ //GO(_rpc_dtablesize, iFv)
+@@ -1838,7 +2170,11 @@ GO(setservent, vFi)
+ GO(setsgent, vFv)
+ #endif
+ GOW(setsid, iFv)
++#ifdef ANDROID
++GOWM(setsockopt, iFiiipu) //%noE
++#else
+ GOW(setsockopt, iFiiipu)
++#endif
+ GO(setsourcefilter, iFiupuuup)
+ GO(setspent, vFv)
+ GOW(setstate, pFp)
+@@ -1880,7 +2216,11 @@ GO(siggetmask, iFv)
+ GO(sighold, iFi)
+ GO(sigignore, iFi)
+ GO(siginterrupt, iFii)
++#ifdef ANDROID
++GOM(sigisemptyset, iFp) //%noE
++#else
+ GO(sigisemptyset, iFp)
++#endif
+ //GO(__sigismember, 
+ GO(sigismember, iFpi)
+ GOM(siglongjmp, vFEpi)
+@@ -1920,7 +2260,11 @@ GOWM(snprintf, iFEpLpV)
+ GOWM(__snprintf_chk, iFEpLiLpV)
+ GO(sockatmark, iFi)
+ GO(__socket, iFiii)
++#ifdef ANDROID
++GOWM(socket, iFiii) //%noE
++#else
+ GOW(socket, iFiii)
++#endif
+ GOW(socketpair, iFiiip)
+ GO(splice, lFipipLu)
+ GOM(sprintf, iFEppV)
+@@ -1942,9 +2286,17 @@ GOM(__stack_chk_fail, vFEv)
+ GOM(stat, iFEpp)
+ GOM(stat64, iFEpp)
+ //GO(__statfs, 
++#ifdef ANDROID
++GOWM(statfs, iFpp) //%noE
++#else
+ GOW(statfs, iFpp)
++#endif
+ GOW(statfs64, iFpp)
++#ifdef ANDROID
++GOWM(statvfs, iFpp) //%noE
++#else
+ GOW(statvfs, iFpp)
++#endif
+ GOW(statvfs64, iFpp)
+ GOM(statx, iFEipiup)
+ DATA(stderr, 8)
+@@ -1971,7 +2323,11 @@ GO(strchr, pFpi)
+ GO(strchrnul, pFpi)
+ GO(strcmp, iFpp)
+ GO(strcoll, iFpp)
++#ifdef ANDROID
++GOM(__strcoll_l, iFppp) //%noE
++#else
+ GO(__strcoll_l, iFppp)
++#endif
+ GOW(strcoll_l, iFppp)
+ GO(strcpy, pFpp)
+ GO(__strcpy_chk, pFppL)
+@@ -1980,14 +2336,26 @@ GO(strcspn, LFpp)
+ //GO(__strcspn_c1, 
+ //GO(__strcspn_c2, 
+ //GO(__strcspn_c3, 
++#ifdef ANDROID
++GOM(__strdup, pFp) //%noE
++#else
+ GO(__strdup, pFp)
++#endif
+ GOW(strdup, pFp)
+ GO(strerror, pFi)
+ GOW(strerrorname_np, pFi)
+ GOW(strerrordesc_np, pFi)
+ GO(strerror_l, pFip)
++#ifdef ANDROID
++GOM(__strerror_r, pFipL) //%noE
++#else
+ GO(__strerror_r, pFipL)
++#endif
++#ifdef ANDROID
++GOM(strerror_r, pFipL) //%noE
++#else
+ GO(strerror_r, pFipL)
++#endif
+ #ifdef STATICBUILD
+ //GO(strfmon, lFpLpV)
+ //GO(__strfmon_l, 
+@@ -2001,12 +2369,20 @@ GO(strfromf, iFpLpf)
+ GOD(strfromf128, iFpLpD, strfromf64)
+ GO(strfromf32, iFpLpf)
+ GO(strfromf32x, iFpLpd)
++#ifdef ANDROID
++GOM(strfromf64, iFpLpd) //%noE
++#else
+ GO(strfromf64, iFpLpd)
++#endif
+ GOD(strfromf64x, iFpLpD, strfromf32x)
+ GOD(strfroml, iFpLpD, strfromd)
+ GO(strfry, pFp)
+ GO(strftime, LFpLpp)
++#ifdef ANDROID
++GOM(__strftime_l, LFpLppL) //%noE
++#else
+ GO(__strftime_l, LFpLppL)
++#endif
+ GOW(strftime_l, LFpLppp)
+ GO(strlen, LFp)
+ GO(__strlcpy_chk, LFppLL)
+@@ -2040,7 +2416,11 @@ GO(strspn, LFpp)
+ GO(strstr, pFpp)
+ GO(strtod, dFpp)
+ GO(__strtod_internal, dFppi)
++#ifdef ANDROID
++GOM(__strtod_l, dFppp) //%noE
++#else
+ GO(__strtod_l, dFppp)
++#endif
+ GOW(strtod_l, dFppp)
+ //GO(__strtod_nan, 
+ GO(strtof, fFpp)
+@@ -2052,12 +2432,20 @@ GOW(strtof32, fFpp)
+ GOW(strtof32_l, fFppp)
+ GOW(strtof32x, dFpp)
+ GOW(strtof32x_l, dFppp)
++#ifdef ANDROID
++GOWM(strtof64, dFpp) //%noE
++#else
+ GOW(strtof64, dFpp)
++#endif
+ GOW(strtof64_l, dFppp)
+ GOWD(strtof64x, DFpp, strtof32x)
+ GOWD(strtof64x_l, DFppp, strtof32x_l)
+ GO(__strtof_internal, fFppi)
++#ifdef ANDROID
++GOM(__strtof_l, fFppp) //%noE
++#else
+ GO(__strtof_l, fFppp)
++#endif
+ GOW(strtof_l, fFppp)
+ //GO(__strtof_nan, 
+ GO(strtoimax, IFppi)
+@@ -2069,7 +2457,11 @@ GO2(__isoc23_wcstoll, IFppi, wcstoll)
+ GO2(__isoc23_wcstoul, LFppi, wcstoul)
+ GO2(__isoc23_wcstoull, UFppi, wcstoull)
+ GO(strtok, pFpp)
++#ifdef ANDROID
++GOM(__strtok_r, pFppp) //%noE
++#else
+ GO(__strtok_r, pFppp)
++#endif
+ GOW(strtok_r, pFppp)
+ //GO(__strtok_r_1c, 
+ GO(strtol, lFppi)
+@@ -2085,7 +2477,11 @@ GOW(strtoll, IFppi)
+ GO(__strtoll_internal, IFppii)
+ GOW(__strtoll_l, IFppip)
+ GOW(strtoll_l, IFppip)
++#ifdef ANDROID
++GOW2(strtoq, IFppi, strtoll)
++#else
+ GOW(strtoq, IFppi)
++#endif
+ GO(strtoul, LFppi)
+ GO(__strtoul_internal, LFppii)
+ //GO(__strtoul_l, 
+@@ -2096,11 +2492,19 @@ GOW(__strtoull_l, UFppip)
+ GOW(strtoull_l, UFppip)
+ GO(strtoumax, UFppi)
+ GO2(__isoc23_strtoumax, UFppi, strtoumax)
++#ifdef ANDROID
++GOW2(strtouq, UFppi, strtoull)
++#else
+ GOW(strtouq, UFppi)
++#endif
+ //GO(__strverscmp, 
+ GOW(strverscmp, iFpp)
+ GO(strxfrm, LFppL)
++#ifdef ANDROID
++GOM(__strxfrm_l, LFppLL) //%noE
++#else
+ GO(__strxfrm_l, LFppLL)
++#endif
+ GO(strxfrm_l, LFppLp)
+ //GO(stty, 
+ #ifdef STATICBUILD
+@@ -2217,7 +2621,11 @@ GOWM(tdestroy, vFEpp)
+ GO(tee, lFiiLu)
+ GO(telldir, lFp)
+ GO(tempnam, pFpp)
++#ifdef ANDROID
++GOWM(textdomain, pFp) //%noE
++#else
+ GOW(textdomain, pFp)
++#endif
+ //GO(__tfind, 
+ GOWM(tfind, pFEppp)
+ GOW(tgkill, iFiii)
+@@ -2252,7 +2660,11 @@ GO(timerfd_gettime, iFip)
+ GO(timerfd_settime, iFiipp)
+ GOW(times, lFp)
+ GO(timespec_get, iFpi)
++#ifdef ANDROID
++DATAM(__timezone, 8)
++#else
+ DATAB(__timezone, 8)
++#endif
+ DATAV(timezone, 8)
+ GO(tmpfile, SFv)
+ GOW(tmpfile64, SFv)
+@@ -2273,13 +2685,25 @@ GOW(towctrans, uFup)
+ //GO(__towctrans_l, 
+ GOW(towctrans_l, uFupp)
+ GOW(towlower, uFu)
++#ifdef ANDROID
++GOM(__towlower_l, iFip) //%noE
++#else
+ GO(__towlower_l, iFip)
++#endif
+ GOW(towlower_l, uFup)
+ GOW(towupper, uFu)
++#ifdef ANDROID
++GOM(__towupper_l, iFip) //%noE
++#else
+ GO(__towupper_l, iFip)
++#endif
+ GOW(towupper_l, uFup)
+ //GO(tr_break, 
++#ifdef ANDROID
++GOM(truncate, iFpl) //%noE
++#else
+ GO(truncate, iFpl)
++#endif
+ GO(truncate64, iFpI)
+ //GO(__tsearch, 
+ GOWM(tsearch, pFEppp)
+@@ -2294,7 +2718,11 @@ DATA(__tzname, 16)
+ DATAV(tzname, 16)
+ GOW(tzset, vFv)
+ GO(ualarm, uFuu)
++#ifdef ANDROID
++GOM(__uflow, iFS) //%noE
++#else
+ GO(__uflow, iFS)
++#endif
+ GOW(ulckpwdf, iFv)
+ #ifdef STATICBUILD
+ //GOW(ulimit, lFiV)
+@@ -2305,19 +2733,39 @@ GOW(umask, uFu)
+ GOW(umount, iFp)
+ GOW(umount2, iFpi)
+ GOWM(uname, iFp)
++#ifdef ANDROID
++GOM(__underflow, iFp) //%noE
++#else
+ GO(__underflow, iFp)
++#endif
+ GOW(ungetc, iFiS)
+ GO(ungetwc, uFuS)
++#ifdef ANDROID
++GOWM(unlink, iFp) //%noE
++#else
+ GOW(unlink, iFp)
++#endif
++#ifdef ANDROID
++GOM(unlinkat, iFipi) //%noE
++#else
+ GO(unlinkat, iFipi)
++#endif
+ GO(unlockpt, iFi)
+ GOW(unsetenv, iFp)
+ GO(unshare, iFi)
+ GOW(updwtmp, vFpp)
+ GO(updwtmpx, vFpp)
+ //GO(uselib, 
++#ifdef ANDROID
++GOM(__uselocale, pFp) //%noE
++#else
+ GO(__uselocale, pFp)
++#endif
++#ifdef ANDROID
++GOWM(uselocale, pFp) //%noE
++#else
+ GOW(uselocale, pFp)
++#endif
+ #ifdef STATICBUILD
+ //GO(user2netname, 
+ #else
+@@ -2327,7 +2775,11 @@ GO(usleep, iFu)
+ //GO(ustat, 
+ GO(utime, iFpp)
+ GO(utimensat, iFippi)
++#ifdef ANDROID
++GOWM(utimes, iFpp) //%noE
++#else
+ GOW(utimes, iFpp)
++#endif
+ GOW(utmpname, iFp)
+ GO(utmpxname, iFp)
+ GO(valloc, pFL)
+@@ -2396,14 +2848,22 @@ GO(wcschr, pFpi)
+ GO(wcschrnul, pFpi)
+ GO(wcscmp, iFpp)
+ GOW(wcscoll, iFpp)
++#ifdef ANDROID
++GOM(__wcscoll_l, iFppp) //%noE
++#else
+ GO(__wcscoll_l, iFppp)
++#endif
+ GOW(wcscoll_l, iFppp)
+ GO(wcscpy, pFpp)
+ GO(__wcscpy_chk, pFppL)
+ GO(wcscspn, LFpp)
+ GO(wcsdup, pFp)
+ GO(wcsftime, LFpLpp)
++#ifdef ANDROID
++GOM(__wcsftime_l, LFpLppp) //%noE
++#else
+ GO(__wcsftime_l, LFpLppp)
++#endif
+ GO(wcsftime_l, LFpLppp)
+ GO(wcslen, LFp)
+ GO(wcsncasecmp, iFppL)
+@@ -2413,7 +2873,11 @@ GO(wcsncat, pFppL)
+ GO(__wcsncat_chk, pFppLL)
+ GO(wcsncmp, iFppL)
+ GOW(wcsncpy, pFppL)
++#ifdef ANDROID
++GOM(__wcsncpy_chk, pFppLL) //%noE
++#else
+ GO(__wcsncpy_chk, pFppLL)
++#endif
+ GO(wcsnlen, LFpL)
+ GO(wcsnrtombs, LFppLLp)
+ #ifdef STATICBUILD
+@@ -2482,7 +2946,11 @@ GOW(wcstouq, UFppi)
+ GOW(wcswcs, pFpp)
+ GO(wcswidth, iFpL)
+ GO(wcsxfrm, LFppL)
++#ifdef ANDROID
++GOM(__wcsxfrm_l, LFppLL) //%noE
++#else
+ GO(__wcsxfrm_l, LFppLL)
++#endif
+ GO(wcsxfrm_l, LFppLp)
+ GO(wctob, iFu)
+ GO(wctomb, iFpi)
+@@ -2492,14 +2960,26 @@ GOW(wctrans, pFp)
+ GOW(wctrans_l, pFpp)
+ GOW(wctype, LFp)
+ GOW(wctype_l, LFpp)
++#ifdef ANDROID
++GOM(__wctype_l, LFpp) //%noE
++#else
+ GO(__wctype_l, LFpp)
++#endif
+ GO(wcwidth, iFi)
+ GO(wmemchr, pFpiL)
+ GO(wmemcmp, iFppL)
+ GOW(wmemcpy, pFppL)
++#ifdef ANDROID
++GOM(__wmemcpy_chk, pFppLL) //%noE
++#else
+ GO(__wmemcpy_chk, pFppLL)
++#endif
+ GO(wmemmove, pFppL)
++#ifdef ANDROID
++GOM(__wmemmove_chk, pFppLL) //%noE
++#else
+ GO(__wmemmove_chk, pFppLL)
++#endif
+ GOW(wmempcpy, pFppL)
+ //GO(__wmempcpy_chk, 
+ GO(wmemset, pFpiL)
+@@ -2666,9 +3146,17 @@ GO(xdr_void, iFv)
+ GOM(__xmknod, iFEipup)
+ GOM(__xmknodat, iFEiipup)
+ #endif
++#ifdef ANDROID
++GOM(__xpg_basename, pFp) //%noE
++#else
+ GO(__xpg_basename, pFp)
++#endif
+ GOW(__xpg_sigpause, iFi)
++#ifdef ANDROID
++GOM(__xpg_strerror_r, pFipL) //%noE
++#else
+ GO(__xpg_strerror_r, pFipL)
++#endif
+ //GOM(xprt_register, vFp)
+ //GOM(xprt_unregister, vFp)
+ GOM(__xstat, iFEipp)
+@@ -3183,3 +3671,45 @@ GO(ynf, fFif)
+ // __ynf_finite
+ // __yn_finite
+ GOD(ynl, DFiD, yn)
++
++#ifdef ANDROID
++GOM(pthread_cancel, iFL) //%noE
++GOM(pthread_setcanceltype, iFip) //%noE
++GOM(shm_open, iFpOu) //%noE
++GOM(shm_unlink, iFp) //%noE
++GOM(mq_getattr, iFip) //%noE
++#else
++GO(pthread_cancel, iFL)
++GO(pthread_setcanceltype, iFip)
++GO(shm_open, iFpOu)
++GO(shm_unlink, iFp)
++GO(mq_getattr, iFip)
++#endif
++
++#ifdef ANDROID
++GOM(res_hnok, iFp) //%noE
++GOM(res_dnok, iFp) //%noE
++GOM(__libc_ns_samename, iFpp) //%noE
++GOM(__libc_ns_makecanon, iFpp) //%noE
++GOM(__res_context_query, iFpppiippp) //%noE
++GOM(__res_get_nsaddr, pFpL) //%noE
++GOM(__res_context_hostalias, pFppp) //%noE
++GOM(__libc_dn_expand, iFppppi) //%noE
++GOM(__libc_res_nameinquery, iFpiipp) //%noE
++GOM(__libc_res_queriesmatch, iFpppp) //%noE
++GOM(__res_context_search, iFpppiippp) //%noE
++GOM(pthread_getattr_np, iFEpp)
++#else
++GO(res_hnok, iFp)
++GO(res_dnok, iFp)
++GO(__libc_ns_samename, iFpp)
++GO(__libc_ns_makecanon, iFpp)
++GO(__res_context_query, iFpppiippp)
++GO(__res_get_nsaddr, pFpL)
++GO(__res_context_hostalias, pFppp)
++GO(__libc_dn_expand, iFppppi)
++GO(__libc_res_nameinquery, iFpiipp)
++GO(__libc_res_queriesmatch, iFpppp)
++GO(__res_context_search, iFpppiippp)
++GO(pthread_getattr_np, iFLp)
++#endif
+diff --git a/src/wrapped/wrappedlibpthread.c b/src/wrapped/wrappedlibpthread.c
+index aefce4154..977f6abd8 100644
+--- a/src/wrapped/wrappedlibpthread.c
++++ b/src/wrapped/wrappedlibpthread.c
+@@ -61,6 +61,25 @@ EXPORT void my___pthread_initialize()
+     // nothing, the lib initialize itself now
+ }
+ 
++#ifdef ANDROID
++// glibc's static initializers (PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP, ...) put the mutex type in the "kind" field (offset 16); bionic keeps it in the
++// top bits of the first word. Give a mutex that is still untouched the type its x86 initializer asked for.
++static inline void androidMutexKind(void* m)
++{
++    int kind = *(int*)((uintptr_t)m + 16) & 3;
++    if(!kind) return;
++    int bits = kind==1 ? 0x4000 : kind==2 ? 0x8000 : 0;
++    if(!bits) return;
++    int zero = 0;
++    __atomic_compare_exchange_n((int*)m, &zero, bits, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
++}
++EXPORT int my_pthread_mutex_lock(void* m) { androidMutexKind(m); return pthread_mutex_lock(m); }
++EXPORT int my___pthread_mutex_lock(void* m) __attribute__((alias("my_pthread_mutex_lock")));
++EXPORT int my_pthread_mutex_trylock(void* m) { androidMutexKind(m); return pthread_mutex_trylock(m); }
++EXPORT int my___pthread_mutex_trylock(void* m) __attribute__((alias("my_pthread_mutex_trylock")));
++EXPORT int my_pthread_mutex_timedlock(void* m, void* t) { androidMutexKind(m); return pthread_mutex_timedlock(m, t); }
++#endif
++
+ #ifdef STATICBUILD
+ #include <semaphore.h>
+ #include <signal.h>
+diff --git a/src/wrapped/wrappedlibpthread_private.h b/src/wrapped/wrappedlibpthread_private.h
+index 699db58cf..308d9cd19 100644
+--- a/src/wrapped/wrappedlibpthread_private.h
++++ b/src/wrapped/wrappedlibpthread_private.h
+@@ -87,7 +87,11 @@ GO(pthread_barrier_init, iFppu)
+ GOM(pthread_barrier_init, iFEppu)
+ #endif
+ GO(pthread_barrier_wait, iFp)
++#ifdef ANDROID
++GOM(pthread_cancel, iFL) //%noE
++#else
+ GO(pthread_cancel, iFL)
++#endif
+ GO(pthread_clockjoin_np, iFppip)
+ GOM(_pthread_cleanup_pop, vFEpi)
+ GOM(_pthread_cleanup_pop_restore, vFEpi)
+@@ -213,12 +217,32 @@ GO(pthread_mutex_init, iFpp)
+ GOM(__pthread_mutex_init, iFpp)
+ GOM(pthread_mutex_init, iFpp)
+ #endif
++#ifdef ANDROID
++GOM(__pthread_mutex_lock, iFp) //%noE
++#else
+ GO(__pthread_mutex_lock, iFp)
++#endif
++#ifdef ANDROID
++GOM(pthread_mutex_lock, iFp) //%noE
++#else
+ GO(pthread_mutex_lock, iFp)
++#endif
+ GO(pthread_mutex_setprioceiling, iFpip)
++#ifdef ANDROID
++GOM(pthread_mutex_timedlock, iFpp) //%noE
++#else
+ GO(pthread_mutex_timedlock, iFpp)
++#endif
++#ifdef ANDROID
++GOM(__pthread_mutex_trylock, iFp) //%noE
++#else
+ GO(__pthread_mutex_trylock, iFp)
++#endif
++#ifdef ANDROID
++GOM(pthread_mutex_trylock, iFp) //%noE
++#else
+ GO(pthread_mutex_trylock, iFp)
++#endif
+ GO(__pthread_mutex_unlock, iFp)
+ GO(pthread_mutex_unlock, iFp)
+ GOM(pthread_once, iFEpp)
+@@ -251,7 +275,11 @@ GO(pthread_self, LFv)
+ GO2(pthread_setaffinity_np@GLIBC_2.3.3, iFEpp, my_pthread_setaffinity_np_old)
+ GOM(pthread_setaffinity_np, iFEpLp)
+ GO(pthread_setcancelstate, iFip)
++#ifdef ANDROID
++GOM(pthread_setcanceltype, iFip) //%noE
++#else
+ GO(pthread_setcanceltype, iFip)
++#endif
+ GO(pthread_setconcurrency, iFi)
+ GO(pthread_setname_np, iFpp)
+ GO(pthread_setschedparam, iFLip)
+diff --git a/src/wrapped/wrappedlibrt_private.h b/src/wrapped/wrappedlibrt_private.h
+index e6a82143d..07e7e1c3c 100644
+--- a/src/wrapped/wrappedlibrt_private.h
++++ b/src/wrapped/wrappedlibrt_private.h
+@@ -30,7 +30,11 @@ GO(clock_settime, iFip)
+ GOM(lio_listio, iFEipip)
+ // lio_listio64
+ GO(mq_close, iFi)
++#ifdef ANDROID
++GOM(mq_getattr, iFip) //%noE
++#else
+ GO(mq_getattr, iFip)
++#endif
+ GO(mq_notify, iFip)
+ GO(mq_open, iFpONN)
+ GO(__mq_open_2, iFpO)
+@@ -40,8 +44,16 @@ GO(mq_setattr, iFipp)
+ GO(mq_timedreceive, lFipLpp)
+ GO(mq_timedsend, iFipLup)
+ GO(mq_unlink, iFp)
++#ifdef ANDROID
++GOM(shm_open, iFpOu) //%noE
++#else
+ GO(shm_open, iFpOu)
++#endif
++#ifdef ANDROID
++GOM(shm_unlink, iFp) //%noE
++#else
+ GO(shm_unlink, iFp)
++#endif
+ GOM(timer_create, iFEipp)
+ GO(timer_delete, iFp)
+ GO(timer_getoverrun, iFp)
+diff --git a/src/wrapped/wrappedvulkan.c b/src/wrapped/wrappedvulkan.c
+index 8d642397d..fc851f44a 100644
+--- a/src/wrapped/wrappedvulkan.c
++++ b/src/wrapped/wrappedvulkan.c
+@@ -59,6 +59,9 @@ static void* resolveSymbol(x64emu_t* emu, void* symbol, void* fnc, const char* r
+ {
+     // get wrapper
+     symbol1_t *s = getWrappedSymbol(emu, rname, 1);
++    // The driver knows more functions than Box64 has wrappers for (a newer Mesa lists vkCmdDispatchTileQCOM): say
++    // the function does not exist rather than dereference nothing, the program checks the result for NULL.
++    if(!s) return NULL;
+ 
+     khint_t k = kh_get(symbolmap, emu->context->vkwrappers, rname);
+     const char* constname = kh_key(emu->context->vkwrappers, k);

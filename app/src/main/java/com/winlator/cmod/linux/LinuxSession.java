@@ -430,6 +430,10 @@ public final class LinuxSession {
         writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
 
+        if (LinuxBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
+            Launch bionic = LinuxBionicSession.build(context, imageFs, container, guestCommand, guestEnv, home);
+            if (bionic != null) return bionic;
+        }
         if (noProot(container) && !runsOnFex(context, container, programGuestPath) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
             Launch direct = noProotLaunch(context, rt, home, argv, guestEnv, guestCommand);
             if (direct != null) return direct;
@@ -959,7 +963,8 @@ public final class LinuxSession {
         File shim = new File(dir, name);
         try (java.io.InputStream in = context.getAssets().open("linux/" + name)) {
             byte[] data = in.readAllBytes();
-            if (!shim.isFile() || shim.length() != data.length) {
+            // The same size is not the same file (a rebuilt binary can come out as long as the last one): the bytes are compared.
+            if (!shim.isFile() || shim.length() != data.length || !java.util.Arrays.equals(java.nio.file.Files.readAllBytes(shim.toPath()), data)) {
                 dir.mkdirs();
                 File temp = new File(dir, name + ".tmp");
                 try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {

@@ -22,3 +22,6 @@ ls -l libmimalloc_compat_x64.so
 # 32-bit x86 programs (a 32-bit game under FEX): the same shim for that architecture, with the gamepad's events in the 32-bit layout.
 $ZIG cc -target x86-linux-gnu.2.17 -shared -fPIC -O2 -Wall -o libskyshim_x86.so skyshim.c -ldl
 ls -l libskyshim_x86.so
+# Android Box64 (LinuxBionicSession): stands in for the OpenGL libraries of the root filesystem, which cannot work there.
+$ZIG cc -target x86_64-linux-gnu.2.17 -shared -fPIC -O1 -Wall -o libskynogl_x64.so skynogl.c
+ls -l libskynogl_x64.so
