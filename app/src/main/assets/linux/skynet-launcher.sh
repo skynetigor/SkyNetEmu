@@ -80,16 +80,6 @@ if [ "$game32" = 1 ] && [ -f "$SKY_FEX_GL32_SCRIPT" ]; then
     . "$SKY_FEX_GL32_SCRIPT"
     sky_gl32_mesa_env
 fi
-# The shortcut's launch options for this game (LinuxSession.writeSteamLaunchOptions): variables, a wrapper before the command, arguments after.
-sky_wrap=(); sky_args=()
-[ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.launch" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.launch"
-[ "${#sky_wrap[@]}" -gt 0 ] && cmd=("${sky_wrap[@]}" "${cmd[@]}")
-[ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
-{
-    echo "== $(date) skynet-launcher"
-    echo "args: $*"
-    echo "run: ${cmd[*]}"
-} >> "$log" 2>&1
 # the Steam runtime's overlay libraries are not there; Steam's own preload would only produce warnings
 unset LD_PRELOAD
 # the client draws in software; the game gets the container's OpenGL driver (Zink on Turnip) back
@@ -119,6 +109,17 @@ if [ -n "$SKY_MIMALLOC_STUB" ] && [ -f "$SKY_MIMALLOC_STUB" ]; then
         esac
     done
 fi
+# Apply the game's profile and shortcut options after all runtime defaults. Explicit environment variables from the
+# shortcut editor win over launch-option assignments too (LinuxSession.writeSteamLaunchOptions merges them).
+sky_wrap=(); sky_args=()
+[ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.launch" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.launch"
+[ "${#sky_wrap[@]}" -gt 0 ] && cmd=("${sky_wrap[@]}" "${cmd[@]}")
+[ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
+{
+    echo "== $(date) skynet-launcher"
+    echo "args: $*"
+    echo "run: ${cmd[*]}"
+} >> "$log" 2>&1
 # Not exec: the game's exit status goes to the log (a signal shows as 128+N), and Steam's stop request still reaches it.
 "${cmd[@]}" >> "$log" 2>&1 &
 game=$!

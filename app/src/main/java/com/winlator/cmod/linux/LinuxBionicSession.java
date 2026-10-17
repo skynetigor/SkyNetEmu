@@ -174,11 +174,6 @@ public final class LinuxBionicSession {
         File shm = new File(context.getCacheDir(), "shm");
         shm.mkdirs();
         env.put("BOX64_SHM_DIR", shm.getPath());
-        for (int i = 0; i < nenv; i++) {
-            String entry = guestCommand[first + i];
-            int eq = entry.indexOf('=');
-            if (eq > 0) env.put(entry.substring(0, eq), entry.substring(eq + 1).replace("/root", homePath));
-        }
 
         // A game with an embedded Chromium looks for icudtl.dat and its .pak files in the game's folder, one level above the program's, where
         // the depot has none (the glibc session has libskyshim_x64 open them from the program's folder): links stand in for them.
@@ -206,6 +201,13 @@ public final class LinuxBionicSession {
                 int eq = line.indexOf('=');
                 if (eq > 0 && !line.startsWith("#")) env.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
             }
+        }
+
+        // The profile and shortcut's explicit variables override runtime defaults and diagnostic environment files.
+        for (int i = 0; i < nenv; i++) {
+            String entry = guestCommand[first + i];
+            int eq = entry.indexOf('=');
+            if (eq > 0) env.put(entry.substring(0, eq), entry.substring(eq + 1).replace("/root", homePath));
         }
 
         java.util.ArrayList<String> argv = new java.util.ArrayList<>();

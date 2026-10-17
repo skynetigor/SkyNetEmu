@@ -115,7 +115,9 @@ public final class LinuxSession {
         String path = shortcut.path;
         if (isSteam(path)) return steamCommand("", false, true);
         GameProfiles.Effective profile = GameProfiles.resolve(context, container, shortcut);
-        LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA));
+        LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
+                shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS));
+        LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
         if (isSteamGame(path)) {
             String appId = steamAppId(path);
             if (!appId.matches("\\d+")) return refusal("Not a Steam game: " + path);
@@ -125,14 +127,12 @@ public final class LinuxSession {
                     return refusal("The game's program " + profile.executableGuest + " is not there. Turn off \"Launch without Steam\" "
                             + "in the shortcut's settings to start the game through Steam.");
                 }
-                return directCommand(context, container, profile.executableGuest,
-                        LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own));
+                return directCommand(context, container, profile.executableGuest, options);
             }
             // A Steam game starts the client without its window unless the shortcut asks for the whole client.
-            writeSteamLaunchOptions(container, appId, own);
+            writeSteamLaunchOptions(container, appId, options);
             return steamCommand(appId, !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL)), false);
         }
-        LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
         return directCommand(context, container, path, options);
     }
 

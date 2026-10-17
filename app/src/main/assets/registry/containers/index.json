@@ -89,20 +89,22 @@
       ]
     },
     {
-      "id": "proton9-x64-box64-zink-dxvk231",
-      "name": "Zink + DXVK 2.3.1, 1024x768",
-      "file": "containers/proton9-x64-box64-zink-dxvk231.wcfg",
-      "description": "Runs at Ultra graphics on a Galaxy Z Fold8 Ultra. Proton 9.0 x86_64, Box64 0.4.4 (PERFORMANCE), DXVK 2.3.1, Zink on the system Vulkan driver, 1024x768. Frame generation is left off: in our logs it crashed the game when the swapchain was created.",
-      "socs": [],
+      "id": "tomb-raider-2013-linux-fex-performance",
+      "name": "Linux, FEX Performance + TSO",
+      "platform": "linux",
+      "file": "containers/tomb-raider-2013-linux-fex-performance.wcfg",
+      "description": "Tomb Raider (2013), native 32-bit Steam build 9573671. FEX 2610 Performance with TSO enabled, Ubuntu 24.04 rootfs, 32-bit OpenGL thunk, NVIDIA vendor override, Zink and Turnip 26.3 for Adreno 8xx. Startup and an in-game scene checked on SM-F976B; long-session stability is untested. Keep the game in the container's internal storage.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
       "channel": "stable",
       "tags": [
-        "Ultra settings",
-        "Galaxy Z Fold8 Ultra",
+        "Linux",
+        "FEX",
+        "32-bit",
+        "TSO",
         "Zink",
-        "DXVK 2.3.1",
-        "Proton 9",
-        "Box64",
-        "1024x768"
+        "Turnip"
       ],
       "testedOn": [
         "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"

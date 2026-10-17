@@ -3,6 +3,45 @@
 One entry per problem: symptom, cause, fix, source. **Search here first**, then the internet (see the `fix-game` skill).
 "Found by experiment" means no outside source was used; replace it with a link when one turns up.
 
+## Tomb Raider 2013: black screen / SIGSEGV with FEX Performance (2026-10-17)
+
+- **Setup:** Steam Linux build, app 203160, ELF i386, build ID `cbbc3f63d3737b1b0d790414e472cc64738b8d1e`;
+  FEX 2610 / Ubuntu 24.04 rootfs, `bannerlator-r9`, Zink / Turnip `turnip-v26.3.0-20261011-a8xx-linux`,
+  Adreno 840 / Android 17. The shortcut selected FEX Performance (`FEX_TSOENABLED=0`).
+- **Symptom:** the game disappears with `TombRaider: crash reporter failed`, `Segmentation fault`, `exit: 139`;
+  the emulator keeps showing a black screen or Steam. The crash reporter leaves a zero-byte minidump.
+- **Evidence:** a temporary i386 signal tracer, preloaded through FEX's `Config.json`, caught a write fault at
+  `TombRaider+0x34eda5` (`0x08396da5`, writing through an invalid graphics-buffer pointer after a Map call).
+  Disabling Feral's threaded GL (`UseMTGL=0`) still crashed, at `libc.so.6+0x1872dc` / `memcpy`, called from
+  `TombRaider+0x32bdc5` after another Map call. This points to buffer handoff/synchronization; it is not proof of
+  a particular faulty instruction in FEX or the driver.
+- **Fix:** keep TSO enabled for this game. In the Linux shortcut's Launch options use
+  `FEX_TSOENABLED=1 %command%` (preserve any existing launch options). This overrides Performance for this game;
+  the other preset variables need not change. In the successful process, `/proc/<pid>/environ` confirmed TSO=1
+  while vector TSO, half-barrier TSO and memcpy/memset TSO remained 0. The game reached its rendered main menu
+  (about 75 FPS in that snapshot), with `UseMTGL=1` again. A long gameplay session was not measured.
+- **Did not fix it:** skipping the pre-game launcher (`GameOptionsDialogShouldShow=0`), Low textures
+  (`TextureQuality=0`), or disabling `UseMTGL` alone. Keep these separate from the TSO workaround.
+- **Pre-game launcher:** restoring `GameOptionsDialogShouldShow=1` with TSO enabled displayed the Feral options
+  page, but the Play click did not advance it. The launcher also logged `glXChooseFBConfig failed` / CEF GPU-process
+  initialization errors. Keep `GameOptionsDialogShouldShow=0` to bypass this separate UI problem; TSO is still needed
+  for the game itself. The diagnostic Low texture setting and `UseMTGL=0` were reverted.
+- **Final check:** restored the shortcut's normal hidden Steam startup (removed diagnostic `steamMinimal=0`),
+  original Auto textures (`TextureQuality=-1`), and `UseMTGL=1`; kept TSO=1 and the pre-game options page disabled.
+  After the user's Play action, the live game rendered Lara in the level (HUD snapshot: 32 FPS, GPU 99%, about 1 GB
+  process RSS). The game process's environment again confirmed TSO=1. Temporary tracing libraries, X11 helper and
+  diagnostic files were removed from the phone; the running game was left intact. This is a startup/gameplay check,
+  not a long stability test or a controlled performance benchmark.
+- **Other diagnostic detail:** Feral's unsupported-driver notice can be behind Steam. The helper process is
+  `FeralLinuxMessage`, but its X window is named `FEX`; focusing that window and sending Return dismisses its
+  selected Continue Anyway button. An independently started game can exit 0 without reproducing the Steam-started
+  crash, so test through the emulator's Steam-game shortcut.
+- **Source:** found by experiment on the device. The upstream [FEX wiki](https://wiki.fex-emu.com/index.php/Tomb_Raider_(2013))
+  recommends Proton for the native port generally; it does not describe this TSO workaround. The bundled
+  `games/tomb-raider-2013.json` now supports Linux only and sets `FEX_TSOENABLED=1`; its recommended
+  `tomb-raider-2013-linux-fex-performance.wcfg` carries the same override and the tested GPU/emulator settings.
+  The previous Windows profile/config was removed. Global FEX defaults are unchanged.
+
 ## 32-bit x86 game: `cannot execute: required file not found`
 
 - **Game:** Tomb Raider (2013, Steam 203160), any 32-bit ELF (`od` shows class 1, machine `03 00`).

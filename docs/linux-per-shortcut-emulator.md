@@ -96,6 +96,18 @@ writes the Box64 variables; Tomb Raider (32-bit) still runs on FEX through the B
 
 ### Launch options of a Steam game shortcut
 
+The Linux shortcut editor groups Launch options and the shared environment-variable editor in the same section. Explicit
+variables are saved in the shortcut's `envVars` extra; they are overrides, so an empty editor inherits the container's
+environment. Precedence, from lowest to highest: container/runtime and emulator preset defaults, game profile variables,
+assignments in Launch options, variables in the shortcut's environment editor. An empty value is still an override;
+removing the row restores inheritance. For example, `FEX_TSOENABLED=1` in the editor wins over the Performance preset and
+over `FEX_TSOENABLED=0 %command%` in Launch options. The preview shows the merged shortcut variables.
+
+This applies to direct launches (including the Android Box64 path) and to emulated games started through Steam. The Steam
+launcher applies the merged profile and shortcut variables after its graphics, thunk and preload defaults, including when
+the Steam client was already running. The editor uses the existing whitespace-separated `NAME=value` format; values with
+spaces can still be quoted in Launch options instead.
+
 The shortcut's "Launch options" (written like Steam's: `NAME=value wrapper %command% args`) are available for Steam games too.
 `LinuxSession.writeSteamLaunchOptions` leaves them in `~/.skynet/steam-emulator/<appId>.launch` (variables as `export`, the wrapper and
 the arguments as the arrays `sky_wrap` and `sky_args`) and `skynet-launcher.sh` applies them to the game's command: the wrapper before it, the

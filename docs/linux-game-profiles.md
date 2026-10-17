@@ -75,3 +75,22 @@ A version's single `preferredContainer` names a Windows config, so for the Linux
 config that suits (a config made for any processor family counts when the preferred one belongs to the other platform): the Add-game
 screen shows it as "Recommended" for `BinLinux/BeamNG.drive.x64`. Box64 reads the program, so it can stay on shared storage (no copy).
 The registry lives in the components repository: these files must be published there, or the app's cached copy replaces them after its TTL.
+
+## Tomb Raider (2013): Linux only (FEX Performance + TSO)
+
+`games/tomb-raider-2013.json` replaces the former Windows profile, keeping its game id and Steam app id (`203160`).
+Only `linux.executables` are listed (`TombRaider.sh`, `bin/TombRaider`); there is no Windows platform or Wine container.
+The default version recognises Steam build `9573671`, checked on SM-F976B / Adreno 840 / Android 17. Other builds
+inherit these settings as a fallback; their compatibility and long-session stability have not been checked.
+
+The profile starts through Steam, adds `-nolauncher` (present in the installed game binary) to bypass Feral's options
+page, and sets `FEX_TSOENABLED=1`. There is no `noSteam` mode: the shipped `TombRaider.sh` starts Steam when
+`SteamAppId` is absent. The TSO override is per game; the shortcut's explicit environment editor still wins over it.
+If Feral's options page still opens, set `GameOptionsDialogShouldShow=0` in the game's preferences, as in the device fix.
+
+The recommended `containers/tomb-raider-2013-linux-fex-performance.wcfg` pins `bannerlator-r9`, FEX 2610 Performance,
+Ubuntu 24.04 rootfs, 32-bit OpenGL thunks, NVIDIA GL vendor strings, Zink / Turnip a8xx and native Vulkan output.
+It also sets `FEX_TSOENABLED=1` so importing the container alone retains the fix. FEX requires the game's executable
+and libraries on internal storage; shared storage is mounted `noexec`. The old Tomb Raider Windows `.wcfg` and its
+index entry are removed. `revision: 1` makes the bundled game profile supersede older downloaded copies without a revision.
+The new registry files must also be published in the components repository for online config selection.

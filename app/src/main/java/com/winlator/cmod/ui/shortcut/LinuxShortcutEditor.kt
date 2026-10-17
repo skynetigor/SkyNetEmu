@@ -45,6 +45,7 @@ import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.linux.LinuxShortcutDefaults
 import com.winlator.cmod.lsfg.LsfgManager
 import com.winlator.cmod.ui.settings.EditorCategory
+import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
 import com.winlator.cmod.ui.settings.RailEditor
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.container.FexDownloadPrompt
@@ -75,7 +76,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     // A shortcut made before the settings were its own still follows the container: it is given its own copy here, once.
     remember { LinuxShortcutDefaults.snapshot(context, container, shortcut) }
     var options by remember { mutableStateOf(shortcut.getExtra(LinuxLaunchOptions.EXTRA)) }
-    val parsed = remember(options) { LinuxLaunchOptions.parse(options) }
+    var envVars by remember { mutableStateOf(shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS)) }
+    val parsed = remember(options, envVars) { LinuxLaunchOptions.parse(options, envVars) }
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
     var fit by remember { mutableStateOf(shortcut.getExtra(FIT)) }
     var upscaler by remember { mutableStateOf(shortcut.getExtra(UPSCALER)) }
@@ -179,6 +181,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         // One line: the shortcut file keeps each extra on a line of its own.
         val text = options.replace('\n', ' ').trim()
         shortcut.putExtra(LinuxLaunchOptions.EXTRA, text.ifEmpty { null })
+        shortcut.putExtra(LinuxLaunchOptions.EXTRA_ENV_VARS, envVars.trim().ifEmpty { null })
         shortcut.putExtra(SIZE, size.trim().ifEmpty { null })
         shortcut.putExtra(FIT, fit.ifEmpty { null })
         shortcut.putExtra("simTouchScreen", touch.ifEmpty { null })
@@ -316,7 +319,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             }
         },
         // A Steam game has launch options in Steam too (the game's properties); these are applied by the launcher that starts the game, after Steam's.
-        EditorCategory("launch", "Launch options", options.ifBlank { "None" }, false) {
+        EditorCategory("launch", "Launch options", listOfNotNull(
+            options.takeIf { it.isNotBlank() },
+            if (parsed.env.isNotEmpty()) "${parsed.env.size} variables" else null
+        ).joinToString(" · ").ifBlank { "None" }, false) {
             SettingsCard { SettingText("Launch options (NAME=value %command% -windowed)", options, minLines = 2) { options = it } }
             Text(
                 (if (throughSteam) "Applied when Steam starts the game, on top of the options set in Steam. They reach a game that needs an x86 emulator; " +
@@ -328,7 +334,19 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (options.isNotBlank()) {
+            Text("Environment variables", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Variables set here override the container, emulator preset, game profile and assignments in Launch options. " +
+                    "Remove a variable to use the default again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            EnvironmentVariablesEditor(
+                value = envVars,
+                onChanged = { envVars = it },
+                showManagedWarning = false
+            )
+            if (options.isNotBlank() || envVars.isNotBlank()) {
                 SettingsCard {
                     PreviewRow("Variables", parsed.env.entries.joinToString("\n") { "${it.key}=${it.value}" })
                     SettingsDivider()

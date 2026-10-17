@@ -20,6 +20,8 @@ import java.util.Map;
 public final class LinuxLaunchOptions {
     /** The shortcut's extra (a line of its .desktop file) that holds the text. */
     public static final String EXTRA = "launchOptions";
+    /** Explicit overrides from the shared environment-variable editor. */
+    public static final String EXTRA_ENV_VARS = "envVars";
     private static final String COMMAND = "%command%";
 
     public final Map<String, String> env = new LinkedHashMap<>();
@@ -47,7 +49,6 @@ public final class LinuxLaunchOptions {
         if (text == null || text.trim().isEmpty()) return options;
         List<String> words = split(text);
         int command = words.indexOf(COMMAND);
-        int before = command >= 0 ? command : 0;
         int i = 0;
         // Variables first, in either form.
         for (; i < words.size() && (command < 0 || i < command); i++) {
@@ -61,6 +62,20 @@ public final class LinuxLaunchOptions {
             for (i = command + 1; i < words.size(); i++) options.args.add(words.get(i));
         } else {
             for (; i < words.size(); i++) options.args.add(words.get(i));
+        }
+        return options;
+    }
+
+    /**
+     * The editor stores whitespace-separated NAME=value entries, without shell quoting or expansion. Apply these last so
+     * they win over assignments in launch options and, when merged, the game's profile. Empty values are overrides too.
+     */
+    public static LinuxLaunchOptions parse(String text, String environment) {
+        LinuxLaunchOptions options = parse(text);
+        if (environment == null || environment.trim().isEmpty()) return options;
+        for (String entry : environment.trim().split("\\s+")) {
+            int equals = assignmentEnd(entry);
+            if (equals > 0) options.env.put(entry.substring(0, equals), entry.substring(equals + 1));
         }
         return options;
     }
