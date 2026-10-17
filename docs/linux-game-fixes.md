@@ -3,6 +3,84 @@
 One entry per problem: symptom, cause, fix, source. **Search here first**, then the internet (see the `fix-game` skill).
 "Found by experiment" means no outside source was used; replace it with a link when one turns up.
 
+## BeamNG.drive 0.34: failed CPU detection and slow terrain loading (2026-10-17)
+
+- **Setup:** native Linux 0.34.0.0, `BinLinux/BeamNG.drive.x64 -nosteam` from shared storage; Box64 0.4.4 Performance,
+  glibc `bannerlator-r9` without proot (`linuxBionic=0`, `linuxNoProot=1`), Turnip a8xx / Adreno 840, SM-F976B / Android 17.
+- **Observed bottleneck:** the Italy load enters `Loading TerrainMaterialTextureSet`, then
+  `Texture added for packing, because cache [/temp/art/terrainMaterialCache/<hash>.dds] not found` and
+  `TextureCooker ... started importing`. The loading screen stays at 0% with no presented frames while eight worker
+  threads consume CPU. This alone is not a deadlock: the live log subsequently reports successful imports.
+- **Measured progress:** in the 20:09:57 run, the first uncached texture started at 53.592 s and completed at 165.229 s
+  (111.6 s); the next two took 10.4 and 11.1 s. A second large texture then took 112.1 s, followed by two about 14 s
+  each; by 327.85 s six new textures were complete. The preceding 20:04:03 run had already cooked six different textures
+  (one took 124 s); the new run skipped those and continued with the next missing texture.
+- **Persistence checked:** the generated DDS files are in the Linux container's user folder,
+  `.local/share/BeamNG.drive/0.34/temp/art/terrainmaterialcache/` (lowercase on disk). Nine files were present at 20:14,
+  including the three newly completed files, and twelve by 20:15. Their DDS/DX10 headers and allocated sizes were checked; a 4096x4096 BC7
+  texture with mipmaps was about 21 MiB. Do not clear this cache or restart in the middle of cooking to diagnose a
+  supposed stall. Let conversion finish; cached textures need not be cooked again on the next load.
+- **Separate observations:** the game displayed a one-physical-core warning, but its process was allowed on CPUs 0-7
+  and eight workers ran concurrently. System memory usage was high, with about 3 GiB of swap in use; this may add pressure,
+  but the measured progress identifies texture conversion as the current loading stage. Full map completion and the
+  warm-cache total load time still need checking; no emulator or graphics settings were changed for these observations.
+- **Cache difference in the earlier fast run:** `beamng.drive_2026-10-17_00-32-28.txt` records the same
+  shared-storage 0.34 executable and Box64 Performance variables, but its user folder was in `xuser-1`. Italy loaded in
+  16.375 s, with terrain material setup taking about 45 ms and no texture imports at that point. The current shortcut
+  belongs to `xuser-2`; its separate `.local/share/BeamNG.drive/0.34` user data was created this evening (settings/temp
+  folders at 20:01). The earlier `xuser-1/.local/share/BeamNG.drive` directory is no longer present. The new folder
+  therefore has to build terrain textures again. The logs establish the folder/cache change, but not which action
+  removed the old data. This is a warm-cache versus cold-cache comparison and does not establish the cause of the
+  full performance regression. Imports of several identical texture hashes in the October 16 12:42 run took
+  approximately 5-9 s versus 8-14 s now; thermal state and memory pressure were not controlled in that comparison.
+- **New hardware warning:** a screenshot confirms `This application will not run well on only one physical core`
+  alongside the memory and unsupported-distribution warnings. The installed `core/hardwareinfo.lua` selects this
+  error when `Engine.Platform.getCPUInfo().coresPhysical <= 1` for a non-AMD vendor (AMD uses logical cores).
+  The game's console query `dump(Engine.Platform.getCPUInfo())` actually returned **zero** logical and physical cores,
+  name `Unknown`, empty vendor/features and zero cache counts. The process still had eight allowed CPUs and concurrent workers.
+- **Reproduced cause of the CPU detection regression:** in the glibc no-proot path, native glibc `shm_open` bypassed
+  `libskypath`'s `open` hooks and tried Android's nonexistent `/dev/shm`. Box64 uses `shm_open` to generate its x86
+  `/proc/cpuinfo`; on failure it falls back to the real ARM file. An isolated x86 probe with the running game's
+  environment reproduced that ARM data. The same binary under proot with the session's `/dev/shm` binding produced
+  Intel CPU data with eight cores. Adding `shm_open`/`shm_unlink` path translation to `libskypath` restored that same
+  eight-core Intel data without proot. This regression belongs to the no-proot implementation introduced October 16
+  (`63b77c1`, default in `eb772a2`), rather than evidence of the bionic Box64 being used: the shortcut has bionic off,
+  and the installed glibc Box64's SHA-256 matches the October 12 override. The bionic work also changed shared asset
+  staging, but this reproduction does not depend on it.
+- **Fix/validation:** rebuilt `libskypath.so` with the shared-memory hooks and updated the bundled asset. An on-device
+  native regression test (`tools/linux-shim/shm-test.c`, assertions enabled) passed mapped create/reopen/mmap/unlink,
+  CLOEXEC, exclusive creation, lifetime after unlink and invalid-name rejection. The matching x86 CPU probe failed
+  before the fix and returned eight-core Intel information afterward. Debug APK assembly and in-place installation
+  passed. After restarting the same shortcut, the game's own console reported eight physical/logical cores and
+  populated x86 feature flags; the CPU error disappeared and the distribution banner returned to yellow. The live
+  run subsequently entered Italy and resumed cooking uncached textures.
+- **Remaining load failure after the CPU fix:** the 20:49:59 run finished Italy terrain material setup at 219.34 s
+  and loaded level objects at 233.47 s (about 52 s after starting the map, including five remaining uncached texture
+  imports of 6.4-7.9 s). It reached `Physics collision reloading...`, then Android killed the app at 20:53:57 with
+  `ApplicationExitInfo reason=3 (LOW_MEMORY)`. This was not verified gameplay or a successful complete load; the
+  memory kill and earlier socket-output ANRs remain separate unresolved issues.
+- **GridV2 verification:** in the 20:55:06 run, the visually checked console command
+  `freeroam_freeroam.startFreeroamByName([[gridmap_v2]])` loaded the correct map. Full level loading completed in
+  242.992 s, including the fresh terrain texture conversions; physics and vehicle spawn completed and gameplay
+  rendered. The CPU error stayed absent, leaving yellow memory/distribution warnings. One unobstructed gameplay
+  snapshot showed 35 FPS, 97% GPU usage and 88% system RAM. Android reported thermal status 4 (critical), with skin
+  temperature about 47 C. Samsung's idle touch-protection overlay also appeared during the unattended load and was
+  dismissed before that snapshot. This verifies startup/map loading and CPU detection, **not** restoration of the
+  user's earlier 150-200 FPS. A cool-device comparison with matching graphics/frame-generation settings remains
+  necessary; neither the measured hot FPS nor the different cold-cache workloads establish a remaining code culprit.
+- **Confirmed separate ANR:** Android exit history records input-dispatch ANRs at 20:03:59 and 20:20:00. The latter's
+  saved 20:16 trace shows the Android main thread blocked in native `write`, called by `ClientSocket.write` ->
+  `XOutputStream.flush` -> `XInput2Extension.XI2Event.send` -> `onMotion` -> `TouchpadView.handleFingerMove`.
+  Synchronous X11 socket output can therefore block the Android UI while the game is not draining input. This is
+  a confirmed failure during loading; its relationship to texture conversion speed is unproven. The socket-output
+  ANR is separate from the shared-memory fix and remains unresolved.
+- **Source:** device logs and process/cache snapshots; BeamNG's official
+  [Texture Cooker documentation](https://docs.beamng.com/modding/materials/texture_cooker/) explains automatic PNG-to-DDS
+  conversion, temporary slowdowns, and persistence under the user folder's `temp` directory. That documentation describes
+  the feature; the timings above were measured here. The CPU failure was reproduced on the device, explained by
+  [glibc's hidden open call in shm_open](https://github.com/bminor/glibc/blob/master/rt/shm_open.c) and
+  [Box64's CPU-info fallback](https://github.com/ptitSeb/box64/blob/v0.4.4/src/wrapped/wrappedlibc.c).
+
 ## Tomb Raider 2013: black screen / SIGSEGV with FEX Performance (2026-10-17)
 
 - **Setup:** Steam Linux build, app 203160, ELF i386, build ID `cbbc3f63d3737b1b0d790414e472cc64738b8d1e`;

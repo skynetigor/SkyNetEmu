@@ -13,6 +13,9 @@ names a path and translates it from outside: about 100 us for a `stat` or an `op
   `files/linux-shim/libc-v2-<runtime>`);
 - Box64 looks libc's functions up with `dlsym(libc handle, ...)`, which skips an `LD_PRELOAD` library: `libskypath` also hooks `dlsym`/`dlvsym` so those lookups find its versions;
 - glibc's `mkdtemp`/`mkstemp` and a raw `syscall(...)` do not go through the hooked functions: they are hooked as well;
+- POSIX `shm_open`/`shm_unlink` also use hidden libc file calls: explicit hooks translate `/dev/shm` to the session's
+  shared-memory directory. Without these, Box64 cannot synthesize x86 `/proc/cpuinfo` and BeamNG 0.34 reports zero
+  cores / an unknown CPU (see [game findings](linux-game-fixes.md));
 - a socket path (`sockaddr_un`) that gets longer than 107 bytes once translated is reached through `/proc/self/fd/<folder>/<name>`;
 - `/sys` answers EACCES where a PC answers ENOENT (`/sys/class/power_supply/BAT0`): hooks turn one into the other.
 
@@ -24,3 +27,9 @@ A session that runs FEX (the container's emulator is FEX, or the program is a 32
 Measured on BeamNG.drive 0.39 (Steam, Box64, the Steam card of the library; three runs each, tap on Play to the main menu): about 18 s without proot, about 23 s under proot
 (on the game's own clock: 14.8 s against 19.5 s). Not yet tried: the Steam client, FEX games, programs that read `/proc/self/exe`-relative paths in unusual ways.
 Rebuild the library with `tools/linux-shim/build.sh` and copy `libskypath.so` to `app/src/main/assets/linux/`.
+
+The shared-memory regression test is `tools/linux-shim/shm-test.c`. Cross-compile it with
+`zig cc -target aarch64-linux-gnu.2.35 -O2 -o shm-test tools/linux-shim/shm-test.c -lrt`, then run it on the device
+through the runtime loader with `libskypath.so` preloaded, `SKY_ROOT` set and `/dev/shm` mapped in `SKY_PATHMAP` to a
+writable app directory. It checks object sharing/mapping and unlink lifetime, CLOEXEC, exclusive creation and invalid
+names. With the old no-proot library the first `shm_open` fails with ENOENT; with the fixed library the test passes.

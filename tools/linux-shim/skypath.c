@@ -44,6 +44,7 @@
 #include <sys/time.h>
 #include <sys/un.h>
 #include <sys/inotify.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utime.h>
@@ -185,6 +186,40 @@ int __openat64_2(int fd, const char *path, int flags) { return openat64(fd, path
 
 FILE *fopen(const char *path, const char *mode) { NEXT(fopen); MAP(m, path); return real(m, mode); }
 FILE *fopen64(const char *path, const char *mode) { NEXT(fopen64); MAP(m, path); return real(m, mode); }
+
+/* glibc's shm_open/unlink use hidden file calls, bypassing the open/unlink hooks. Box64 uses these
+   objects to synthesize /proc/cpuinfo; falling back to Android's ARM data breaks x86 CPU detection. */
+static int shm_path(const char *name, char *path, size_t size) {
+    while (*name == '/') name++;
+    size_t len = strlen(name);
+    if (len > NAME_MAX) { errno = ENAMETOOLONG; return -1; }
+    if (!len || strchr(name, '/') || !strcmp(name, ".") || !strcmp(name, "..")) {
+        errno = EINVAL;
+        return -1;
+    }
+    snprintf(path, size, "/dev/shm/%s", name);
+    return 0;
+}
+
+int shm_open(const char *name, int flags, mode_t mode) {
+    if (!on) { NEXT(shm_open); return real(name, flags, mode); }
+    char path[NAME_MAX + 10];
+    if (shm_path(name, path, sizeof path) < 0) return -1;
+    NEXT(open64);
+    MAP(m, path);
+    int fd = real(m, flags | O_NOFOLLOW | O_CLOEXEC, mode);
+    if (fd < 0 && errno == EISDIR) errno = EINVAL;
+    return fd;
+}
+
+int shm_unlink(const char *name) {
+    if (!on) { NEXT(shm_unlink); return real(name); }
+    char path[NAME_MAX + 10];
+    if (shm_path(name, path, sizeof path) < 0) return -1;
+    NEXT(unlink);
+    MAP(m, path);
+    return real(m);
+}
 FILE *freopen(const char *path, const char *mode, FILE *s) { NEXT(freopen); MAP(m, path); return real(m, mode, s); }
 FILE *freopen64(const char *path, const char *mode, FILE *s) { NEXT(freopen64); MAP(m, path); return real(m, mode, s); }
 
