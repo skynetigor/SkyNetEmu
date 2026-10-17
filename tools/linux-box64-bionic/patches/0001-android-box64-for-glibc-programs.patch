@@ -1,3 +1,25 @@
+diff --git a/src/core.c b/src/core.c
+index c33c384fb..142ecc9da 100644
+--- a/src/core.c
++++ b/src/core.c
+@@ -1258,6 +1258,9 @@ int initialize(int argc, const char **argv, char** env, x64emu_t** emulator, elf
+         FreeCollection(&ld_preload);
+         return -1;
+     }
++#ifndef ANDROID
++    // On Android a game sits on the shared storage, where no file carries the executable bit (and the mount is noexec): Box64 reads
++    // the program itself, so being readable is enough.
+     if(!FileExist(my_context->argv[0], IS_FILE|IS_EXECUTABLE)) {
+         printf_log(LOG_NONE, "Error: %s is not an executable file.\n", my_context->argv[0]);
+         free_contextargv();
+@@ -1265,6 +1268,7 @@ int initialize(int argc, const char **argv, char** env, x64emu_t** emulator, elf
+         FreeCollection(&ld_preload);
+         return -1;
+     }
++#endif
+     if(!(my_context->fullpath = box_realpath(my_context->argv[0], NULL)))
+         my_context->fullpath = box_strdup(my_context->argv[0]);
+     if (getenv("BOX64_ARG0")) {
 diff --git a/src/elfs/elfloader.c b/src/elfs/elfloader.c
 index 89c248e8e..bb8cc004b 100644
 --- a/src/elfs/elfloader.c
@@ -350,10 +372,10 @@ index 5f73ab4bb..95443a0cb 100644
      elfheader_t* elf_header = NULL;
 diff --git a/src/wrapped/androidpath.h b/src/wrapped/androidpath.h
 new file mode 100644
-index 000000000..87c1c9657
+index 000000000..cc4c5fd6c
 --- /dev/null
 +++ b/src/wrapped/androidpath.h
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,185 @@
 +// Android has no /dev/shm and no /tmp: the program's paths there go to BOX64_SHM_DIR and TMPDIR (the way libskypath does for the glibc session).
 +#ifndef ANDROIDPATH_H
 +#define ANDROIDPATH_H
@@ -376,9 +398,29 @@ index 000000000..87c1c9657
 +static inline const char* skyFixPath(const char* path, char* out, size_t size)
 +{
 +    if(!path || path[0]!='/') return path;
++    // A game with an embedded Chromium (CEF) reads icudtl.dat and its .pak files from the game's folder, one level above the
++    // program's; BeamNG's depot has them next to the program only, and a folder on the shared storage takes no symbolic links.
++    // SKY_RESOURCE_DIR names the program's folder (what libskyshim does for the glibc session).
++    static const char* const cef[] = {"icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak",
++                                      "snapshot_blob.bin", "v8_context_snapshot.bin", NULL};
++    const char* res = getenv("SKY_RESOURCE_DIR");
++    if(res && *res) {
++        const char* base = strrchr(path, '/');
++        base = base ? base+1 : path;
++        for(int i=0; cef[i]; ++i) if(!strcmp(base, cef[i])) {
++            if(access(path, R_OK)) {
++                snprintf(out, size, "%s/%s", res, base);
++                if(!access(out, R_OK)) return out;
++            }
++            break;
++        }
++    }
 +    const char* dir = NULL;
 +    size_t skip = 0;
 +    if(!strncmp(path, "/dev/shm", 8) && (path[8]=='/' || !path[8])) { dir = getenv("BOX64_SHM_DIR"); skip = 8; }
++    // Android has no /dev/input for an app: the folder the app writes the controllers' evdev events into stands in for it, so that a
++    // program listing the folder (SDL without udev) finds the pads at all; their ioctls are answered by skyPadOpen's files.
++    else if(!strncmp(path, "/dev/input", 10) && (path[10]=='/' || !path[10])) { dir = getenv("SKY_INPUT_DIR"); skip = 10; }
 +    else if(!strncmp(path, "/tmp", 4) && (path[4]=='/' || !path[4])) { dir = getenv("TMPDIR"); skip = 4; }
 +    // Android denies the battery (EACCES), which a program takes for an error where a machine without one gives ENOENT
 +    if(!strncmp(path, "/sys/class/power_supply", 23) && (path[23]=='/' || !path[23])) { snprintf(out, size, "/proc/skynet-enoent%s", path+23); return out; }
@@ -1778,7 +1820,7 @@ index bc0112979..d2d59a6fc 100644
  void iFEv(x64emu_t *emu, uintptr_t fnc);
  void lFEv(x64emu_t *emu, uintptr_t fnc);
 diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
-index c995a0cc5..22278e8c6 100644
+index c995a0cc5..e7e291972 100644
 --- a/src/wrapped/wrappedlibc.c
 +++ b/src/wrapped/wrappedlibc.c
 @@ -160,6 +160,9 @@ static void my_wrap_error_print_progname(void)
@@ -1893,7 +1935,27 @@ index c995a0cc5..22278e8c6 100644
      if(isProcSelf((const char*)path, "cmdline")) {
          int tmp = shm_open(TMP_CMDLINE, O_RDWR | O_CREAT, S_IRWXU);
          if(tmp<0) return fopen64(path, mode);
-@@ -3455,8 +3490,17 @@ void InitCpuModel()
+@@ -2673,6 +2708,9 @@ EXPORT int32_t my_glob(x64emu_t *emu, void* pat, int32_t flags, void* errfnc, vo
+ EXPORT int my_scandir64(x64emu_t *emu, void* dir, void* namelist, void* sel, void* comp)
+ {
+     (void)emu;
++#ifdef ANDROID
++    ANDROID_FIXPATH(dir);
++#endif
+     return scandir64(dir, namelist, findfilter64Fct(sel), findcompare64Fct(comp));
+ }
+ EXPORT int my_scandir(x64emu_t *emu, void* dir, void* namelist, void* sel, void* comp) __attribute__((alias("my_scandir64")));
+@@ -2680,6 +2718,9 @@ EXPORT int my_scandir(x64emu_t *emu, void* dir, void* namelist, void* sel, void*
+ EXPORT int my_scandirat(x64emu_t *emu, int dirfd, void* dirp, void* namelist, void* sel, void* comp)
+ {
+     (void)emu;
++#ifdef ANDROID
++    ANDROID_FIXPATH(dirp);
++#endif
+     return scandirat(dirfd, dirp, namelist, findfilter64Fct(sel), findcompare64Fct(comp));
+ }
+ 
+@@ -3455,8 +3496,17 @@ void InitCpuModel()
  #endif
  
  #ifdef ANDROID
@@ -1911,7 +1973,7 @@ index c995a0cc5..22278e8c6 100644
  }
  #else
  EXPORT const unsigned short int *my___ctype_b;
-@@ -3554,6 +3598,9 @@ EXPORT void my___explicit_bzero_chk(x64emu_t* emu, void* dst, uint32_t len, uint
+@@ -3554,6 +3604,9 @@ EXPORT void my___explicit_bzero_chk(x64emu_t* emu, void* dst, uint32_t len, uint
  
  EXPORT void* my_realpath(x64emu_t* emu, void* path, void* resolved_path)
  {
@@ -1921,7 +1983,7 @@ index c995a0cc5..22278e8c6 100644
      if(path && isProcSelf(path, "exe")) {
          return realpath(emu->context->fullpath, resolved_path);
      }
-@@ -3788,11 +3835,23 @@ EXPORT void* my_mallinfo(x64emu_t* emu, void* p)
+@@ -3788,11 +3841,23 @@ EXPORT void* my_mallinfo(x64emu_t* emu, void* p)
          inited = 1;
          f = (mallinfo_fnc)dlsym(my_lib->w.lib, "mallinfo");
      }
@@ -1945,7 +2007,7 @@ index c995a0cc5..22278e8c6 100644
  }
  
  struct my_mallinfo2_s {
-@@ -4851,7 +4910,57 @@ __attribute__((weak)) int dn_skipname(const unsigned char* ptr, const unsigned c
+@@ -4851,7 +4916,57 @@ __attribute__((weak)) int dn_skipname(const unsigned char* ptr, const unsigned c
  #ifndef _SC_NPROCESSORS_CONF
  #define _SC_NPROCESSORS_CONF    83
  #endif
