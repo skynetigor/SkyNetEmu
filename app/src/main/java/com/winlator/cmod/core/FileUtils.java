@@ -368,6 +368,7 @@ public abstract class FileUtils {
     }
 
     public static String getFilePathFromUri(Context context, Uri uri) {
+        if ("file".equalsIgnoreCase(uri.getScheme())) return uri.getPath();
         Log.d(TAG, "getFilePathFromUri called with URI: " + uri.toString());
         String filePath = getFilePathFromUriUsingSAF(context, uri);
         Log.d(TAG, "File path obtained: " + filePath);

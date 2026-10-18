@@ -44,6 +44,7 @@
     <string name="name">Name</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
+    <string name="use_this_folder">Use this folder</string>
     <string name="untitled">Untitled</string>
     <string name="no_profile_selected">No profile selected</string>
     <string name="no_profile_found">No profile found</string>

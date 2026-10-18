@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
@@ -184,6 +185,10 @@ class ContainersSettingsActivity : AppCompatActivity() {
                             propertiesState.value = ContainerManager(this@ContainersSettingsActivity).getContainerById(id)
                         },
                         onDismissProperties = { propertiesState.value = null },
+                        onFiles = { id ->
+                            startActivity(Intent(this@ContainersSettingsActivity, com.winlator.cmod.MainActivity::class.java)
+                                .putExtra(com.winlator.cmod.MainActivity.EXTRA_BROWSE_CONTAINER, id))
+                        },
                         onRun = ::runContainer,
                         onDuplicate = ::duplicateContainer,
                         onRemove = ::removeContainer,
@@ -469,6 +474,7 @@ private fun ContainersSettingsScreen(
     onAdd: () -> Unit,
     onEdit: (Int) -> Unit,
     onProperties: (Int) -> Unit,
+    onFiles: (Int) -> Unit,
     onDismissProperties: () -> Unit,
     onRun: (Int) -> Unit,
     onDuplicate: (Int) -> Unit,
@@ -509,7 +515,7 @@ private fun ContainersSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(containers, key = { it.id }) { container ->
-                    SettingsContainerCard(container, onEdit, onProperties, onRun, onDuplicate, onRemove, onExport)
+                    SettingsContainerCard(container, onEdit, onProperties, onFiles, onRun, onDuplicate, onRemove, onExport)
                 }
             }
         }
@@ -525,6 +531,7 @@ private fun SettingsContainerCard(
     container: Container,
     onEdit: (Int) -> Unit,
     onProperties: (Int) -> Unit,
+    onFiles: (Int) -> Unit,
     onRun: (Int) -> Unit,
     onDuplicate: (Int) -> Unit,
     onRemove: (Int) -> Unit,
@@ -592,6 +599,12 @@ private fun SettingsContainerCard(
             ) {
                 ActionButton(Icons.Outlined.Edit, "Edit", Modifier.weight(1f)) { onEdit(container.id) }
                 ActionButton(Icons.Outlined.Info, "Properties", Modifier.weight(1f)) { onProperties(container.id) }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ActionButton(Icons.Outlined.FolderOpen, "Files", Modifier.weight(1f)) { onFiles(container.id) }
                 // The Steam container is the app's own: it is reset from its settings, and has nothing to duplicate, remove or export here.
                 if (SteamContainer.isManaged(container)) Spacer(Modifier.weight(1f))
                 else ContainerMoreButton(

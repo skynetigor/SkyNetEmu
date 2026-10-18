@@ -38,6 +38,10 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("fileManager"))) {
+                result.putString("stream", FileManagerChecks.run(this));
+                finish(status, result); return;
+            }
             if (options != null && "1".equals(options.getString("framePipeline"))) {
                 result.putString("stream", com.winlator.cmod.linux.FramePipelineChecks.run(this) + new RendererDiagnosticsChecks(this).run());
                 finish(status,result);return;

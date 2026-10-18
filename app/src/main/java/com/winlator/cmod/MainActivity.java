@@ -63,6 +63,7 @@ import java.io.File;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
+    public static final String EXTRA_BROWSE_CONTAINER = "browse_container_id";
     public static final @IntRange(from = 1, to = 19) byte CONTAINER_PATTERN_COMPRESSION_LEVEL = 9;
     public static final int PERMISSION_WRITE_EXTERNAL_STORAGE_REQUEST_CODE = 500;
     public static final int PERMISSION_POST_NOTIFICATIONS_REQUEST_CODE = 501;
@@ -220,6 +221,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             onNavigationItemSelected(navigationView.getMenu().findItem(menuItemId));
             navigationView.setCheckedItem(menuItemId);
             selectBottomDestination(menuItemId);
+            com.winlator.cmod.container.Container browseContainer = containerManager.getContainerById(intent.getIntExtra(EXTRA_BROWSE_CONTAINER, -1));
+            if (browseContainer != null) {
+                show(FileManagerFragment.forContainerFiles(browseContainer), false);
+                navigationView.setCheckedItem(R.id.main_menu_file_manager);
+                selectBottomDestination(R.id.main_menu_file_manager);
+            }
 
             if (!ImageFsInstaller.installIfNeeded(this, () -> requestAppPermissions())) {
                 if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)

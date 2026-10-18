@@ -774,7 +774,9 @@ public class ShortcutsFragment extends Fragment {
 
         if (uriString != null) {
             Uri folderUri = Uri.parse(uriString);
-            DocumentFile pickedDir = DocumentFile.fromTreeUri(requireContext(), folderUri);
+            DocumentFile pickedDir = "file".equalsIgnoreCase(folderUri.getScheme())
+                    ? DocumentFile.fromFile(new File(folderUri.getPath()))
+                    : DocumentFile.fromTreeUri(requireContext(), folderUri);
             if (pickedDir == null || !pickedDir.canWrite()) return;
             shortcutsDir = new File(FileUtils.getFilePathFromUri(requireContext(), folderUri));
         } else {
