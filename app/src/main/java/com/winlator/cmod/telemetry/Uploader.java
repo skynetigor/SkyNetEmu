@@ -284,7 +284,7 @@ final class Uploader {
             String key = String.valueOf(f[i]);
             Object value = f[i + 1];
             if (value == null) continue;
-            if (value instanceof String && !key.equals("error.stack_trace")) value = Scrub.text((String) value, 300);
+            if (value instanceof String) value = Scrub.field(key, (String) value);
             doc.put(key, value);
         }
         return doc.toString();

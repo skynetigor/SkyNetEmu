@@ -41,6 +41,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener {
 
     private long nativeHandle = 0;
+    private long rendererSampleAt;
+    private boolean importFailureReported;
     private final Object lock = new Object();
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
@@ -122,8 +124,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
-    @FastNative private native void nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
+    @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
         int w, int h, int stride, int offset);
+    private native String nativeRendererDiagnostics(long handle);
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long id,
         long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
@@ -235,6 +238,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     nativeSetVerboseLog(nativeHandle, true);
                     nativeDumpRendererInfo(nativeHandle);
+                    sampleRendererDiagnostics(true);
                 }
             }
             initComplete = true;
@@ -568,25 +572,46 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
-        if (window.id == sessionWindowId) com.winlator.cmod.telemetry.GameSessionRecorder.onFrame();
-        if (window.id == fpsWindowId) {
-            if (hudRef != null) hudRef.onFrame();
-            if (classicHudRef != null) classicHudRef.update();
-        }
         synchronized (lock) {
             if (nativeHandle == 0 || pixmap == null) return;
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
                 if (pixmap.dmaBufFd >= 0) {
-                    nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
+                    boolean accepted = nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
                         pixmap.dmaBufFd, pixmap.width, pixmap.height, pixmap.dmaBufStride, pixmap.dmaBufOffset);
+                    if (!accepted) {
+                        if (!importFailureReported) {
+                            importFailureReported = true;
+                            String details = nativeRendererDiagnostics(nativeHandle);
+                            Log.e("VulkanXServerView", "Linux frame import failed: " + details);
+                            com.winlator.cmod.telemetry.LinuxDiagnostics.rendererImportFailed(details);
+                        }
+                        return;
+                    }
                 }
                 else if (pixmap.backingAHB != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
                         pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
                 }
+                else return;
+                sampleRendererDiagnostics(false);
             }
         }
+        // Incoming Present requests are not proof that the renderer accepted their buffers.
+        if (window.id == sessionWindowId) com.winlator.cmod.telemetry.GameSessionRecorder.onFrame();
+        if (window.id == fpsWindowId) {
+            if (hudRef != null) hudRef.onFrame();
+            if (classicHudRef != null) classicHudRef.update();
+        }
+    }
+
+    /** At most one small snapshot every five seconds, and only for opted-in telemetry. Caller holds lock. */
+    private void sampleRendererDiagnostics(boolean force) {
+        if (nativeHandle == 0 || !com.winlator.cmod.telemetry.Telemetry.isEnabled()) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (!force && now - rendererSampleAt < 5000) return;
+        rendererSampleAt = now;
+        com.winlator.cmod.telemetry.LinuxDiagnostics.rendererSnapshot(nativeRendererDiagnostics(nativeHandle));
     }
 
     public void addDirectContent(int windowId, Drawable drawable, GPUImage gpuImage) {
@@ -679,6 +704,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (drawable.backingAHB != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(drawable),
                         drawable.backingAHB, drawable.width, drawable.height, rx, ry);
+                    sampleRendererDiagnostics(false);
                 }
             }
         }

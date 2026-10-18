@@ -211,6 +211,19 @@
                 }
               }
             },
+            "linux": {
+              "properties": {
+                "logs": {
+                  "type": "text"
+                },
+                "seconds_running": {
+                  "type": "long"
+                },
+                "setup": {
+                  "type": "text"
+                }
+              }
+            },
             "memory": {
               "properties": {
                 "peak_used_bytes": {
@@ -218,6 +231,13 @@
                 },
                 "total_bytes": {
                   "type": "long"
+                }
+              }
+            },
+            "renderer": {
+              "properties": {
+                "diagnostics": {
+                  "type": "text"
                 }
               }
             },

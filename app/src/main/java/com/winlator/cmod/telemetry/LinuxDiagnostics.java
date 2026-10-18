@@ -1,7 +1,5 @@
 package com.winlator.cmod.telemetry;
 
-import android.os.Build;
-
 import java.io.File;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
@@ -22,6 +20,10 @@ public final class LinuxDiagnostics {
     private static volatile String setup = "";
     private static volatile boolean windowDrawn;
     private static volatile long startedAt;
+    private static volatile boolean active;
+    private static volatile String renderer = "";
+    private static final RendererLog rendererLog = new RendererLog();
+    private static final java.util.concurrent.atomic.AtomicBoolean importReported = new java.util.concurrent.atomic.AtomicBoolean();
     private static ScheduledThreadPoolExecutor executor;
 
     private LinuxDiagnostics() {}
@@ -33,6 +35,8 @@ public final class LinuxDiagnostics {
         steamLogs = logs;
         output = programOutput;
         setup = description;
+        active = true;
+        importReported.set(false);
         windowDrawn = false;
         startedAt = System.currentTimeMillis();
         GameSessionRecorder.resetFrameCount();
@@ -47,6 +51,41 @@ public final class LinuxDiagnostics {
     public static synchronized void stop() {
         if (executor != null) executor.shutdownNow();
         executor = null;
+        if (active) {
+            renderer = "";
+            rendererLog.clear();
+        }
+        active = false;
+    }
+
+    /** Called with a bounded native snapshot; it contains API results and buffer geometry, never file paths. */
+    public static void rendererSnapshot(String snapshot) {
+        if (Telemetry.isEnabled()) renderer = Scrub.field("skynet.renderer.diagnostics", snapshot);
+    }
+
+    public static void rendererLogLine(String line) {
+        if (active && Telemetry.isEnabled()) rendererLog.add(line);
+    }
+
+    /** A rejected frame must be reported even if the client continues sending Present requests. One report per session. */
+    public static void rendererImportFailed(String snapshot) {
+        if (!active || !Telemetry.isEnabled() || !importReported.compareAndSet(false, true)) return;
+        rendererSnapshot(snapshot);
+        final String details = renderer;
+        final String description = setup;
+        final long seconds = (System.currentTimeMillis() - startedAt) / 1000;
+        final Supplier<String> programOutput = output;
+        final File logDirectory = steamLogs;
+        final String renderedLog = rendererLog.snapshot();
+        // Reading log tails is never done on the X server's frame/update thread.
+        Uploader.background(() -> Telemetry.event("skynet.error", "launch", "failure",
+                "skynet.error.stage", "launch",
+                "error.type", "linux_frame_import_failed",
+                "error.message", Scrub.text(details, 300),
+                "skynet.renderer.diagnostics", details,
+                "skynet.linux.setup", description,
+                "skynet.linux.seconds_running", seconds,
+                "skynet.linux.logs", collect(programOutput, logDirectory, renderedLog)));
     }
 
     /** The session's first window drew. */
@@ -55,6 +94,15 @@ public final class LinuxDiagnostics {
     }
 
     private static void check(long seconds) {
+        if (!active || !Telemetry.isEnabled()) return;
+        if (seconds == CHECKS_S[0]) {
+            // A successful import can still display black. Send one neutral snapshot even when the watchdog sees frames.
+            Telemetry.event("skynet.session", "linux_renderer", (String) null,
+                    "skynet.renderer.diagnostics", renderer,
+                    "skynet.linux.setup", setup,
+                    "skynet.linux.seconds_running", (System.currentTimeMillis() - startedAt) / 1000,
+                    "skynet.linux.logs", collect());
+        }
         if (GameSessionRecorder.frameCount() > 0) return;
         Telemetry.event("skynet.error", "linux_render_stalled", "failure",
                 "skynet.error.stage", "linux_render_stalled",
@@ -62,18 +110,23 @@ public final class LinuxDiagnostics {
                 "error.message", "No frame was presented " + seconds + " s after the session started",
                 "skynet.linux.seconds_running", (System.currentTimeMillis() - startedAt) / 1000,
                 "skynet.linux.setup", setup,
-                "skynet.gpu", Build.HARDWARE + " " + Build.SOC_MODEL,
+                "skynet.renderer.diagnostics", renderer,
                 "skynet.linux.logs", collect());
     }
 
     /** The program's last output lines and the tail of Steam's newest log files, with paths and personal text taken out. */
     public static String collect() {
+        return collect(output, steamLogs, rendererLog.snapshot());
+    }
+
+    private static String collect(Supplier<String> programOutput, File logDirectory, String nativeLog) {
         StringBuilder out = new StringBuilder();
+        if (!nativeLog.isEmpty()) out.append("== renderer\n").append(nativeLog).append('\n');
         try {
-            out.append("== output\n").append(lastLines(output.get(), 30)).append('\n');
+            out.append("== output\n").append(lastLines(programOutput.get(), 30)).append('\n');
         }
         catch (RuntimeException ignored) {}
-        File dir = steamLogs;
+        File dir = logDirectory;
         File[] files = dir == null ? null : dir.listFiles(f -> f.isFile() && f.getName().endsWith(".txt"));
         if (files != null) {
             java.util.Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));

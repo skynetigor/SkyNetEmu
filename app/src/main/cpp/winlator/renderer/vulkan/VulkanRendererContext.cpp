@@ -348,6 +348,8 @@ void VulkanRendererContext::createLogicalDevice() {
         VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME
     };
     // Linux clients hand over frames as dma-bufs: importing them takes these two.
+    hasExternalMemoryFd = hasExternalFd;
+    hasDmaBufExtension = hasDmaBufExt;
     hasDmaBufImport = hasExternalFd && hasDmaBufExt;
     if (hasDmaBufImport) {
         extList.push_back("VK_KHR_external_memory_fd");
@@ -913,6 +915,8 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
 }
 
 VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int stride, int offset) {
+    dmaDiagnostics.stage = "capabilities";
+    dmaDiagnostics.result = VK_ERROR_EXTENSION_NOT_PRESENT;
     if (!hasDmaBufImport || !vk_.GetMemoryFdPropertiesKHR) return DmaImport::Failed;
 
     VkExternalMemoryImageCreateInfo emi{};
@@ -927,12 +931,14 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
     ii.mipLevels=1; ii.arrayLayers=1; ii.samples=VK_SAMPLE_COUNT_1_BIT;
     ii.tiling=VK_IMAGE_TILING_LINEAR; ii.usage=VK_IMAGE_USAGE_SAMPLED_BIT;
     ii.sharingMode=VK_SHARING_MODE_EXCLUSIVE; ii.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
-    VkResult cr = vk_.CreateImage(device,&ii,nullptr,&wt.img);
+    dmaDiagnostics.stage = "create_image";
+    VkResult cr = dmaDiagnostics.result = vk_.CreateImage(device,&ii,nullptr,&wt.img);
     if (cr!=VK_SUCCESS) { RLOG_E("importDmaBufToWinTex: vkCreateImage -> %d (%dx%d)", cr, w, h); wt.img=VK_NULL_HANDLE; return DmaImport::Failed; }
 
     VkImageSubresource sub{VK_IMAGE_ASPECT_COLOR_BIT,0,0};
     VkSubresourceLayout layout{};
     vk_.GetImageSubresourceLayout(device,wt.img,&sub,&layout);
+    dmaDiagnostics.rowPitch = layout.rowPitch;
     if ((int)layout.rowPitch != stride || offset != 0) {
         RLOG_E("importDmaBufToWinTex: the driver lays the image out with row pitch %llu, the client with %d (offset %d): copying instead",
             (unsigned long long)layout.rowPitch, stride, offset);
@@ -942,8 +948,12 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
 
     VkMemoryRequirements req{};
     vk_.GetImageMemoryRequirements(device,wt.img,&req);
+    dmaDiagnostics.imageBytes = req.size;
+    dmaDiagnostics.imageTypes = req.memoryTypeBits;
     VkMemoryFdPropertiesKHR fdp{}; fdp.sType=VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
-    VkResult pr = vk_.GetMemoryFdPropertiesKHR(device,VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,fd,&fdp);
+    dmaDiagnostics.stage = "image_fd_properties";
+    VkResult pr = dmaDiagnostics.result = vk_.GetMemoryFdPropertiesKHR(device,VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,fd,&fdp);
+    dmaDiagnostics.fdTypes = fdp.memoryTypeBits;
     if (pr!=VK_SUCCESS) {
         RLOG_E("importDmaBufToWinTex: vkGetMemoryFdPropertiesKHR -> %d", pr);
         vk_.DestroyImage(device,wt.img,nullptr); wt.img=VK_NULL_HANDLE;
@@ -951,12 +961,15 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
     }
     uint32_t typeBits = req.memoryTypeBits & fdp.memoryTypeBits;
     if (!typeBits) {
+        dmaDiagnostics.stage = "image_memory_types";
+        dmaDiagnostics.result = VK_ERROR_FEATURE_NOT_PRESENT;
         RLOG_E("importDmaBufToWinTex: no memory type fits (image 0x%x, dma-buf 0x%x)", req.memoryTypeBits, fdp.memoryTypeBits);
         vk_.DestroyImage(device,wt.img,nullptr); wt.img=VK_NULL_HANDLE;
         return DmaImport::Failed;
     }
 
     off_t fdSize = lseek(fd, 0, SEEK_END);
+    dmaDiagnostics.bufferBytes = fdSize;
     RLOG("importDmaBufToWinTex: image needs %llu bytes, the dma-buf has %lld; memory types: image 0x%x, dma-buf 0x%x",
         (unsigned long long)req.size, (long long)fdSize, req.memoryTypeBits, fdp.memoryTypeBits);
 
@@ -979,7 +992,8 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
         if (dedicated) { ded.pNext=&imp; mai.pNext=&ded; } else mai.pNext=&imp;
         mai.allocationSize = (attempt >= 2 && fdSize > 0) ? (VkDeviceSize)fdSize : req.size;
         mai.memoryTypeIndex=findMemType(typeBits,0);
-        ar = vk_.AllocateMemory(device,&mai,nullptr,&wt.mem);
+        dmaDiagnostics.stage = "allocate_image_memory";
+        ar = dmaDiagnostics.result = vk_.AllocateMemory(device,&mai,nullptr,&wt.mem);
         RLOG("importDmaBufToWinTex: attempt %d (%s allocation, size %llu) -> %d", attempt, dedicated ? "dedicated" : "plain",
             (unsigned long long)mai.allocationSize, ar);
         if (ar != VK_SUCCESS) close(imp.fd);
@@ -988,7 +1002,9 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
         vk_.DestroyImage(device,wt.img,nullptr); wt.img=VK_NULL_HANDLE; wt.mem=VK_NULL_HANDLE;
         return DmaImport::Failed;
     }
-    vk_.BindImageMemory(device,wt.img,wt.mem,0);
+    dmaDiagnostics.stage = "bind_image_memory";
+    dmaDiagnostics.result = vk_.BindImageMemory(device,wt.img,wt.mem,0);
+    if (dmaDiagnostics.result != VK_SUCCESS) { destroyWinTex(wt); return DmaImport::Failed; }
 
     VkImageViewCreateInfo vi{};
     vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -997,12 +1013,14 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
     vi.components={VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,
                    VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
     vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-    if (vk_.CreateImageView(device,&vi,nullptr,&wt.view)!=VK_SUCCESS){ destroyWinTex(wt); return DmaImport::Failed; }
+    dmaDiagnostics.stage = "create_image_view";
+    if ((dmaDiagnostics.result = vk_.CreateImageView(device,&vi,nullptr,&wt.view))!=VK_SUCCESS){ destroyWinTex(wt); return DmaImport::Failed; }
 
     VkDescriptorSetAllocateInfo dsai{};
     dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
-    if (vk_.AllocateDescriptorSets(device,&dsai,&wt.ds)!=VK_SUCCESS){ destroyWinTex(wt); return DmaImport::Failed; }
+    dmaDiagnostics.stage = "allocate_descriptors";
+    if ((dmaDiagnostics.result = vk_.AllocateDescriptorSets(device,&dsai,&wt.ds))!=VK_SUCCESS){ destroyWinTex(wt); return DmaImport::Failed; }
 
     VkDescriptorImageInfo dii{};
     dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1021,6 +1039,8 @@ VulkanRendererContext::DmaImport VulkanRendererContext::importDmaBufToWinTex(Win
 }
 
 bool VulkanRendererContext::importDmaBufAsBuffer(DmaBufSrc& src, int fd, int h, int stride, int offset) {
+    dmaDiagnostics.stage = "buffer_capabilities";
+    dmaDiagnostics.result = VK_ERROR_EXTENSION_NOT_PRESENT;
     if (!hasDmaBufImport || !vk_.GetMemoryFdPropertiesKHR) return false;
     VkExternalMemoryBufferCreateInfo ebi{};
     ebi.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
@@ -1029,17 +1049,27 @@ bool VulkanRendererContext::importDmaBufAsBuffer(DmaBufSrc& src, int fd, int h, 
     bi.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bi.pNext=&ebi;
     bi.size=(VkDeviceSize)stride*h + offset; bi.usage=VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     bi.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-    if (vk_.CreateBuffer(device,&bi,nullptr,&src.buf)!=VK_SUCCESS) { src.buf=VK_NULL_HANDLE; return false; }
+    dmaDiagnostics.stage = "create_buffer";
+    if ((dmaDiagnostics.result = vk_.CreateBuffer(device,&bi,nullptr,&src.buf))!=VK_SUCCESS) { src.buf=VK_NULL_HANDLE; return false; }
     VkMemoryRequirements req{};
     vk_.GetBufferMemoryRequirements(device,src.buf,&req);
     VkMemoryFdPropertiesKHR fdp{}; fdp.sType=VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR;
-    if (vk_.GetMemoryFdPropertiesKHR(device,VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,fd,&fdp)!=VK_SUCCESS
-        || !(req.memoryTypeBits & fdp.memoryTypeBits)) {
+    dmaDiagnostics.stage = "buffer_fd_properties";
+    dmaDiagnostics.imageBytes = req.size;
+    dmaDiagnostics.imageTypes = req.memoryTypeBits;
+    dmaDiagnostics.result = vk_.GetMemoryFdPropertiesKHR(device,VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,fd,&fdp);
+    dmaDiagnostics.fdTypes = fdp.memoryTypeBits;
+    if (dmaDiagnostics.result == VK_SUCCESS && !(req.memoryTypeBits & fdp.memoryTypeBits)) {
+        dmaDiagnostics.stage = "buffer_memory_types";
+        dmaDiagnostics.result = VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (dmaDiagnostics.result != VK_SUCCESS) {
         RLOG_E("importDmaBufAsBuffer: no usable memory type (buffer 0x%x, dma-buf 0x%x)", req.memoryTypeBits, fdp.memoryTypeBits);
         vk_.DestroyBuffer(device,src.buf,nullptr); src.buf=VK_NULL_HANDLE;
         return false;
     }
     off_t fdSize = lseek(fd, 0, SEEK_END);
+    dmaDiagnostics.bufferBytes = fdSize;
     VkImportMemoryFdInfoKHR imp{};
     imp.sType=VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
     imp.handleType=VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
@@ -1048,14 +1078,21 @@ bool VulkanRendererContext::importDmaBufAsBuffer(DmaBufSrc& src, int fd, int h, 
     mai.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; mai.pNext=&imp;
     mai.allocationSize = (fdSize > 0 && (VkDeviceSize)fdSize < req.size) ? (VkDeviceSize)fdSize : req.size;
     mai.memoryTypeIndex=findMemType(req.memoryTypeBits & fdp.memoryTypeBits,0);
-    VkResult ar = vk_.AllocateMemory(device,&mai,nullptr,&src.mem);
+    dmaDiagnostics.stage = "allocate_buffer_memory";
+    VkResult ar = dmaDiagnostics.result = vk_.AllocateMemory(device,&mai,nullptr,&src.mem);
     if (ar!=VK_SUCCESS) {
         RLOG_E("importDmaBufAsBuffer: vkAllocateMemory (import) -> %d", ar);
         close(imp.fd);
         vk_.DestroyBuffer(device,src.buf,nullptr); src.buf=VK_NULL_HANDLE; src.mem=VK_NULL_HANDLE;
         return false;
     }
-    vk_.BindBufferMemory(device,src.buf,src.mem,offset);
+    dmaDiagnostics.stage = "bind_buffer_memory";
+    dmaDiagnostics.result = vk_.BindBufferMemory(device,src.buf,src.mem,offset);
+    if (dmaDiagnostics.result != VK_SUCCESS) {
+        vk_.DestroyBuffer(device,src.buf,nullptr); src.buf=VK_NULL_HANDLE;
+        vk_.FreeMemory(device,src.mem,nullptr); src.mem=VK_NULL_HANDLE;
+        return false;
+    }
     src.rowPx = stride / 4;
     return true;
 }
@@ -1521,7 +1558,10 @@ void VulkanRendererContext::renderFrame() {
     si.signalSemaphoreCount=1; si.pSignalSemaphores=sSem;
 
     vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
-    if (vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame])!=VK_SUCCESS) {
+    rendererDraws.store((uint32_t)frameDraws.size());
+    VkResult submitResult = vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame]);
+    rendererSubmitResult.store(submitResult);
+    if (submitResult!=VK_SUCCESS) {
         { std::lock_guard<std::mutex> lk(renderMutex);
           pendingFrameSerial=0;
           if (hasCurUpload) isCursorImageDirty.store(true);
@@ -1535,6 +1575,7 @@ void VulkanRendererContext::renderFrame() {
     }
     {
         std::lock_guard<std::mutex> lk(renderMutex);
+        ++rendererSubmits;
         slotSerial[currentFrame]=pendingFrameSerial;
         pendingFrameSerial=0;
         for (const auto& p:pendingAHB) {
@@ -1553,6 +1594,8 @@ void VulkanRendererContext::renderFrame() {
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
     res = vk_.QueuePresentKHR(graphicsQueue, &pi);
+    rendererPresentResult.store(res);
+    if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) ++rendererPresents;
 
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) fbResized.store(true);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
@@ -1703,14 +1746,22 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     needsRender.store(true); dirtyCV.notify_one();
 }
 
-void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset) {
-    if (fd < 0 || w <= 0 || h <= 0) return;
+bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset) {
     AHardwareBuffer* stand = reinterpret_cast<AHardwareBuffer*>(static_cast<uintptr_t>(0x7d000000u) + static_cast<uintptr_t>(key));
     std::lock_guard<std::mutex> lk(renderMutex);
+    ++dmaUpdates;
+    if (fd < 0 || w <= 0 || h <= 0 || stride <= 0 || offset < 0) {
+        dmaDiagnostics = {};
+        dmaDiagnostics.w=w; dmaDiagnostics.h=h; dmaDiagnostics.stride=stride; dmaDiagnostics.offset=offset;
+        dmaDiagnostics.stage="invalid_buffer"; dmaDiagnostics.result=VK_ERROR_UNKNOWN;
+        ++dmaFailures; return false;
+    }
 
     auto cit = ahbImportCache.find(stand);
     auto sit = dmaBufSrcCache.find(stand);
     if (cit == ahbImportCache.end() && sit == dmaBufSrcCache.end()) {
+        dmaDiagnostics = {};
+        dmaDiagnostics.w=w; dmaDiagnostics.h=h; dmaDiagnostics.stride=stride; dmaDiagnostics.offset=offset;
         WinTex tmp{};
         DmaImport result = importDmaBufToWinTex(tmp, fd, w, h, stride, offset);
         if (result == DmaImport::Ok) {
@@ -1723,7 +1774,7 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
             DmaBufSrc src;
             if (!importDmaBufAsBuffer(src, fd, h, stride, offset)) {
                 RLOG_E("updateWindowContentDmaBuf: buffer import failed for id=%" PRId64, id);
-                return;
+                ++dmaFailures; return false;
             }
             dmaBufKeys.insert(stand);
             dmaBufSrcCache[stand] = src;
@@ -1732,7 +1783,7 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
             RLOG("updateWindowContentDmaBuf: imported dma-buf %d for id=%" PRId64 " (%dx%d stride %d), copied each frame", key, id, w, h, stride);
         } else {
             RLOG_E("updateWindowContentDmaBuf: import failed for id=%" PRId64, id);
-            return;
+            ++dmaFailures; return false;
         }
     }
 
@@ -1748,7 +1799,7 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
         if (wt.isAHB) wt = {};
         if (wt.img==VK_NULL_HANDLE || wt.w!=w || wt.h!=h) {
             if (wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
-            if (!createWinTexResources(wt,w,h)) { texMap.erase(id); return; }
+            if (!createWinTexResources(wt,w,h)) { dmaDiagnostics.stage="create_copy_texture"; dmaDiagnostics.result=VK_ERROR_UNKNOWN; texMap.erase(id); ++dmaFailures; return false; }
             // createWinTexResources made a host staging buffer too; the dma-buf is the source here.
             vk_.DestroyBuffer(device,wt.stg,nullptr); vk_.FreeMemory(device,wt.stgMem,nullptr);
             wt.stg=VK_NULL_HANDLE; wt.stgMem=VK_NULL_HANDLE; wt.mapped=nullptr; wt.cap=0;
@@ -1756,7 +1807,11 @@ void VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
         wt.stg = sit->second.buf; wt.stgBorrowed = true; wt.rowPx = sit->second.rowPx;
         wt.dirty = true;
     }
+    dmaDiagnostics.stage = sit != dmaBufSrcCache.end() ? "buffer_copy" : "sampled_image";
+    dmaDiagnostics.result = VK_SUCCESS;
+    ++dmaAccepted;
     needsRender.store(true); dirtyCV.notify_one();
+    return true;
 }
 
 void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
@@ -1971,6 +2026,28 @@ void VulkanRendererContext::cleanupAllAHBCache() {
     }
     dmaBufSrcCache.clear(); windowDmaSrcs.clear();
     ahbImportCache.clear(); windowAhbs.clear();
+}
+
+std::string VulkanRendererContext::rendererDiagnostics() {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    VkPhysicalDeviceProperties props{};
+    vk_.GetPhysicalDeviceProperties(physicalDevice,&props);
+    char text[1536];
+    snprintf(text,sizeof(text),
+        "stage=%s vk_result=%d device=%s vendor=0x%x driver=0x%x api=%u.%u.%u "
+        "external_fd=%d dma_buf=%d fd_properties=%d format=BGRA8(%d) size=%dx%d stride=%d offset=%d "
+        "row_pitch=%llu image_bytes=%llu buffer_bytes=%lld image_types=0x%x fd_types=0x%x "
+        "updates=%llu accepted=%llu failed=%llu submits=%llu presents=%llu draws=%u submit_result=%d present_result=%d",
+        dmaDiagnostics.stage,(int)dmaDiagnostics.result,props.deviceName,props.vendorID,props.driverVersion,
+        VK_VERSION_MAJOR(props.apiVersion),VK_VERSION_MINOR(props.apiVersion),VK_VERSION_PATCH(props.apiVersion),
+        hasExternalMemoryFd,hasDmaBufExtension,vk_.GetMemoryFdPropertiesKHR!=nullptr,(int)VK_FORMAT_B8G8R8A8_UNORM,
+        dmaDiagnostics.w,dmaDiagnostics.h,dmaDiagnostics.stride,dmaDiagnostics.offset,
+        (unsigned long long)dmaDiagnostics.rowPitch,(unsigned long long)dmaDiagnostics.imageBytes,
+        (long long)dmaDiagnostics.bufferBytes,dmaDiagnostics.imageTypes,dmaDiagnostics.fdTypes,
+        (unsigned long long)dmaUpdates,(unsigned long long)dmaAccepted,(unsigned long long)dmaFailures,
+        (unsigned long long)rendererSubmits.load(),(unsigned long long)rendererPresents.load(),rendererDraws.load(),
+        rendererSubmitResult.load(),rendererPresentResult.load());
+    return text;
 }
 
 void VulkanRendererContext::dumpRendererInfo() {

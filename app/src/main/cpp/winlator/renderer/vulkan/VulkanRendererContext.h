@@ -168,7 +168,8 @@ public:
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
     // A frame a Linux client rendered into a dma-buf (DRI3). [key] names the buffer (its pixmap) across frames.
-    void updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
+    bool updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
+    std::string rendererDiagnostics();
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
@@ -454,6 +455,19 @@ public:
     std::unordered_map<AHardwareBuffer*, DmaBufSrc>            dmaBufSrcCache;
     std::unordered_map<int64_t, std::vector<AHardwareBuffer*>> windowDmaSrcs;
     bool  hasDmaBufImport = false;
+    bool hasExternalMemoryFd = false, hasDmaBufExtension = false;
+    struct DmaBufDiagnostics {
+        const char* stage = "not_started";
+        VkResult result = VK_SUCCESS;
+        int w = 0, h = 0, stride = 0, offset = 0;
+        uint64_t rowPitch = 0, imageBytes = 0;
+        int64_t bufferBytes = -1;
+        uint32_t imageTypes = 0, fdTypes = 0;
+    } dmaDiagnostics;
+    uint64_t dmaUpdates = 0, dmaAccepted = 0, dmaFailures = 0;
+    std::atomic<uint64_t> rendererSubmits{0}, rendererPresents{0};
+    std::atomic<int> rendererSubmitResult{VK_SUCCESS}, rendererPresentResult{VK_SUCCESS};
+    std::atomic<uint32_t> rendererDraws{0};
     // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
     std::unordered_set<AHardwareBuffer*> dmaBufKeys;
     void releaseAhbKey(AHardwareBuffer* key) { if (key && !dmaBufKeys.erase(key)) AHardwareBuffer_release(key); }

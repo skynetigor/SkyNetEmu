@@ -38,6 +38,11 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("rendererDiagnostics"))) {
+                result.putString("stream", new RendererDiagnosticsChecks(this).run());
+                finish(status, result);
+                return;
+            }
             if (options != null && "1".equals(options.getString("liveTouch"))) {
                 result.putString("stream", new NativeTouchChecks(this).live(options));
                 finish(status,result);

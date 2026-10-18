@@ -41,13 +41,39 @@ the user turns telemetry off and on), `session.id` (per app process), `service.n
 
 | `event.dataset` | one per | fields |
 |---|---|---|
-| `skynet.session` | app start | the common fields |
+| `skynet.session` | app start; once after 40 s of a Linux session | the common fields; `linux_renderer` snapshots also carry the Linux diagnostic fields below and omit `event.outcome` |
 | `skynet.funnel` | step of adding a game | `event.action`: `add_game_started`, `exe_picked`, `game_recognised`, `config_chosen`, `container_created`, `shortcut_created`, `game_launched`; `skynet.game.id`, `skynet.game.version`, `skynet.config.id` |
 | `skynet.game_session` | play session | `skynet.game.id`, `skynet.game.version`, `skynet.config.id`, `skynet.wine`, `skynet.emulator`, `skynet.driver`, `skynet.file_cache`, `skynet.storage`, `skynet.time_to_window_ms`, `skynet.time_to_renderer_ms`, `event.duration` (ns), `skynet.fps.avg`, `skynet.fps.p1_low`, `skynet.frametime.p99_ms`, `skynet.cpu.avg_pct`, `skynet.temp.cpu_max_c`, `skynet.temp.battery_max_c`, `skynet.thermal.max_status`, `skynet.memory.peak_used_bytes`, `skynet.battery.drain_pct`, `skynet.exit.code`, `skynet.exit.kind` |
 | `skynet.error` | failure | `error.type`, `error.message`, `error.stack_trace`, `skynet.error.stage` |
 
 Never sent: file paths, game folder or exe names, shortcut or container names, text typed by the user, Wine logs, the IP address. Messages are
 scrubbed of paths, quoted text and e-mail addresses before they leave the phone. Game ids are the registry's, or `unknown`.
+
+## Linux renderer diagnostics
+
+With telemetry enabled, Linux sessions send bounded diagnostic excerpts rather than full local log files:
+
+| Field | Limit | Content |
+|---|---|---|
+| `skynet.renderer.diagnostics` | 2048 characters | GPU/driver identity, external-memory capabilities, last DMA import stage and Vulkan result, buffer geometry, memory requirements/type masks, accepted/rejected update counts, GPU submit/present results and counts |
+| `skynet.linux.setup` | 1000 characters | Linux runtime, emulator and launch configuration |
+| `skynet.linux.seconds_running` | 0–604800 | Elapsed seconds |
+| `skynet.linux.logs` | 6000 characters total | Renderer messages when the debug logcat collector is running, the last 30 lines of game output, and up to 25 lines from each of Steam's five newest text logs |
+
+These fields are allowed on `skynet.session` and `skynet.error`. All text is scrubbed on the phone and again by ingestion. The renderer
+excerpt keeps at most 24 distinct consecutive messages and 3000 characters; it excludes unrelated logcat tags. Release builds still
+collect the native numeric snapshot directly, but do not start a logcat collector for telemetry. Full `*_winlator_*.txt` files are kept locally.
+
+An import rejection sends one immediate `skynet.error` event per Linux session (`event.action=launch`,
+`error.type=linux_frame_import_failed`). It reads log tails on a background thread. At 40 seconds, a neutral
+`skynet.session` / `linux_renderer` event captures diagnostics even if the game is sending frames; the existing zero-frame watchdog also
+checks at 40 and 120 seconds. Rejected DMA imports do not increase the game/HUD frame count. Accepted imports or successful Android
+presentation calls alone do not establish that the game's pixels are visible.
+
+The ingest service's schema has a different structure from the app schema here. Apply [ingest-renderer-logs.patch](telemetry/ingest-renderer-logs.patch)
+to the root of the `ubuntu_vm` repository. It updates the service
+allow-list, per-event byte limit, privacy filtering, ingest pipeline, template, and existing session/error stream mappings on startup.
+The live integration check tags synthetic events with `device.manufacturer=TelemetryTest` so they can be excluded from device analysis.
 
 ## Endpoint and switches
 

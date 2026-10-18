@@ -136,13 +136,21 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
         r->updateWindowContentAHB(id, reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentDmaBuf(
     JNIEnv*, jobject, jlong handle, jlong id, jint key, jint fd,
     jint w, jint h, jint stride, jint offset)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->updateWindowContentDmaBuf(id, key, fd, w, h, stride, offset);
+    return r && r->updateWindowContentDmaBuf(id, key, fd, w, h, stride, offset) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererDiagnostics(
+    JNIEnv* env, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return env->NewStringUTF(r ? r->rendererDiagnostics().c_str() : "renderer=unavailable");
 }
 
 extern "C" JNIEXPORT void JNICALL
