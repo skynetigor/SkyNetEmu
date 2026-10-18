@@ -1606,6 +1606,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (renderer instanceof VulkanXServerView) {
             VulkanXServerView vkRenderer = (VulkanXServerView) renderer;
+            if (linuxNativeOutput) {
+                vkRenderer.requireDmaBufImport(message -> {
+                    if (isFinishing() || isDestroyed() || exiting.get()) return;
+                    preloaderDialog.closeOnUiThread();
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle("Renderer driver unavailable")
+                            .setMessage(message + "\n\nChoose an Android Turnip driver compatible with your GPU in the shortcut's Renderer driver setting.")
+                            .setPositiveButton(android.R.string.ok, (d, w) -> exit())
+                            .setOnCancelListener(d -> exit())
+                            .show();
+                });
+            }
 
             EnvVars vulkanStartupVars = new EnvVars();
             if (container != null) vulkanStartupVars.putAll(container.getEnvVars());
@@ -1631,9 +1643,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     String libraryName = adrenotoolsManager.getLibraryName(rendererDriverId);
                     String nativeLibDir = AppUtils.getNativeLibDir(this);
-                    if (!libraryName.isEmpty())
+                    if (linuxNativeOutput || !libraryName.isEmpty())
                         vkRenderer.setDriverInfo(driverPath, libraryName, nativeLibDir);
-                } catch (Exception ignored) {
+                } catch (Exception error) {
+                    if (linuxNativeOutput) {
+                        vkRenderer.setDriverInfo(getFilesDir().getAbsolutePath() + "/contents/adrenotools/" + rendererDriverId + "/", "", AppUtils.getNativeLibDir(this));
+                    }
+                    android.util.Log.e("XServerDisplayActivity", "Unable to prepare renderer driver " + rendererDriverId, error);
                 }
             }
 

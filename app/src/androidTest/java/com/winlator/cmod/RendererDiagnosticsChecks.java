@@ -107,9 +107,22 @@ final class RendererDiagnosticsChecks {
             VulkanXServerView.loadNativeLibrary();
             driver.runOnMainSync(() -> view[0] = new VulkanXServerView(context, server));
             long handle = (Long) method("nativeInit", Surface.class, int.class, int.class,
-                    String.class, String.class, String.class, boolean.class).invoke(view[0], reader.getSurface(),
-                    64, 64, null, null, context.getApplicationInfo().nativeLibraryDir, false);
+                    String.class, String.class, String.class, boolean.class, boolean.class).invoke(view[0], reader.getSurface(),
+                    64, 64, null, null, context.getApplicationInfo().nativeLibraryDir, false, false);
             check(handle != 0, "real Vulkan renderer initializes on an offscreen Android surface");
+            try {
+                method("nativeInit", Surface.class, int.class, int.class,
+                        String.class, String.class, String.class, boolean.class, boolean.class)
+                        .invoke(view[0], reader.getSurface(), 64, 64,
+                                new File(context.getCacheDir(), "missing-renderer-driver").getAbsolutePath() + "/",
+                                "missing-driver.so", context.getApplicationInfo().nativeLibraryDir, false, true);
+                throw new AssertionError("native output silently accepted an unavailable custom driver");
+            } catch (java.lang.reflect.InvocationTargetException error) {
+                check(error.getCause() instanceof IllegalStateException
+                                && error.getCause().getMessage().contains("could not be loaded"),
+                        "native output rejects unavailable custom drivers instead of falling back to System");
+            }
+
             field(VulkanXServerView.class, "nativeHandle").setLong(view[0], handle);
             field(VulkanXServerView.class, "importFailureReported").setBoolean(view[0], true);
             Method snapshot = method("nativeRendererDiagnostics", long.class);

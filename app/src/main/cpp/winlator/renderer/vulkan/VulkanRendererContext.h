@@ -170,6 +170,7 @@ public:
     // A frame a Linux client rendered into a dma-buf (DRI3). [key] names the buffer (its pixmap) across frames.
     bool updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
     std::string rendererDiagnostics();
+    bool supportsDmaBufImport() const { return hasDmaBufImport && vk_.GetMemoryFdPropertiesKHR; }
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);

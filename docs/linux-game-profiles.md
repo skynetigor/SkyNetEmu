@@ -2,6 +2,19 @@
 
 Written 2026-10-13. Nothing here was compiled or run yet when this was written; the checks are listed at the end.
 
+## Native Vulkan output
+
+Linux shortcuts expose **Renderer driver** when **Vulkan output** is **Native**. This searchable picker lists bundled,
+installed and downloadable Android AdrenoTools drivers from Components. Installed drivers select immediately; downloads
+select the installed package ID only after installation succeeds. Failure preserves the previous selection. The editor
+waits for an active driver download before saving and closing; changing settings categories does not cancel it.
+
+The renderer driver is stored in the shortcut's existing `rendererDriverId` field. It is separate from **Turnip driver**,
+which selects a glibc driver for the Linux game. Native output validates the Android renderer's DMA-BUF import support,
+reports custom-driver loading or frame-import failures, and does not fall back to the system driver or CPU output when
+an explicitly chosen Android driver fails. A driver must support the device GPU and importing the Linux game's frames;
+a successful installation alone does not establish compatibility.
+
 ## Game profiles
 
 The registry (`games.json` in the components repository, see its README, "Game profiles") says how to start a game and what works

@@ -59,6 +59,14 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private boolean cursorVisible = false;
     private String driverPath = null;
     private ExecutorService initExecutor = null;
+    private boolean requireDmaBufImport;
+    private java.util.function.Consumer<String> initializationError;
+
+    public void requireDmaBufImport(java.util.function.Consumer<String> onError) {
+        requireDmaBufImport = true;
+        initializationError = onError;
+    }
+
     private volatile boolean initComplete = false;
     private volatile boolean inPipMode = false;
     private String driverLibraryName = null;
@@ -115,7 +123,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native long nativeInit(Surface surface,
                                    int screenWidth, int screenHeight,
                                    String driverPath, String libraryName, String nativeLibDir,
-                                   boolean validationEnabled);
+                                   boolean validationEnabled, boolean requireDmaBufImport);
     private native void nativeResize(long handle, int width, int height);
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
@@ -213,10 +221,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     }
                 }
 
-                nativeHandle = nativeInit(
-                    surface,
-                    xServer.screenInfo.width, xServer.screenInfo.height,
-                    driverPath, driverLibraryName, nativeLibDir, validationEnabled);
+                try {
+                    nativeHandle = nativeInit(
+                            surface,
+                            xServer.screenInfo.width, xServer.screenInfo.height,
+                            driverPath, driverLibraryName, nativeLibDir, validationEnabled, requireDmaBufImport);
+                } catch (IllegalStateException error) {
+                    Log.e("VulkanXServerView", "Renderer initialization failed", error);
+                    if (initializationError != null) post(() -> initializationError.accept(error.getMessage()));
+                    return;
+                }
 
                 if (nativeHandle != 0) {
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
@@ -587,6 +601,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                                 Log.e("VulkanXServerView", "Linux frame import failed: " + details);
                                 com.winlator.cmod.telemetry.LinuxDiagnostics.rendererImportFailed(details);
                             } catch (Exception ignored) {}
+                            if (requireDmaBufImport && initializationError != null) {
+                                post(() -> initializationError.accept("The selected renderer driver could not import the game's DMA-BUF frame."));
+                            }
                         }
                         return;
                     }
