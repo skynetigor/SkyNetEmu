@@ -89,7 +89,7 @@ public final class SteamContainer {
 
     /** The configuration of a new Steam container: the registry's "steam" block, or the built-in one when it cannot be read. */
     public static Defaults defaults(Context context, boolean allowNetwork) {
-        Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native",
+        Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4-r2", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native",
                 "fex-2610", "rootfs-ubuntu-24-04-2026-08-11");
         String text = RegistryCache.get(context, "linux.json", RegistryCache.TTL_INDEX, allowNetwork);
         if (text == null) return builtIn;

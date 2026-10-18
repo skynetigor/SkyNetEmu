@@ -9,7 +9,7 @@ not yet. Each stop below was found by running the game on the device; the last o
 | # | Symptom in the game's log | Cause | Status |
 | --- | --- | --- | --- |
 | 1 | `free(): invalid size`, SIGABRT after 1 s, backtrace `box64/free` <- `libdxcompiler.so+1959281` | 0.39 ships mimalloc (`libmimalloc.so.3`, the exe calls `mi_zalloc`, `mi_heap_new`, ...) and on Linux it takes over `malloc`/`free` for the whole process. Box64 cannot interpose the wrapped glibc, so a block mimalloc allocated reaches glibc's `free`. `BOX64_MALLOC_HACK` 0, 1, 2 only change where it dies | **Fixed.** `tools/linux-shim/mimalloc_compat.c` (`libmimalloc_compat_x64.so`): the `mi_*` functions the game imports, built on plain `malloc`, no `malloc`/`free` of its own. It must be preloaded: `BOX64_LD_PRELOAD=...:libmimalloc.so.3` (the file named like the library's soname). `BOX64_LD_LIBRARY_PATH` is not enough, the game's own copy is found first. **Not wired into the app yet** (tried by hand through `Winlator/linux-env.txt`) |
-| 2 | SIGSEGV in `box64/vkGetInstanceProcAddr`, just after `no wrapper for vkCmdDispatchTileQCOM` | Box64's `resolveSymbol` (`src/wrapped/wrappedvulkan.c`) dereferences the missing wrapper when the driver returns a function Box64 has no wrapper for. Turnip 26.x (and the runtime's own) lists `VK_QCOM_tile_shading`, and the game asks for every function | **Fixed** by `scripts/linux/box64/patches/0002-vulkan-function-without-wrapper.patch` (components repo, not committed): return NULL when there is no wrapper. Tried with a Box64 built on the Mac (zig cc, see below) and put over the installed binary. A release of the patched build is needed |
+| 2 | SIGSEGV in `box64/vkGetInstanceProcAddr`, just after `no wrapper for vkCmdDispatchTileQCOM` | Box64's `resolveSymbol` (`src/wrapped/wrappedvulkan.c`) dereferences the missing wrapper when the driver returns a function Box64 has no wrapper for. Turnip 26.x (and the runtime's own) lists `VK_QCOM_tile_shading`, and the game asks for every function | **Fixed in published package `box64-0.4.4-r2`** by `scripts/linux/box64/patches/0002-vulkan-function-without-wrapper.patch` (components repo): return NULL when there is no wrapper. Existing shortcuts must select the new build |
 | 3 | SIGILL (`ud2`) at `libcef.so+0x8770d6b`, 10 s after start | CEF's `base::i18n::InitializeICU` cannot open `icudtl.dat`: it looks in the **game root** (`.../BeamNG_0_39/icudtl.dat`), the depot has it only in `BinLinux/`. Found with an `open()` tracer (`LD_PRELOAD`). `/proc/self/exe` is fine (a test program showed Box64 returns the game's path) | **Worked around** by copying `icudtl.dat`, `resources.pak`, `chrome_100_percent.pak`, `chrome_200_percent.pak`, `snapshot_blob.bin`, `v8_context_snapshot.bin` from `BinLinux/` into the game root (28 MB). The app should do this without touching the user's folder, for example an `open()` fallback in `libskyshim_x64.so` for these names |
 | 4 | SIGILL (`ud2`) at `libcef.so+0x39043bf`, about 1 s after `GELUA VM loaded` | Our X server's reply to XI 1.x `ListInputDevices` with no devices was 32 bytes with `length=0`; Chromium's reader (`x11::Input::ListInputDevices`) aligns the end of the names list one byte past an empty list and aborts when the length does not cover it. Same crash in Steam's web helper (aarch64 `brk`), see [linux-cef-x11.md](linux-cef-x11.md) | **Fixed** in `XInput2Extension.listInputDevices`: the reply lists the two master devices, which both Chromium and libXi accept |
 
@@ -50,8 +50,7 @@ shared storage with Box64 (no copy needed, unlike FEX).
 With the four fixes BeamNG 0.39 reaches its main menu (about 115 FPS, Alpha v.0.39.4) on Box64 from shared storage. The app does
 items 1 and 3 by itself now (`LinuxSession.guestEnv`: the mimalloc stub is preloaded for a program whose folder has
 `libmimalloc.so.3`; `SKY_RESOURCE_DIR` makes `libskyshim_x64.so` open `icudtl.dat` and the `.pak`/`.bin` files from the
-program's folder when the game root lacks them). Item 4 is the X server. Item 2 still needs the patched Box64 (here a
-debug build copies it over the installed one; users need a published build).
+program's folder when the game root lacks them). Item 4 is the X server. Item 2 originally needed a debug override. The patched Box64 is now published as `box64-0.4.4-r2`; existing shortcuts must select that build.
 
 ## What was left on the phone (written before the fix; the debug leftovers were removed afterwards) (to clean up or reuse)
 
@@ -71,11 +70,18 @@ debug build copies it over the installed one; users need a published build).
 * `tools/linux-shim/mimalloc_compat.c`, `libmimalloc_compat_x64.so` (the stub, committed earlier, built by `build.sh`).
 * `app/src/main/java/com/winlator/cmod/linux/LinuxSession.java`: `debugEnv` (`linux-env.txt`) and `installDebugBox64`
   (`box64-override`), both for debug builds only. Not committed.
-* `winlator-skynet-components/scripts/linux/box64/patches/0002-vulkan-function-without-wrapper.patch`: not committed
-  there; it needs a new Box64 build and release (`linux-box64-0.4.4`, the registry entry in `linux.json`).
+* `winlator-skynet-components/scripts/linux/box64/patches/0002-vulkan-function-without-wrapper.patch`: committed in the
+  components repository and included in release `linux-box64-0.4.4-r2`; the catalogs name the new package and checksum.
 * `docs/linux-fex-plan.md`: FEX is parked; this game runs on Box64 only.
 
-## Decisions that were open
+## Box64 distribution (2026-10-18)
 
-1. Publish a Box64 build with patch 0002 (a public release in the components repo; the registry entry in `linux.json`);
-   until then 0.39 works only in a debug build with `Winlator/box64-override`.
+[Linux Box64 0.4.4-r2](https://github.com/skynetigor/winlator-skynet-components/releases/tag/linux-box64-0.4.4-r2)
+contains both patches. Its ARM Linux build passes static and dynamic x86-64 smoke tests and a mock Vulkan driver test of
+`vkGetInstanceProcAddr` and `vkGetDeviceProcAddr`. On the Fold, the original published binary reproduces the Xiaomi screenshot's
+SIGSEGV at `vkGetInstanceProcAddr + 0x13`; the r2 binary passes the same test. The Fold's older working binary matches its
+`Winlator/box64-override`, explaining why the unpatched package was not exposed by ordinary testing there.
+
+Import the release's `beamng-linux-box64-r2.wcfg` to download the new build, then select Box64 0.4.4-r2 in the affected game's
+shortcut. An APK update does not replace an emulator already installed under the old ID. Xiaomi game testing is still pending:
+the device was unavailable when this package was published.
