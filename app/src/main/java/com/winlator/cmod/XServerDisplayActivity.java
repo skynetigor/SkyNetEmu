@@ -458,6 +458,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         linuxSession = container.isLinux();
+        com.winlator.cmod.linux.FramePipelineDiagnostics.configure(this);
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
             if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
@@ -1089,6 +1090,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
+        com.winlator.cmod.linux.FramePipelineDiagnostics.stop();
         if (performanceSession != null) performanceSession.close();
         com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
         GameSessionRecorder.end();
@@ -1164,6 +1166,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        com.winlator.cmod.linux.FramePipelineDiagnostics.stop();
         if (performanceSession != null) performanceSession.close();
         if (realMouseListener != null) {
             InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
@@ -1813,6 +1816,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         setupSidebarHudControls();
         setupSidebarGraphicsControls();
+        if (com.winlator.cmod.linux.FramePipelineDiagnostics.enabled()) {
+            FrameLayout.LayoutParams probeLayout=new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.TOP | android.view.Gravity.CENTER_HORIZONTAL);
+            probeLayout.topMargin=Math.round(32*getResources().getDisplayMetrics().density);
+            rootView.addView(new com.winlator.cmod.widget.FramePipelineOverlay(this),probeLayout);
+        }
     }
 
     private ActivityResultLauncher<Intent> controlsEditorActivityResultLauncher = registerForActivityResult(

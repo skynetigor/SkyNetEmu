@@ -7,6 +7,7 @@
 #include "view_transformation.hpp"
 #include "xform.hpp"
 #include "RendererTiming.h"
+#include "FramePipelineCounters.h"
 
 struct VkTable {
 
@@ -160,7 +161,7 @@ class VulkanRendererContext {
 public:
     VulkanRendererContext(ANativeWindow* window, int cWidth, int cHeight,
                           void* adrenotoolsHandle = nullptr,
-                          bool validationEnabled = false);
+                          bool validationEnabled = false, bool pipelineEnabled = false);
     ~VulkanRendererContext();
 
     void onSurfaceResized(int width, int height);
@@ -171,6 +172,8 @@ public:
     // A frame a Linux client rendered into a dma-buf (DRI3). [key] names the buffer (its pixmap) across frames.
     bool updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
     std::string rendererDiagnostics();
+    std::string pipelineDiagnostics();
+    void setPipelineTarget(int64_t id);
     bool supportsDmaBufImport() const { return hasDmaBufImport && vk_.GetMemoryFdPropertiesKHR; }
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
@@ -467,6 +470,17 @@ public:
         uint32_t imageTypes = 0, fdTypes = 0;
     } dmaDiagnostics;
     uint64_t dmaUpdates = 0, dmaAccepted = 0, dmaFailures = 0;
+    const bool pipelineEnabled;
+    FramePipelineCounters pipe;
+    int64_t pipelineTarget=0;
+    uint64_t pipelineEpoch=0;
+    bool displayTimingEnabled=false;
+    PFN_vkGetPastPresentationTimingGOOGLE getPastTiming=nullptr;
+    DisplayTimingCounters displayFeedback;
+    uint64_t lastDisplayPollNs=0;
+    std::atomic<int> displayTimingResult{VK_NOT_READY};
+    uint32_t nextDisplayId=1;
+    void pollDisplayTiming();
     std::atomic<uint64_t> rendererSubmits{0}, rendererPresents{0};
     std::atomic<int> rendererSubmitResult{VK_SUCCESS}, rendererPresentResult{VK_SUCCESS};
     std::atomic<uint32_t> rendererDraws{0};

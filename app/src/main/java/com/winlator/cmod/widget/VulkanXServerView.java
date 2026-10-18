@@ -123,7 +123,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native long nativeInit(Surface surface,
                                    int screenWidth, int screenHeight,
                                    String driverPath, String libraryName, String nativeLibDir,
-                                   boolean validationEnabled, boolean requireDmaBufImport);
+                                   boolean validationEnabled, boolean requireDmaBufImport, boolean pipelineEnabled);
     private native void nativeResize(long handle, int width, int height);
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
@@ -135,6 +135,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
         int w, int h, int stride, int offset);
     private native String nativeRendererDiagnostics(long handle);
+    private native String nativePipelineDiagnostics(long handle);
+    private native void nativeSetPipelineTarget(long handle, long id);
+    public String pipelineDiagnostics() {
+        synchronized(lock) {return nativeHandle!=0?nativePipelineDiagnostics(nativeHandle):"pipe_available=0";}
+    }
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long id,
         long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
@@ -225,7 +230,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeHandle = nativeInit(
                             surface,
                             xServer.screenInfo.width, xServer.screenInfo.height,
-                            driverPath, driverLibraryName, nativeLibDir, validationEnabled, requireDmaBufImport);
+                            driverPath, driverLibraryName, nativeLibDir, validationEnabled, requireDmaBufImport, com.winlator.cmod.linux.FramePipelineDiagnostics.enabled());
                 } catch (IllegalStateException error) {
                     Log.e("VulkanXServerView", "Renderer initialization failed", error);
                     if (initializationError != null) post(() -> initializationError.accept(error.getMessage()));
@@ -233,6 +238,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 }
 
                 if (nativeHandle != 0) {
+                    com.winlator.cmod.linux.FramePipelineDiagnostics.renderer(this::pipelineDiagnostics);
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
@@ -588,6 +594,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
         synchronized (lock) {
             if (nativeHandle == 0 || pixmap == null) return;
+            if (window.id==sessionWindowId && com.winlator.cmod.linux.FramePipelineDiagnostics.enabled())
+                nativeSetPipelineTarget(nativeHandle,did(window.getContent()));
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
                 if (pixmap.dmaBufFd >= 0) {
@@ -833,7 +841,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     public void setFpsWindowId(int id) { fpsWindowId = id; }
     @Override
-    public void setSessionWindowId(int id) { sessionWindowId = id; }
+    public void setSessionWindowId(int id) { sessionWindowId = id; com.winlator.cmod.linux.FramePipelineDiagnostics.targetWindow(id); }
     public void setFrameRating(Object fr) {
         if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
         else if (fr instanceof FrameRating) classicHudRef = (FrameRating) fr;

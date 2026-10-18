@@ -59,7 +59,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     JNIEnv* env, jobject ,
     jobject surface, jint w, jint h,
     jstring jDriverPath, jstring jLibraryName, jstring jNativeLibDir,
-    jboolean validationEnabled, jboolean requireDmaBufImport)
+    jboolean validationEnabled, jboolean requireDmaBufImport, jboolean pipelineEnabled)
 {
     ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
     if (!win) return 0;
@@ -101,7 +101,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     VulkanRendererContext* renderer = nullptr;
     try {
         renderer = new VulkanRendererContext(win, w, h, adrenotoolsHandle,
-                                             validationEnabled == JNI_TRUE);
+                                             validationEnabled == JNI_TRUE, pipelineEnabled == JNI_TRUE);
     } catch (const std::exception& error) {
         ANativeWindow_release(win);
         if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
@@ -441,4 +441,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeReattachSurface(
     if (!win) return JNI_FALSE;
     bool ok = r->reattachSurface(win);
     return (jboolean)ok;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPipelineTarget(JNIEnv*,jobject,jlong h,jlong id) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(h);if(r)r->setPipelineTarget(id);
+}
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativePipelineDiagnostics(JNIEnv* env,jobject,jlong h) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(h);
+    return env->NewStringUTF(r?r->pipelineDiagnostics().c_str():"pipe_available=0");
 }

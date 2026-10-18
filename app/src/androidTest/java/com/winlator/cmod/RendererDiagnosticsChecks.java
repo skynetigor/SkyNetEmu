@@ -107,15 +107,15 @@ final class RendererDiagnosticsChecks {
             VulkanXServerView.loadNativeLibrary();
             driver.runOnMainSync(() -> view[0] = new VulkanXServerView(context, server));
             long handle = (Long) method("nativeInit", Surface.class, int.class, int.class,
-                    String.class, String.class, String.class, boolean.class, boolean.class).invoke(view[0], reader.getSurface(),
-                    64, 64, null, null, context.getApplicationInfo().nativeLibraryDir, false, false);
+                    String.class, String.class, String.class, boolean.class, boolean.class, boolean.class).invoke(view[0], reader.getSurface(),
+                    64, 64, null, null, context.getApplicationInfo().nativeLibraryDir, false, false, true);
             check(handle != 0, "real Vulkan renderer initializes on an offscreen Android surface");
             try {
                 method("nativeInit", Surface.class, int.class, int.class,
-                        String.class, String.class, String.class, boolean.class, boolean.class)
+                        String.class, String.class, String.class, boolean.class, boolean.class, boolean.class)
                         .invoke(view[0], reader.getSurface(), 64, 64,
                                 new File(context.getCacheDir(), "missing-renderer-driver").getAbsolutePath() + "/",
-                                "missing-driver.so", context.getApplicationInfo().nativeLibraryDir, false, true);
+                                "missing-driver.so", context.getApplicationInfo().nativeLibraryDir, false, true, false);
                 throw new AssertionError("native output silently accepted an unavailable custom driver");
             } catch (java.lang.reflect.InvocationTargetException error) {
                 check(error.getCause() instanceof IllegalStateException
@@ -139,6 +139,7 @@ final class RendererDiagnosticsChecks {
                     int.class, int.class, int.class, int.class)
                     .invoke(view[0], handle, gameId, (long) root.id, contentId, 0, 0, 64, 64);
             method("nativeMapWindow", long.class, long.class).invoke(view[0], handle, gameId);
+            method("nativeSetPipelineTarget",long.class,long.class).invoke(view[0],handle,contentId);
             Field frames = field(GameSessionRecorder.class, "framesSeen");
             int before = frames.getInt(null);
             Drawable pixmap = root.getContent();
@@ -168,6 +169,26 @@ final class RendererDiagnosticsChecks {
             } while (SystemClock.elapsedRealtime() < deadline);
             check(counter(presented, "submits") > 0 && counter(presented, "presents") > 0 && counter(presented, "draws") > 0,
                     "native diagnostics observe successful GPU submission and presentation with content: " + presented);
+            Method pipeline=method("nativePipelineDiagnostics",long.class);
+            String flow=(String)pipeline.invoke(view[0],handle);
+            check(counter(flow,"pipe_accepted")==1 && counter(flow,"pipe_unique")==1,
+                    "pipeline counts one accepted AHB update and one unique source queued");
+            method("nativeSetPointerPos",long.class,short.class,short.class).invoke(view[0],handle,(short)7,(short)9);
+            deadline=SystemClock.elapsedRealtime()+3000;
+            do {flow=(String)pipeline.invoke(view[0],handle);if(counter(flow,"pipe_repeats")>0)break;SystemClock.sleep(20);}
+            while(SystemClock.elapsedRealtime()<deadline);
+            check(counter(flow,"pipe_unique")==1 && counter(flow,"pipe_repeats")>0,
+                    "cursor-only redraw repeats the source without inventing a game frame");
+            view[0].onUpdateWindowContentDirect(root,pixmap);
+            deadline=SystemClock.elapsedRealtime()+3000;
+            do {flow=(String)pipeline.invoke(view[0],handle);if(counter(flow,"pipe_unique")==2)break;SystemClock.sleep(20);}
+            while(SystemClock.elapsedRealtime()<deadline);
+            check(counter(flow,"pipe_accepted")==2 && counter(flow,"pipe_unique")==2,
+                    "reusing the same AHB advances source sequence");
+            if(counter(flow,"pipe_display_available")==0)check(flow.contains("pipe_displayed=-1"),
+                    "unsupported physical display feedback is unavailable, never fabricated");
+            report.append("PIPELINE ").append(flow).append('\n');
+
             report.append("NATIVE ").append(presented).append('\n');
         } finally {
             if (view[0] != null) {

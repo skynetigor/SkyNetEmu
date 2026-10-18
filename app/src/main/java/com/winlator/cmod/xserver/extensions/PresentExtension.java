@@ -194,6 +194,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         final Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
 
+        com.winlator.cmod.linux.FramePipelineDiagnostics.received(windowId);
         final Pixmap pixmap = client.xServer.pixmapManager.getPixmap(pixmapId);
         if (pixmap == null) throw new BadPixmap(pixmapId);
 

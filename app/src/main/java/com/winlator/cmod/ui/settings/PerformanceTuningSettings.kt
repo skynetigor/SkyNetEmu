@@ -38,6 +38,24 @@ internal class PerformanceTuningEditorState(shortcut: Shortcut) {
 }
 
 @Composable
+private fun FramePipelineDiagnosticsToggle() {
+    val prefs = PreferenceManager.getDefaultSharedPreferences(LocalContext.current)
+    val key = com.winlator.cmod.linux.FramePipelineDiagnostics.KEY
+    var enabled by remember(prefs) { mutableStateOf(prefs.getBoolean(key, false)) }
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, changed ->
+            if (changed == key || changed == null) enabled = prefs.getBoolean(key, false)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    SettingToggle("Frame pipeline diagnostics", enabled,
+        description = "Global setting for all games. Restart the game after changing this. Frame counters appear in the overlay and in-game Performance tuning dialog.") {
+        prefs.edit().putBoolean(key, it).apply()
+    }
+}
+
+@Composable
 internal fun PerformanceTuningGlobalCard() {
     val prefs = PreferenceManager.getDefaultSharedPreferences(LocalContext.current)
     var revision by remember { mutableIntStateOf(0) }
@@ -48,6 +66,8 @@ internal fun PerformanceTuningGlobalCard() {
     }
     SettingsCard {
         Text("Defaults for every game. Shortcuts can override each option. All options start off.", Modifier.padding(14.dp))
+        SettingsDivider()
+        FramePipelineDiagnosticsToggle()
         tuningLabels.forEachIndexed { i, label ->
             SettingsDivider()
             @Suppress("UNUSED_EXPRESSION") revision
@@ -62,6 +82,8 @@ internal fun PerformanceTuningGlobalCard() {
 internal fun PerformanceTuningGameCard(state: PerformanceTuningEditorState, onChanged: () -> Unit = {}) {
     val prefs = PreferenceManager.getDefaultSharedPreferences(LocalContext.current)
     SettingsCard {
+        FramePipelineDiagnosticsToggle()
+        SettingsDivider()
         Text("Overrides apply to this game in Linux and Wine. Requests are restored when the session ends or goes into the background.", Modifier.padding(14.dp))
         tuningLabels.forEachIndexed { i, label ->
             SettingsDivider()
@@ -92,7 +114,7 @@ object PerformanceTuningDialog {
                             DisposableEffect(session) {
                                 val handler = Handler(Looper.getMainLooper())
                                 val poll = object : Runnable {
-                                    override fun run() { status = session?.status().orEmpty(); handler.postDelayed(this, 1000) }
+                                    override fun run() { status = session?.status().orEmpty() + "\n\n" + com.winlator.cmod.linux.FramePipelineDiagnostics.display(); handler.postDelayed(this, 1000) }
                                 }
                                 handler.post(poll)
                                 onDispose { handler.removeCallbacks(poll) }

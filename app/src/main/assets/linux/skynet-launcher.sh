@@ -81,6 +81,18 @@ if [ "$game32" = 1 ] && [ -f "$SKY_FEX_GL32_SCRIPT" ]; then
     sky_gl32_mesa_env
 fi
 # the Steam runtime's overlay libraries are not there; Steam's own preload would only produce warnings
+# The frame probe is a native aarch64 layer. A 32-bit game's loader cannot load it.
+if [ "$game32" = 1 ] && [ -n "$SKY_FRAME_PROBE_DIR" ]; then
+    sky_probe_layers=""
+    IFS=: read -r -a sky_probe_layer_list <<< "${VK_INSTANCE_LAYERS:-}"
+    for sky_probe_layer in "${sky_probe_layer_list[@]}"; do
+        [ "$sky_probe_layer" = VK_LAYER_SKYNET_frame_probe ] && continue
+        [ -n "$sky_probe_layer" ] && sky_probe_layers="${sky_probe_layers:+$sky_probe_layers:}$sky_probe_layer"
+    done
+    if [ -n "$sky_probe_layers" ]; then export VK_INSTANCE_LAYERS="$sky_probe_layers"; else unset VK_INSTANCE_LAYERS; fi
+    unset SKY_FRAME_PROBE_DIR sky_probe_layer_list sky_probe_layer sky_probe_layers
+fi
+
 unset LD_PRELOAD
 # the client draws in software; the game gets the container's OpenGL driver (Zink on Turnip) back
 # (A 32-bit game gets its own thunk selection (SKY_FEX_THUNKCONFIG32: none of the 64-bit guests' thunks). With the OpenGL one on

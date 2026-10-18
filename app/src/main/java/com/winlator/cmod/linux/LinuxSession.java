@@ -876,6 +876,8 @@ public final class LinuxSession {
 
         env.putAll(userEnv(container));
         env.putAll(debugEnv(context));
+        if (emulator != null && LinuxEmulator.BOX64.equals(emulator.emulator) && !LinuxBionicSession.enabled(container))
+            FramePipelineDiagnostics.prepare(context, env, com.winlator.cmod.lsfg.LsfgManager.getMultiplier(container)>=2);
 
         List<String> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : env.entrySet()) result.add(entry.getKey() + "=" + entry.getValue());

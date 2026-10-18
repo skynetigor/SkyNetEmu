@@ -33,10 +33,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL logValidationMessage(
 }
 
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
-                                             void* aHandle, bool enableValidation)
+                                             void* aHandle, bool enableValidation, bool enablePipeline)
     : window(win), surfaceWidth(cW), surfaceHeight(cH),
       containerWidth(cW), containerHeight(cH),
-      adrenotoolsHandle(aHandle), validationRequested(enableValidation)
+      adrenotoolsHandle(aHandle), validationRequested(enableValidation), pipelineEnabled(enablePipeline)
 {
     createInstance(); createSurface(); pickPhysicalDevice(); createLogicalDevice();
     createSwapchain(); createRenderPass(); createDSLayout();
@@ -328,10 +328,11 @@ void VulkanRendererContext::createLogicalDevice() {
         throw std::runtime_error("reading Vulkan device extensions");
 
     bool hasForeignQueue = false;
-    bool hasExternalFd = false, hasDmaBufExt = false;
+    bool hasExternalFd = false, hasDmaBufExt = false, hasDisplayTiming = false;
     for (const auto& ext : availableExts) {
         if (strcmp(ext.extensionName, "VK_KHR_external_memory_fd") == 0) hasExternalFd = true;
         if (strcmp(ext.extensionName, "VK_EXT_external_memory_dma_buf") == 0) hasDmaBufExt = true;
+        if (strcmp(ext.extensionName, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) == 0) hasDisplayTiming = true;
         RLOG("Available Vulkan device extension: %s (specVersion=%u)",
              ext.extensionName, ext.specVersion);
         if (strcmp(ext.extensionName, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0)
@@ -358,6 +359,7 @@ void VulkanRendererContext::createLogicalDevice() {
     RLOG("dma-buf import %s", hasDmaBufImport ? "available" : "NOT available on this device");
     for (const char* ext : extList)
         RLOG("Enabled Vulkan device extension: %s", ext);
+    if (pipelineEnabled && hasDisplayTiming) extList.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
@@ -365,6 +367,10 @@ void VulkanRendererContext::createLogicalDevice() {
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
+    if (pipelineEnabled && hasDisplayTiming) {
+        getPastTiming=reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(vk_.GetDeviceProcAddr(device,"vkGetPastPresentationTimingGOOGLE"));
+        displayTimingEnabled=getPastTiming!=nullptr;
+    }
 
     vk_.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
@@ -453,6 +459,10 @@ void VulkanRendererContext::createSwapchain() {
     VkSwapchainKHR newSwapchain=VK_NULL_HANDLE;
     if (vk_.CreateSwapchainKHR(device,&ci,nullptr,&newSwapchain)!=VK_SUCCESS) throw std::runtime_error("swapchain");
     swapchain=newSwapchain;
+    if (pipelineEnabled) {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        displayFeedback.beginSwapchain(nextDisplayId);
+    }
     if (oldSwapchain!=VK_NULL_HANDLE) vk_.DestroySwapchainKHR(device,oldSwapchain,nullptr);
     vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,nullptr);
     swapchainImages.resize(imgCount); vk_.GetSwapchainImagesKHR(device,swapchain,&imgCount,swapchainImages.data());
@@ -1345,9 +1355,11 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 void VulkanRendererContext::renderLoop() {
     while (isRunning) {
         { std::unique_lock<std::mutex> lk(dirtyMutex);
-           dirtyCV.wait(lk,[this]{
-               return !isRunning||(!surfaceDetached.load()&&
-                   (needsRender.load()||fbResized.load()||cursorMoved.load())); }); }
+           auto ready=[this]{ return !isRunning||(!surfaceDetached.load()&&
+                   (needsRender.load()||fbResized.load()||cursorMoved.load())); };
+           if (pipelineEnabled && displayTimingEnabled) dirtyCV.wait_for(lk,std::chrono::seconds(1),ready);
+           else dirtyCV.wait(lk,ready); }
+        if (pipelineEnabled && displayTimingEnabled && !surfaceDetached.load()) pollDisplayTiming();
         if (!isRunning) break;
         try { renderFrame(); }
         catch (const std::exception& e) {
@@ -1433,6 +1445,7 @@ void VulkanRendererContext::renderFrame() {
         swapchainRetryPending.store(true);
         return;
     }
+    uint64_t frameSource=0, frameEpoch=0;
     bool currentFenceWaited = false;
     VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
     if (fenceState==VK_NOT_READY) {
@@ -1532,6 +1545,7 @@ void VulkanRendererContext::renderFrame() {
             }
             if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) { de.upload=wt.stg; de.rowPx=wt.rowPx; wt.dirty=false; }
             else if (wt.isAHB) { wt.dirty=false; }
+            if (pipelineEnabled && re.id==pipelineTarget) {frameSource=pipe.accepted;frameEpoch=pipelineEpoch;}
             frameDraws.push_back(de);
         }
 
@@ -1607,12 +1621,22 @@ void VulkanRendererContext::renderFrame() {
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
+    VkPresentTimeGOOGLE displayTime{nextDisplayId++,0};
+    VkPresentTimesInfoGOOGLE displayTimes{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
+    displayTimes.swapchainCount=1; displayTimes.pTimes=&displayTime;
+    if (displayTimingEnabled) pi.pNext=&displayTimes;
     {
         ScopedRendererTiming timing(presentTiming, performanceDiagnostics.load(std::memory_order_relaxed));
         res = vk_.QueuePresentKHR(graphicsQueue, &pi);
     }
     rendererPresentResult.store(res);
-    if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) ++rendererPresents;
+    if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) {
+        ++rendererPresents;
+        if (pipelineEnabled) {
+            std::lock_guard<std::mutex> lk(renderMutex);
+            if (frameSource && frameEpoch==pipelineEpoch) pipe.presented(frameSource);
+        }
+    }
 
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) fbResized.store(true);
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
@@ -1760,6 +1784,7 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
     wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
     wt.needsTransition = false; // The first-use layout belongs to the cached VkImage.
+    if (pipelineEnabled && id==pipelineTarget) pipe.accept();
     needsRender.store(true); dirtyCV.notify_one();
 }
 
@@ -1829,6 +1854,7 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
     dmaDiagnostics.stage = sit != dmaBufSrcCache.end() ? "buffer_copy" : "sampled_image";
     dmaDiagnostics.result = VK_SUCCESS;
     ++dmaAccepted;
+    if (pipelineEnabled && id==pipelineTarget) pipe.accept();
     needsRender.store(true); dirtyCV.notify_one();
     return true;
 }
@@ -2184,3 +2210,41 @@ void VulkanRendererContext::clearCustomScissor() {
 }
 
 #pragma GCC diagnostic pop
+
+
+void VulkanRendererContext::setPipelineTarget(int64_t id) {
+    if (!pipelineEnabled) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    if (id!=pipelineTarget) {pipelineTarget=id;++pipelineEpoch;pipe={};}
+}
+
+std::string VulkanRendererContext::pipelineDiagnostics() {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    bool available=displayTimingEnabled && displayFeedback.complete && displayFeedback.records>0 &&
+        (displayTimingResult.load()==VK_SUCCESS || displayTimingResult.load()==VK_INCOMPLETE);
+    char text[512];
+    snprintf(text,sizeof(text),"pipe_accepted=%llu pipe_unique=%llu pipe_repeats=%llu pipe_skipped=%llu pipe_android_queued=%llu pipe_displayed=%lld pipe_display_available=%d pipe_display_result=%d",
+        (unsigned long long)pipe.accepted,(unsigned long long)pipe.unique,(unsigned long long)pipe.repeats,
+        (unsigned long long)pipe.skipped,(unsigned long long)pipe.androidQueued,
+        available?(long long)displayFeedback.records:-1LL,available?1:0,displayTimingResult.load());
+    return text;
+}
+
+void VulkanRendererContext::pollDisplayTiming() {
+    std::shared_lock<std::shared_mutex> frameLock(frameMutex);
+    if (surfaceDetached.load()) return;
+    uint64_t now=(uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (!getPastTiming || swapchain==VK_NULL_HANDLE || now-lastDisplayPollNs<1000000000ULL) return;
+    lastDisplayPollNs=now;
+    uint32_t count=0;
+    VkResult result=getPastTiming(device,swapchain,&count,nullptr);
+    if (result!=VK_SUCCESS || count==0) {displayTimingResult.store(result);return;}
+    count=std::min(count,256u);
+    std::vector<VkPastPresentationTimingGOOGLE> timings(count);
+    result=getPastTiming(device,swapchain,&count,timings.data());
+    displayTimingResult.store(result);
+    if (result!=VK_SUCCESS && result!=VK_INCOMPLETE) return;
+    std::lock_guard<std::mutex> lk(renderMutex);
+    std::sort(timings.begin(),timings.begin()+count,[](const auto& a,const auto& b){return a.presentID<b.presentID;});
+    for(uint32_t i=0;i<count;i++) if(timings[i].actualPresentTime>0) displayFeedback.record(timings[i].presentID);
+}
