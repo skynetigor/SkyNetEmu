@@ -64,7 +64,7 @@ final class RendererDiagnosticsChecks {
         Class<?> eventType = Class.forName("com.winlator.cmod.telemetry.Telemetry$Event");
         Constructor<?> constructor = eventType.getDeclaredConstructor(String.class, String.class, String.class, Object[].class);
         constructor.setAccessible(true);
-        Object event = constructor.newInstance("skynet.session", "linux_renderer", null, new Object[] {
+        Object event = constructor.newInstance("skynet.error", "launch", null, new Object[] {
                 "skynet.renderer.diagnostics", "stage=allocate_image_memory vk_result=-2 " + "d".repeat(3000),
                 "skynet.linux.logs", "open /tmp/private/game.log by person@example.test\n" + "l".repeat(7000),
                 "skynet.linux.setup", "native vulkan " + "s".repeat(1100),

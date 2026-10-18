@@ -582,9 +582,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     if (!accepted) {
                         if (!importFailureReported) {
                             importFailureReported = true;
-                            String details = nativeRendererDiagnostics(nativeHandle);
-                            Log.e("VulkanXServerView", "Linux frame import failed: " + details);
-                            com.winlator.cmod.telemetry.LinuxDiagnostics.rendererImportFailed(details);
+                            try {
+                                String details = nativeRendererDiagnostics(nativeHandle);
+                                Log.e("VulkanXServerView", "Linux frame import failed: " + details);
+                                com.winlator.cmod.telemetry.LinuxDiagnostics.rendererImportFailed(details);
+                            } catch (Exception ignored) {}
                         }
                         return;
                     }
@@ -611,7 +613,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         long now = android.os.SystemClock.elapsedRealtime();
         if (!force && now - rendererSampleAt < 5000) return;
         rendererSampleAt = now;
-        com.winlator.cmod.telemetry.LinuxDiagnostics.rendererSnapshot(nativeRendererDiagnostics(nativeHandle));
+        try { com.winlator.cmod.telemetry.LinuxDiagnostics.rendererSnapshot(nativeRendererDiagnostics(nativeHandle)); }
+        catch (Exception ignored) {}
     }
 
     public void addDirectContent(int windowId, Drawable drawable, GPUImage gpuImage) {

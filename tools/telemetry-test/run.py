@@ -9,6 +9,11 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 java = Path(os.environ['JAVA_HOME']) / 'bin' if os.environ.get('JAVA_HOME') else Path('/usr/bin')
 schema = json.loads((root / 'docs/telemetry/schema/v1.json').read_text())
+config = json.loads((root / 'app/src/main/assets/registry/telemetry.json').read_text())
+assert config['schema'] == 2
+assert config['host'].startswith('https://') and config['apiKey']
+assert 'endpoint' not in config
+assert 'skynet.ingest.version' not in schema['fields']
 for field, limit in {'skynet.renderer.diagnostics': 2048, 'skynet.linux.logs': 6000,
                      'skynet.linux.setup': 1000, 'error.stack_trace': 8192, 'error.message': 300}.items():
     assert schema['fields'][field]['max'] == limit, field

@@ -4,26 +4,25 @@ import android.content.Context;
 
 import com.winlator.cmod.BuildConfig;
 import com.winlator.cmod.contents.RegistryCache;
+import com.winlator.cmod.core.FileUtils;
 
 import org.json.JSONObject;
 
-/**
- * Where and how telemetry is sent. The numbers come from registry/telemetry.json (downloaded and kept like the rest of the registry,
- * with a copy bundled in the app); the build supplies the endpoint and key when the registry names none.
- */
+import okhttp3.HttpUrl;
+
+/** Elasticsearch host, public append-only API key and delivery settings from registry/telemetry.json. */
 final class TelemetryConfig {
-    final String endpoint;
-    final String key;
-    /** The registry's kill switch: false stops all sending whatever the user chose. */
+    final String host;
+    final String apiKey;
     final boolean enabled;
     final int batchMax;
     final long flushMs;
     final int maxAttempts;
     final int sampleSec;
 
-    private TelemetryConfig(String endpoint, String key, boolean enabled, int batchMax, long flushMs, int maxAttempts, int sampleSec) {
-        this.endpoint = endpoint;
-        this.key = key;
+    private TelemetryConfig(String host, String apiKey, boolean enabled, int batchMax, long flushMs, int maxAttempts, int sampleSec) {
+        this.host = host;
+        this.apiKey = apiKey;
         this.enabled = enabled;
         this.batchMax = batchMax;
         this.flushMs = flushMs;
@@ -32,40 +31,48 @@ final class TelemetryConfig {
     }
 
     static TelemetryConfig defaults() {
-        return new TelemetryConfig(BuildConfig.TELEMETRY_ENDPOINT, BuildConfig.TELEMETRY_KEY, true, 200, 2000, 3, 5);
+        return new TelemetryConfig("", "", true, 200, 2000, 3, 5);
     }
 
-    /** Reads telemetry.json from the registry (the network is used when the kept copy is old: call off the main thread). */
-    static TelemetryConfig load(Context context, String debugEndpoint) {
-        TelemetryConfig base = defaults();
-        String text = RegistryCache.get(context, "telemetry.json", RegistryCache.TTL_INDEX, true);
-        String endpoint = base.endpoint;
-        boolean enabled = base.enabled;
-        int batchMax = base.batchMax, maxAttempts = base.maxAttempts, sampleSec = base.sampleSec;
-        long flushMs = base.flushMs;
-        if (text != null) {
-            try {
-                JSONObject json = new JSONObject(text);
-                String remote = json.optString("endpoint", "");
-                if (remote.startsWith("https://")) endpoint = remote;
-                enabled = json.optBoolean("enabled", true);
-                batchMax = clamp(json.optInt("batchMax", batchMax), 1, 500);
-                flushMs = clamp(json.optInt("flushMs", (int) flushMs), 500, 60000);
-                maxAttempts = clamp(json.optInt("maxAttempts", maxAttempts), 1, 10);
-                sampleSec = clamp(json.optInt("sampleSec", sampleSec), 0, 300);
+    static TelemetryConfig fromJson(JSONObject json) {
+        return new TelemetryConfig(normalizeHost(json.optString("host", ""), false), json.optString("apiKey", "").trim(),
+                json.optBoolean("enabled", true), clamp(json.optInt("batchMax", 200), 1, 500),
+                clamp(json.optInt("flushMs", 2000), 500, 60000), clamp(json.optInt("maxAttempts", 3), 1, 10),
+                clamp(json.optInt("sampleSec", 5), 0, 300));
+    }
+
+    /** Bundled configuration works offline; a complete remote host/key pair replaces it atomically. */
+    static TelemetryConfig load(Context context, String debugHost) {
+        TelemetryConfig config = defaults();
+        try { config = fromJson(new JSONObject(FileUtils.readString(context, "registry/telemetry.json"))); }
+        catch (Exception ignored) {}
+        try {
+            String text = RegistryCache.get(context, "telemetry.json", RegistryCache.TTL_INDEX, true);
+            if (text != null) {
+                TelemetryConfig candidate = fromJson(new JSONObject(text));
+                if (!candidate.enabled || candidate.usable()) config = candidate;
             }
-            catch (org.json.JSONException ignored) {}
-        }
-        // Debug builds may point at a test receiver, which can be plain http.
-        if (debugEndpoint != null && !debugEndpoint.isEmpty() && BuildConfig.DEBUG) endpoint = debugEndpoint;
-        return new TelemetryConfig(endpoint, base.key, enabled, batchMax, flushMs, maxAttempts, sampleSec);
+        } catch (Exception ignored) {}
+        if (BuildConfig.DEBUG && debugHost != null && !debugHost.isEmpty()) config = config.withDebugHost(debugHost);
+        return config;
     }
 
-    boolean usable() {
-        return enabled && endpoint != null && !endpoint.isEmpty();
+    static String normalizeHost(String value, boolean debug) {
+        HttpUrl url = HttpUrl.parse(value);
+        if (url == null || !url.username().isEmpty() || !url.password().isEmpty()
+                || url.query() != null || url.fragment() != null || !url.encodedPath().equals("/")) return "";
+        boolean loopback = url.host().equals("127.0.0.1") || url.host().equals("localhost") || url.host().equals("::1");
+        if (!url.isHttps() && !(debug && loopback)) return "";
+        String host = url.toString();
+        return host.substring(0, host.length() - 1);
     }
 
-    private static int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
+    TelemetryConfig withDebugHost(String value) {
+        return new TelemetryConfig(normalizeHost(value, BuildConfig.DEBUG), apiKey, enabled,
+                batchMax, flushMs, maxAttempts, sampleSec);
     }
+
+    boolean usable() { return enabled && !host.isEmpty() && !apiKey.isEmpty() && !apiKey.contains("\n") && !apiKey.contains("\r"); }
+
+    private static int clamp(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
 }

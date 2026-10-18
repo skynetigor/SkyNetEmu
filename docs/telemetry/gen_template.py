@@ -3,7 +3,7 @@
 
   python3 docs/telemetry/gen_template.py            # writes docs/telemetry/elasticsearch/index-template.json
   python3 docs/telemetry/gen_template.py --check    # fails when the file on disk is not what the schema generates
-Also checks the schema: every field named by a dataset, the common list or `added_by_service` is defined in "fields".
+Also writes the app's validation schema and checks every referenced field.
 """
 import json
 import os
@@ -12,6 +12,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = os.path.join(HERE, 'schema', 'v1.json')
 OUT = os.path.join(HERE, 'elasticsearch', 'index-template.json')
+APP_SCHEMA = os.path.abspath(os.path.join(HERE, '..', '..', 'app', 'src', 'main', 'assets', 'telemetry-schema.json'))
 
 
 def mapping_for(spec):
@@ -32,7 +33,7 @@ def insert(tree, dotted, mapping):
 def main():
     schema = json.load(open(SCHEMA))
     fields = schema['fields']
-    used = set(schema['common']['fields']) | set(schema['added_by_service'])
+    used = set(schema['common']['fields']) | set(schema['added_by_elasticsearch'])
     for ds in schema['datasets'].values():
         used |= set(ds['fields'])
     missing = sorted(f for f in used if f not in fields)
@@ -51,20 +52,24 @@ def main():
         'data_stream': {},
         'priority': 200,
         'template': {
-            'settings': {'index.lifecycle.name': 'skynet-90d'},
             'mappings': {'dynamic': 'false', 'properties': properties},
         },
         '_meta': {'description': 'Generated from docs/telemetry/schema/v1.json by gen_template.py. Do not edit by hand.'},
     }
     text = json.dumps(template, indent=2) + '\n'
+    app_schema = json.dumps(schema, separators=(',', ':')) + '\n'
     if '--check' in sys.argv:
         current = open(OUT).read() if os.path.exists(OUT) else ''
         if current != text:
             sys.exit('index-template.json is out of date: run gen_template.py')
+        if not os.path.exists(APP_SCHEMA) or open(APP_SCHEMA).read() != app_schema:
+            sys.exit('app telemetry-schema.json is out of date: run gen_template.py')
         print('ok')
         return
     with open(OUT, 'w') as f:
         f.write(text)
+    with open(APP_SCHEMA, 'w') as f:
+        f.write(app_schema)
     print(f'{len(fields)} fields -> {OUT}')
 
 

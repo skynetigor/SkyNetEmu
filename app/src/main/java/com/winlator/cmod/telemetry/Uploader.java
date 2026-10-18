@@ -60,6 +60,7 @@ final class Uploader {
     private static JSONObject environment;
     private static OkHttpClient client;
     private static SimpleDateFormat timestamps;
+    private static volatile TelemetrySchema schema;
 
     private Uploader() {}
 
@@ -81,7 +82,7 @@ final class Uploader {
 
     /** Called when telemetry is turned on: reads the configuration on the uploader's thread, never on the caller's. */
     static void start(Context context) {
-        EXECUTOR.execute(() -> loadConfig(context, true));
+        background(() -> loadConfig(context, true));
     }
 
     /** How often the performance sampler reads the device, in seconds (0: not at all). */
@@ -92,7 +93,10 @@ final class Uploader {
     /** Runs a task on the uploader's thread (it wakes up for it and sleeps again). */
     static void background(Runnable task) {
         try {
-            EXECUTOR.execute(task);
+            EXECUTOR.execute(() -> {
+                try { task.run(); }
+                catch (Exception ignored) {}
+            });
         }
         catch (RuntimeException ignored) {}
     }
@@ -106,7 +110,7 @@ final class Uploader {
     /** Telemetry was turned off: forget what is waiting. */
     static void clear(Context context) {
         BUFFER.clear();
-        EXECUTOR.execute(() -> {
+        background(() -> {
             PENDING.clear();
             environment = null;
         });
@@ -161,9 +165,9 @@ final class Uploader {
                     keep.addAll(chunk);
                     continue;
                 }
-                if (send(context, c, chunk)) continue;
-                failed = true;
-                for (Telemetry.Event event : chunk) {
+                List<Telemetry.Event> retry = send(context, c, chunk);
+                failed = !retry.isEmpty();
+                for (Telemetry.Event event : retry) {
                     if (!oneAttemptOnly && ++event.attempts < c.maxAttempts) keep.add(event);
                 }
             }
@@ -171,7 +175,7 @@ final class Uploader {
             int excess = keep.size() - BUFFER_SIZE;
             PENDING.addAll(excess > 0 ? keep.subList(excess, keep.size()) : keep);
         }
-        catch (RuntimeException ignored) {
+        catch (Exception ignored) {
             // Telemetry never throws into the app.
         }
         if (!oneAttemptOnly && (!PENDING.isEmpty() || !BUFFER.isEmpty()) && SCHEDULED.compareAndSet(false, true)) {
@@ -182,41 +186,71 @@ final class Uploader {
     private static void loadConfig(Context context, boolean force) {
         long now = System.currentTimeMillis();
         if (!force && configLoadedAt != 0 && now - configLoadedAt < CONFIG_TTL_MS) return;
-        configLoadedAt = now;
-        config = TelemetryConfig.load(context, Telemetry.debugEndpoint());
+        try {
+            config = TelemetryConfig.load(context, Telemetry.debugEsHost());
+            configLoadedAt = now;
+        } catch (Exception ignored) {}
     }
 
-    private static boolean send(Context context, TelemetryConfig c, List<Telemetry.Event> events) {
+    /** Returns only transient failures. Every exception stays on this background path. */
+    private static List<Telemetry.Event> send(Context context, TelemetryConfig c, List<Telemetry.Event> events) {
+        List<Telemetry.Event> valid = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
         try {
             if (environment == null) environment = environment(context);
             if (timestamps == null) {
                 timestamps = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
                 timestamps.setTimeZone(TimeZone.getTimeZone("UTC"));
             }
-            StringBuilder body = new StringBuilder(events.size() * 400);
-            List<String> lines = new ArrayList<>(events.size());
             for (Telemetry.Event event : events) {
-                String line = json(event, environment, timestamps);
-                lines.add(line);
-                body.append(line).append('\n');
+                try {
+                    String line = json(event, environment, timestamps);
+                    if (!schema.hasRequired(new JSONObject(line))) continue;
+                    lines.add(line);
+                    valid.add(event);
+                } catch (Exception ignored) {
+                    // A malformed event is discarded without blocking later events.
+                }
             }
-            ByteArrayOutputStream zipped = new ByteArrayOutputStream(body.length() / 3 + 64);
-            try (GZIPOutputStream gzip = new GZIPOutputStream(zipped)) {
-                gzip.write(body.toString().getBytes(StandardCharsets.UTF_8));
-            }
-            Request.Builder request = new Request.Builder()
-                    .url(c.endpoint)
-                    .header("Content-Encoding", "gzip")
-                    .post(RequestBody.create(zipped.toByteArray(), NDJSON));
-            if (!c.key.isEmpty()) request.header("X-SkyNet-Key", c.key);
-            try (Response response = http().newCall(request.build()).execute()) {
-                if (!response.isSuccessful()) return false;
-                remember(lines);
-                return true;
-            }
+            if (valid.isEmpty()) return valid;
+            return sendDocuments(c, valid, lines);
         }
         catch (Exception e) {
-            return false;
+            return new ArrayList<>(events);
+        }
+    }
+
+    private static List<Telemetry.Event> sendDocuments(TelemetryConfig config, List<Telemetry.Event> events, List<String> lines) {
+        try {
+            byte[] body = ElasticsearchBulk.body(lines).getBytes(StandardCharsets.UTF_8);
+            ByteArrayOutputStream zipped = new ByteArrayOutputStream(body.length / 3 + 64);
+            try (GZIPOutputStream gzip = new GZIPOutputStream(zipped)) { gzip.write(body); }
+            Request request = new Request.Builder().url(config.host + "/_bulk")
+                    .header("Content-Encoding", "gzip").header("Authorization", "ApiKey " + config.apiKey)
+                    .post(RequestBody.create(zipped.toByteArray(), NDJSON)).build();
+            int status;
+            String responseBody;
+            try (Response response = http().newCall(request).execute()) {
+                status = response.code();
+                responseBody = response.body() == null ? "" : response.body().string();
+            }
+            if (status == 413 && events.size() > 1) {
+                int middle = events.size() / 2;
+                List<Telemetry.Event> retry = sendDocuments(config, events.subList(0, middle), lines.subList(0, middle));
+                retry.addAll(sendDocuments(config, events.subList(middle, events.size()), lines.subList(middle, lines.size())));
+                return retry;
+            }
+            int[] outcomes = ElasticsearchBulk.outcomes(status, responseBody, events.size());
+            List<Telemetry.Event> retry = new ArrayList<>();
+            List<String> accepted = new ArrayList<>();
+            for (int i = 0; i < outcomes.length; i++) {
+                if (outcomes[i] == ElasticsearchBulk.RETRY) retry.add(events.get(i));
+                else if (outcomes[i] == ElasticsearchBulk.ACCEPTED) accepted.add(lines.get(i));
+            }
+            remember(accepted);
+            return retry;
+        } catch (Exception ignored) {
+            return new ArrayList<>(events);
         }
     }
 
@@ -226,6 +260,9 @@ final class Uploader {
                     .connectTimeout(5, TimeUnit.SECONDS)
                     .readTimeout(5, TimeUnit.SECONDS)
                     .writeTimeout(5, TimeUnit.SECONDS)
+                    .callTimeout(10, TimeUnit.SECONDS)
+                    .followRedirects(false)
+                    .followSslRedirects(false)
                     .build();
         }
         return client;
@@ -259,7 +296,7 @@ final class Uploader {
             String id = Telemetry.installId().isEmpty() ? "(made when you turn it on)" : Telemetry.installId();
             return new JSONObject(json(event, environment(context), format)).put("user.id", id).toString(2);
         }
-        catch (JSONException e) {
+        catch (Exception e) {
             return "";
         }
     }
@@ -287,7 +324,8 @@ final class Uploader {
             if (value instanceof String) value = Scrub.field(key, (String) value);
             doc.put(key, value);
         }
-        return doc.toString();
+        if (schema == null) schema = TelemetrySchema.load(Telemetry.context());
+        return schema.clean(doc).toString();
     }
 
     /** What every event says about the device and the app. Read once, on the uploader's thread. */

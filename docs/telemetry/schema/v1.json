@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "SkyNetEmu telemetry events, schema version 1. The ingest service validates against this file and docs/telemetry/gen_template.py generates the Elasticsearch index template from it. A field that is not listed for an event's dataset is dropped. Numbers outside min/max are clamped. Strings are cut at max.",
+  "description": "SkyNetEmu telemetry schema version 1. The app validates events before direct Elasticsearch bulk ingestion. Unknown fields are dropped, numbers clamped and free text scrubbed and bounded. gen_template.py generates the app schema and Elasticsearch mappings.",
   "datasets": {
     "skynet.session": {
       "actions": ["app_started", "linux_renderer"],
@@ -21,7 +21,6 @@
       ]
     },
     "skynet.error": {
-      "actions": ["container_create", "import_warning", "download", "add_game", "launch", "app_crash", "anr", "native_crash", "low_memory_kill", "killed_by_signal", "excessive_resource_kill", "linux_program_exit", "linux_render_stalled"],
       "fields": ["error.type", "error.message", "error.stack_trace", "skynet.error.stage", "skynet.error.occurred_at", "skynet.exit.code", "skynet.exit.rss_kb", "skynet.renderer.diagnostics", "skynet.linux.setup", "skynet.linux.seconds_running", "skynet.linux.logs"]
     }
   },
@@ -34,7 +33,7 @@
       "skynet.memory.total_bytes", "skynet.telemetry.schema"
     ]
   },
-  "added_by_service": ["event.ingested", "skynet.ingest.version", "skynet.client_timestamp", "skynet.timestamp_fixed"],
+  "added_by_elasticsearch": ["event.ingested", "skynet.client_timestamp", "skynet.timestamp_fixed"],
   "fields": {
     "@timestamp": {"type": "date"},
     "event.id": {"type": "keyword", "uuid": true},
@@ -61,7 +60,6 @@
     "skynet.gpu.renderer": {"type": "keyword", "max": 128},
     "skynet.memory.total_bytes": {"type": "long", "min": 0, "max": 1099511627776},
     "skynet.telemetry.schema": {"type": "integer", "min": 1, "max": 1000},
-    "skynet.ingest.version": {"type": "keyword", "max": 32},
     "skynet.client_timestamp": {"type": "date"},
     "skynet.timestamp_fixed": {"type": "boolean"},
     "skynet.game.id": {"type": "keyword", "max": 100},
@@ -87,7 +85,7 @@
     "skynet.exit.code": {"type": "integer", "min": -1000000, "max": 1000000},
     "skynet.exit.kind": {"type": "keyword", "enum": ["user", "wine_exit", "crash", "killed"]},
     "skynet.exit.rss_kb": {"type": "long", "min": 0, "max": 1073741824},
-    "skynet.error.stage": {"type": "keyword", "enum": ["container_create", "import_warning", "download", "add_game", "launch", "app_crash", "anr", "native_crash", "low_memory_kill", "killed_by_signal", "excessive_resource_kill", "linux_program_exit", "linux_render_stalled"]},
+    "skynet.error.stage": {"type": "keyword", "max": 64, "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
     "skynet.error.occurred_at": {"type": "date", "epoch_millis": true},
     "skynet.renderer.diagnostics": {"type": "text", "max": 2048, "free_text": true},
     "skynet.linux.setup": {"type": "text", "max": 1000, "free_text": true},

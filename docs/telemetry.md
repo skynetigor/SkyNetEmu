@@ -1,53 +1,72 @@
 # Telemetry
 
-Opt-in. Off until the user says yes (onboarding question, Settings > Privacy). When it is on, the app sends usage, error and performance
-events to an HTTPS endpoint you run.
+Telemetry is opt-in (onboarding or Settings > Privacy). The Android app sends events directly to Elasticsearch over HTTPS.
 
-## Delivery rules
+## Registry configuration
 
-- `Telemetry.event(...)` only puts a small object into a memory buffer (1000 events, a full buffer drops the new event). No I/O, no JSON,
-  nothing the caller waits for.
-- One daemon thread at background priority sends the buffer. It sleeps while the buffer is empty; the first event schedules a flush 2 s later.
-  A flush sends everything waiting, in requests of at most 200 events.
-- A failed request is retried silently at the next flush (2 s later). After 3 failed attempts the events are dropped, silently. Offline
-  counts as failed attempts.
-- At the end of a game the app makes one bounded attempt (1.5 s) so the session summary is not lost when the process exits.
-- A crash writes one small file that is sent at the next start. Nothing else is stored on the phone.
+The components repository's `registry/telemetry.json` supplies the Elasticsearch base `host` and encoded, public append-only `apiKey`.
+A matching copy is bundled at `app/src/main/assets/registry/telemetry.json` for offline startup. Host and key are replaced together;
+a partial or malformed remote configuration falls back to the bundled copy. `enabled: false` always disables uploads.
 
-## Request
-
+```json
+{"schema":2,"enabled":true,"host":"https://your-project.es.region.elastic.cloud","apiKey":"<encoded public ingest key>","batchMax":200,"flushMs":2000,"maxAttempts":3,"sampleSec":5,"gameSessionSampleRate":1.0}
 ```
-POST <endpoint>
+
+Configuration reloads at startup and every six hours while uploading. The host must be an HTTPS base URL without credentials, a path,
+query or fragment. Debug builds allow the `telemetry_es_host_override` preference to select an HTTP loopback receiver.
+There are no build-time endpoint or credential overrides. Local `es.env` credentials are tooling inputs and are never bundled.
+
+The registry key is intentionally public. Restrict it to `create_doc` on `logs-skynet.*-*`, with no read, update, delete, management,
+index creation or automatic mapping permissions. Create the four streams and their mappings separately. Public submission keys can
+be used to generate false events and ingestion costs.
+
+## Delivery and failure isolation
+
+- Caller-facing telemetry methods catch exceptions silently. `Telemetry.event(...)` only puts an object in a bounded memory queue
+  (1000 events); a full queue drops the newest event. It does no network access, serialization or waiting on the caller's thread.
+- A daemon thread at background priority loads configuration, validates/serializes documents and uploads batches of up to 200 events.
+  An exception in a background task is caught without stopping later telemetry work. Failed telemetry never blocks game launch.
+- Requests use gzip NDJSON, `POST <host>/_bulk`, and `Authorization: ApiKey <apiKey>`. Redirects are disabled. Network timeouts are
+  five seconds for connecting/reading/writing and ten seconds overall per call.
+- Every document has a `create` action with `_index=logs-<event.dataset>-default` and `_id=event.id`. Retries preserve the ID. Only the
+  four telemetry datasets are routed; callers cannot select arbitrary indices.
+- Bulk results are handled per document. Successful creates and duplicate IDs (409) are complete. Rate limits (429), timeouts and
+  server/network failures retry, up to `maxAttempts` (three). Other item failures are dropped. Malformed replies retry safely.
+- HTTP 413 splits a batch into smaller requests; a single oversized event is dropped. Permanent authorization failures are dropped.
+- Malformed individual events are skipped so later valid events can still be delivered. At game exit, the caller waits at most 1.5 seconds
+  for one background flush attempt. A crash record is sent at the next startup if telemetry is enabled.
+
+```text
+POST <host>/_bulk
 Content-Type: application/x-ndjson
 Content-Encoding: gzip
-X-SkyNet-Key: <public key from the build, may be empty>
+Authorization: ApiKey <encoded public ingest key>
 
-{"@timestamp":"2026-10-14T12:00:00.000Z","event.id":"...","event.dataset":"skynet.session",...}
-{...}
+{"create":{"_index":"logs-skynet.session-default","_id":"<event UUID>"}}
+{"@timestamp":"2026-10-18T12:00:00.000Z","event.id":"<same event UUID>","event.dataset":"skynet.session",...}
 ```
 
-Reply any 2xx for accepted. Anything else is a failed attempt. `event.id` is a UUID made on the phone, the same on a retry: use it as the
-document `_id` so a retry after a lost reply does not duplicate. The key is in the APK, so it only keeps casual noise out: rate-limit
-per `user.id` and per IP (do not store the IP) and drop fields you do not know.
+## Event schema
 
-## Common fields (every event)
+`telemetry/schema/v1.json` is the canonical allow-list, type definitions and limits. Run `python3 docs/telemetry/gen_template.py`
+to update both `app/src/main/assets/telemetry-schema.json` and `telemetry/elasticsearch/index-template.json`; `--check` detects drift.
+The app drops unknown fields, clamps numbers, bounds text, scrubs paths/quoted names/email and validates required fields before uploading.
+Elasticsearch mappings remain non-dynamic. A trusted final ingest pipeline can additionally enforce validation for arbitrary public clients.
 
-`@timestamp`, `event.id`, `event.dataset`, `event.action`, `event.outcome` (`success` / `failure`), `user.id` (random install UUID, reset when
-the user turns telemetry off and on), `session.id` (per app process), `service.name`=`skynetemu`, `service.version`,
-`skynet.build.type`, `host.os.name`, `host.os.version`, `skynet.android.sdk`, `device.manufacturer`, `device.model.identifier`,
-`skynet.soc.family`, `skynet.soc.model`, `skynet.gpu.renderer`, `skynet.memory.total_bytes`, `skynet.telemetry.schema` (1).
+Data streams remain `logs-skynet.session-default`, `logs-skynet.funnel-default`, `logs-skynet.game_session-default` and
+`logs-skynet.error-default`. Event schema version remains 1; registry transport configuration is version 2.
+`event.ingested` is supplied by the Elasticsearch ingest pipeline.
 
-## Datasets
+Common fields include `@timestamp`, `event.id`, `event.dataset`, `event.action`, optional `event.outcome`, random install `user.id`,
+process `session.id`, service/build version, Android/device/SoC/GPU identity and `skynet.telemetry.schema`.
+The install UUID resets when telemetry is disabled and enabled again. No IP address is included in event documents.
 
-| `event.dataset` | one per | fields |
-|---|---|---|
-| `skynet.session` | app start; once after 40 s of a Linux session | the common fields; `linux_renderer` snapshots also carry the Linux diagnostic fields below and omit `event.outcome` |
-| `skynet.funnel` | step of adding a game | `event.action`: `add_game_started`, `exe_picked`, `game_recognised`, `config_chosen`, `container_created`, `shortcut_created`, `game_launched`; `skynet.game.id`, `skynet.game.version`, `skynet.config.id` |
-| `skynet.game_session` | play session | `skynet.game.id`, `skynet.game.version`, `skynet.config.id`, `skynet.wine`, `skynet.emulator`, `skynet.driver`, `skynet.file_cache`, `skynet.storage`, `skynet.time_to_window_ms`, `skynet.time_to_renderer_ms`, `event.duration` (ns), `skynet.fps.avg`, `skynet.fps.p1_low`, `skynet.frametime.p99_ms`, `skynet.cpu.avg_pct`, `skynet.temp.cpu_max_c`, `skynet.temp.battery_max_c`, `skynet.thermal.max_status`, `skynet.memory.peak_used_bytes`, `skynet.battery.drain_pct`, `skynet.exit.code`, `skynet.exit.kind` |
-| `skynet.error` | failure | `error.type`, `error.message`, `error.stack_trace`, `skynet.error.stage` |
-
-Never sent: file paths, game folder or exe names, shortcut or container names, text typed by the user, Wine logs, the IP address. Messages are
-scrubbed of paths, quoted text and e-mail addresses before they leave the phone. Game ids are the registry's, or `unknown`.
+| Dataset | Events |
+|---|---|
+| `skynet.session` | App start and the neutral Linux renderer snapshot |
+| `skynet.funnel` | Game import and launch steps |
+| `skynet.game_session` | Session duration, performance, device conditions and exit summary |
+| `skynet.error` | Bounded error messages/stacks, exit reasons and Linux diagnostics |
 
 ## Linux renderer diagnostics
 
@@ -60,7 +79,7 @@ With telemetry enabled, Linux sessions send bounded diagnostic excerpts rather t
 | `skynet.linux.seconds_running` | 0–604800 | Elapsed seconds |
 | `skynet.linux.logs` | 6000 characters total | Renderer messages when the debug logcat collector is running, the last 30 lines of game output, and up to 25 lines from each of Steam's five newest text logs |
 
-These fields are allowed on `skynet.session` and `skynet.error`. All text is scrubbed on the phone and again by ingestion. The renderer
+These fields are allowed on `skynet.session` and `skynet.error`. All text is scrubbed on the phone before it is sent. The renderer
 excerpt keeps at most 24 distinct consecutive messages and 3000 characters; it excludes unrelated logcat tags. Release builds still
 collect the native numeric snapshot directly, but do not start a logcat collector for telemetry. Full `*_winlator_*.txt` files are kept locally.
 
@@ -70,77 +89,18 @@ An import rejection sends one immediate `skynet.error` event per Linux session (
 checks at 40 and 120 seconds. Rejected DMA imports do not increase the game/HUD frame count. Accepted imports or successful Android
 presentation calls alone do not establish that the game's pixels are visible.
 
-The ingest service's schema has a different structure from the app schema here. Apply [ingest-renderer-logs.patch](telemetry/ingest-renderer-logs.patch)
-to the root of the `ubuntu_vm` repository. It updates the service
-allow-list, per-event byte limit, privacy filtering, ingest pipeline, template, and existing session/error stream mappings on startup.
-The live integration check tags synthetic events with `device.manufacturer=TelemetryTest` so they can be excluded from device analysis.
+## Verification
 
-## Endpoint and switches
+`JAVA_HOME=<JDK17> python3 tools/telemetry-test/run.py` checks text privacy/bounds, registry configuration and generated schema consistency.
+Build the debug app/test APKs, install both and run:
 
-The endpoint comes from the registry file `registry/telemetry.json` (kept by the app for 6 hours, with a copy bundled in the app), or from the
-build (`-PtelemetryEndpoint=... -PtelemetryKey=...`) when the registry names none. `"enabled": false` in the registry stops all sending. With no
-endpoint anywhere, nothing is sent even if the user opted in.
-
-```json
-{"schema":1,"enabled":true,"endpoint":"https://your-host/v1/events","batchMax":200,"flushMs":2000,"maxAttempts":3,"sampleSec":5,"gameSessionSampleRate":1.0}
+```bash
+adb shell am instrument -w -e elasticsearchTelemetry 1 com.winlator.cmod.dev2.test/com.winlator.cmod.SharedLinuxInstrumentation
 ```
 
-Debug builds also accept the preference `telemetry_endpoint_override` (a test receiver, plain http allowed).
+The checks exercise real gzip bulk HTTP requests, all four routing targets, partial failures, duplicate IDs, malformed responses,
+413 splitting, network/serialization exceptions, background-worker survival and nonblocking UI submission. Add `-e liveEs 1` to create
+four marked test events in the configured Elasticsearch project; retrieve the printed IDs to verify acceptance independently.
+Synthetic events use `device.manufacturer=TelemetryTest` and can be excluded from device analysis.
 
-## Elasticsearch
-
-Data streams, one per dataset: `logs-skynet.session-default`, `logs-skynet.funnel-default`, `logs-skynet.game_session-default`,
-`logs-skynet.error-default`. Fields are flat dotted names, which Elasticsearch maps as objects. Index template sketch:
-
-```json
-PUT _index_template/logs-skynet
-{
-  "index_patterns": ["logs-skynet.*-*"],
-  "data_stream": {},
-  "priority": 200,
-  "template": {
-    "settings": {"index.lifecycle.name": "skynet-90d"},
-    "mappings": {
-      "dynamic": "false",
-      "properties": {
-        "@timestamp": {"type": "date"},
-        "event": {"properties": {"id": {"type": "keyword"}, "dataset": {"type": "keyword"}, "action": {"type": "keyword"},
-                                 "outcome": {"type": "keyword"}, "duration": {"type": "long"}}},
-        "user": {"properties": {"id": {"type": "keyword"}}},
-        "session": {"properties": {"id": {"type": "keyword"}}},
-        "service": {"properties": {"name": {"type": "keyword"}, "version": {"type": "keyword"}}},
-        "host": {"properties": {"os": {"properties": {"name": {"type": "keyword"}, "version": {"type": "keyword"}}}}},
-        "device": {"properties": {"manufacturer": {"type": "keyword"}, "model": {"properties": {"identifier": {"type": "keyword"}}}}},
-        "error": {"properties": {"type": {"type": "keyword"}, "message": {"type": "text"}, "stack_trace": {"type": "wildcard"}}},
-        "skynet": {"properties": {
-          "build": {"properties": {"type": {"type": "keyword"}}},
-          "android": {"properties": {"sdk": {"type": "integer"}}},
-          "soc": {"properties": {"family": {"type": "keyword"}, "model": {"type": "keyword"}}},
-          "gpu": {"properties": {"renderer": {"type": "keyword"}}},
-          "memory": {"properties": {"total_bytes": {"type": "long"}, "peak_used_bytes": {"type": "long"}}},
-          "game": {"properties": {"id": {"type": "keyword"}, "version": {"type": "keyword"}}},
-          "config": {"properties": {"id": {"type": "keyword"}}},
-          "wine": {"type": "keyword"}, "emulator": {"type": "keyword"}, "driver": {"type": "keyword"},
-          "file_cache": {"type": "boolean"}, "storage": {"type": "keyword"},
-          "time_to_window_ms": {"type": "long"}, "time_to_renderer_ms": {"type": "long"},
-          "fps": {"properties": {"avg": {"type": "float"}, "p1_low": {"type": "float"}}},
-          "frametime": {"properties": {"p99_ms": {"type": "float"}}},
-          "cpu": {"properties": {"avg_pct": {"type": "float"}}},
-          "temp": {"properties": {"cpu_max_c": {"type": "float"}, "battery_max_c": {"type": "float"}}},
-          "thermal": {"properties": {"max_status": {"type": "integer"}}},
-          "battery": {"properties": {"drain_pct": {"type": "float"}}},
-          "exit": {"properties": {"code": {"type": "integer"}, "kind": {"type": "keyword"}}},
-          "error": {"properties": {"stage": {"type": "keyword"}}},
-          "telemetry": {"properties": {"schema": {"type": "integer"}}}
-        }}
-      }
-    }
-  }
-}
-```
-
-With `dynamic: false` an unexpected field is kept in `_source` but not indexed, so a newer app does not break an older template. ILM example:
-a hot phase with rollover, delete after 90 days.
-
-Useful views: FPS and 1 % low by SoC family and config (feeds `preferredBySoc` in the registry), time to window by storage and file cache,
-crash and kill rate by app version, funnel drop-off, thermal status by device model.
+`python3 tools/telemetry-mock/receive.py --item-statuses 201,409,429,400` starts a standalone loopback bulk receiver. It never logs credentials.

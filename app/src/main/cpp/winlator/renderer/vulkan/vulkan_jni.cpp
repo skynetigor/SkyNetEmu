@@ -150,7 +150,12 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererDiagnostics(
     JNIEnv* env, jobject, jlong handle)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    return env->NewStringUTF(r ? r->rendererDiagnostics().c_str() : "renderer=unavailable");
+    try {
+        return env->NewStringUTF(r ? r->rendererDiagnostics().c_str() : "renderer=unavailable");
+    } catch (...) {
+        // Diagnostics must never unwind through JNI into a rendering callback.
+        return nullptr;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
