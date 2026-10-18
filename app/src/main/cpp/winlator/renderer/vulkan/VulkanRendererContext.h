@@ -6,6 +6,7 @@
 
 #include "view_transformation.hpp"
 #include "xform.hpp"
+#include "RendererTiming.h"
 
 struct VkTable {
 
@@ -469,6 +470,10 @@ public:
     std::atomic<uint64_t> rendererSubmits{0}, rendererPresents{0};
     std::atomic<int> rendererSubmitResult{VK_SUCCESS}, rendererPresentResult{VK_SUCCESS};
     std::atomic<uint32_t> rendererDraws{0};
+    std::atomic<bool> performanceDiagnostics{false};
+    RendererTiming fenceTiming, acquireTiming, submitTiming, presentTiming, dmaTiming;
+    std::atomic<int> actualPresentMode{VK_PRESENT_MODE_FIFO_KHR};
+    std::atomic<uint32_t> outputWidth{0}, outputHeight{0};
     // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
     std::unordered_set<AHardwareBuffer*> dmaBufKeys;
     void releaseAhbKey(AHardwareBuffer* key) { if (key && !dmaBufKeys.erase(key)) AHardwareBuffer_release(key); }

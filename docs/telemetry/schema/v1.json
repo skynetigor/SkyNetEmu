@@ -3,8 +3,8 @@
   "description": "SkyNetEmu telemetry schema version 1. The app validates events before direct Elasticsearch bulk ingestion. Unknown fields are dropped, numbers clamped and free text scrubbed and bounded. gen_template.py generates the app schema and Elasticsearch mappings.",
   "datasets": {
     "skynet.session": {
-      "actions": ["app_started", "linux_renderer"],
-      "fields": ["skynet.renderer.diagnostics", "skynet.linux.setup", "skynet.linux.seconds_running", "skynet.linux.logs"]
+      "actions": ["app_started", "linux_renderer", "linux_performance"],
+      "fields": ["skynet.renderer.diagnostics", "skynet.linux.setup", "skynet.linux.seconds_running", "skynet.linux.logs", "skynet.performance.diagnostics"]
     },
     "skynet.funnel": {
       "actions": ["add_game_started", "exe_picked", "game_recognised", "game_unrecognised", "config_chosen", "container_created", "shortcut_created", "game_launched"],
@@ -88,6 +88,7 @@
     "skynet.error.stage": {"type": "keyword", "max": 64, "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
     "skynet.error.occurred_at": {"type": "date", "epoch_millis": true},
     "skynet.renderer.diagnostics": {"type": "text", "max": 2048, "free_text": true},
+    "skynet.performance.diagnostics": {"type": "text", "max": 4096, "free_text": true},
     "skynet.linux.setup": {"type": "text", "max": 1000, "free_text": true},
     "skynet.linux.seconds_running": {"type": "long", "min": 0, "max": 604800},
     "skynet.linux.logs": {"type": "text", "max": 6000, "free_text": true}

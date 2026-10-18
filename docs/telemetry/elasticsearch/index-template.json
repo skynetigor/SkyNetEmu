@@ -224,6 +224,13 @@
                 }
               }
             },
+            "performance": {
+              "properties": {
+                "diagnostics": {
+                  "type": "text"
+                }
+              }
+            },
             "renderer": {
               "properties": {
                 "diagnostics": {

@@ -63,7 +63,7 @@ The install UUID resets when telemetry is disabled and enabled again. No IP addr
 
 | Dataset | Events |
 |---|---|
-| `skynet.session` | App start and the neutral Linux renderer snapshot |
+| `skynet.session` | App start, the neutral Linux renderer snapshot and periodic Linux performance samples |
 | `skynet.funnel` | Game import and launch steps |
 | `skynet.game_session` | Session duration, performance, device conditions and exit summary |
 | `skynet.error` | Bounded error messages/stacks, exit reasons and Linux diagnostics |
@@ -88,6 +88,46 @@ An import rejection sends one immediate `skynet.error` event per Linux session (
 `skynet.session` / `linux_renderer` event captures diagnostics even if the game is sending frames; the existing zero-frame watchdog also
 checks at 40 and 120 seconds. Rejected DMA imports do not increase the game/HUD frame count. Accepted imports or successful Android
 presentation calls alone do not establish that the game's pixels are visible.
+
+### Linux performance diagnosis
+
+Opted-in Linux sessions also send `skynet.session` / `linux_performance` after 10 seconds, then every 30 seconds
+with fixed delay. Sampling runs on a background-priority worker, independently of the HUD. It does not wait for a clean exit
+and does not upload game log tails on every sample. Turning telemetry off suppresses collection and events.
+
+`skynet.performance.diagnostics` is a numeric-only, versioned text snapshot, bounded to 4096 characters. Missing or denied
+readings are `-1`, including the first CPU utilization reading. It contains:
+
+- Per-core utilization from `/proc/stat`, current frequency, scaling frequency cap and hardware maximum in kHz (up to 16 cores).
+- Adreno GPU current/capped frequency in Hz where accessible, and GPU utilization. A missing GPU reading is not zero utilization.
+- Whole-device available RAM and total/free swap in kB; cumulative swap-in, swap-out and major-fault counters from `/proc/vmstat`.
+- The Android app process's RSS/swap in kB, separately from device memory. This excludes guest processes and is not the game's RSS.
+- CPU, memory and I/O PSI `some`/`full` cumulative stall totals in microseconds where accessible. These are system-wide;
+  consecutive deltas show pressure during the interval, not proof that this game caused it.
+- Current CPU/battery temperatures, Android thermal status, charging and power-saving state, plus aggregate CPU utilization.
+- Cumulative counted game frames and the age of the cached native renderer snapshot in milliseconds. Renderer counters are refreshed
+  by frame updates at most every five seconds, so check freshness before calculating rates. Counted frames mean accepted updates,
+  not confirmed scanout or unique game frames. Direct Linux frame counting works with the HUD hidden.
+
+Each performance event also carries `skynet.linux.setup`, elapsed seconds and the cached `skynet.renderer.diagnostics`.
+Setup includes requested Linux/Android renderer driver IDs, emulator build/preset, CPU affinity selection, Vulkan output mode,
+GL driver, sysmem setting, requested renderer present mode and game resolution. Requested IDs are configuration evidence;
+they do not prove which game-side driver or emulator defaults actually loaded.
+
+Native snapshots include the actual renderer Vulkan driver ID/name/info, custom-driver-handle status, output dimensions and
+chosen present mode. Host timing counters (`*_calls`, cumulative `*_us`, lifetime `*_max_us`) cover render-frame fence waits,
+swapchain acquire, queue submit, queue present and DMA update/import including its mutex wait. They start at the first diagnostic
+snapshot and use a monotonic clock. These measure CPU wall time inside those operations, **not GPU execution time**; small
+submit times do not rule out a GPU bottleneck. Fence counters exclude one-shot uploads, swapchain recreation and texture retirement.
+Timings keep fixed-size counters with no per-frame log messages or allocations.
+
+For comparisons, align scene, game resolution, emulator configuration and both driver selections. Compare counter deltas over
+the elapsed interval with clocks, thermal state and memory-pressure deltas. A slower frame arrival rate without long renderer
+call times directs further profiling toward the game/emulator or GPU producer; it does not by itself distinguish CPU from GPU work.
+
+The generated Elasticsearch template adds `skynet.performance.diagnostics`. Apply that mapping to existing data streams as well
+as the template before relying on indexed searches of the new field. Existing `dynamic: false` streams can retain unknown fields
+in `_source` without indexing them. This source change does not deploy backend mappings or install a phone build.
 
 ## Verification
 

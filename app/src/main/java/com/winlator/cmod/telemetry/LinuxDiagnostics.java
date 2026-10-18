@@ -20,8 +20,11 @@ public final class LinuxDiagnostics {
     private static volatile String setup = "";
     private static volatile boolean windowDrawn;
     private static volatile long startedAt;
+    private static volatile long startedElapsed;
     private static volatile boolean active;
     private static volatile String renderer = "";
+    private static volatile long rendererElapsed;
+    private static volatile long generation;
     private static final RendererLog rendererLog = new RendererLog();
     private static final java.util.concurrent.atomic.AtomicBoolean importReported = new java.util.concurrent.atomic.AtomicBoolean();
     private static ScheduledThreadPoolExecutor executor;
@@ -29,7 +32,7 @@ public final class LinuxDiagnostics {
     private LinuxDiagnostics() {}
 
     /** A Linux session is starting. {@code logs} is Steam's log folder, {@code programOutput} the program's last lines, {@code description} the setup. */
-    public static synchronized void start(File logs, Supplier<String> programOutput, String description) {
+    public static synchronized void start(android.content.Context context, File logs, Supplier<String> programOutput, String description) {
         if (!Telemetry.isEnabled()) return;
         stop();
         steamLogs = logs;
@@ -39,20 +42,31 @@ public final class LinuxDiagnostics {
         importReported.set(false);
         windowDrawn = false;
         startedAt = System.currentTimeMillis();
+        startedElapsed = android.os.SystemClock.elapsedRealtime();
         GameSessionRecorder.resetFrameCount();
         executor = new ScheduledThreadPoolExecutor(1, r -> {
-            Thread t = new Thread(r, "SkyNet-linux-watchdog");
+            Thread t = new Thread(() -> {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                r.run();
+            }, "SkyNet-linux-watchdog");
             t.setDaemon(true);
             return t;
         });
         for (long seconds : CHECKS_S) executor.schedule(() -> check(seconds), seconds, TimeUnit.SECONDS);
+        // Keep device conditions even when the process is killed without a session-end event.
+        // Fixed delay prevents catch-up bursts after a slow filesystem read or a suspended phone.
+        PerfSampler perf = new PerfSampler(context, 0);
+        long run = generation;
+        executor.scheduleWithFixedDelay(() -> performance(perf, run), 10, 30, TimeUnit.SECONDS);
     }
 
     public static synchronized void stop() {
+        generation++;
         if (executor != null) executor.shutdownNow();
         executor = null;
         if (active) {
             renderer = "";
+            rendererElapsed = 0;
             rendererLog.clear();
         }
         active = false;
@@ -60,7 +74,10 @@ public final class LinuxDiagnostics {
 
     /** Called with a bounded native snapshot; it contains API results and buffer geometry, never file paths. */
     public static void rendererSnapshot(String snapshot) {
-        if (Telemetry.isEnabled()) renderer = Scrub.field("skynet.renderer.diagnostics", snapshot);
+        if (Telemetry.isEnabled()) {
+            renderer = Scrub.field("skynet.renderer.diagnostics", snapshot);
+            rendererElapsed = android.os.SystemClock.elapsedRealtime();
+        }
     }
 
     public static void rendererLogLine(String line) {
@@ -91,6 +108,22 @@ public final class LinuxDiagnostics {
     /** The session's first window drew. */
     public static void onWindow() {
         windowDrawn = true;
+    }
+
+    private static void performance(PerfSampler perf, long run) {
+        if (!active || generation != run || !Telemetry.isEnabled()) return;
+        try {
+            String sample = perf.snapshot();
+            long now = android.os.SystemClock.elapsedRealtime();
+            sample += " accepted_game_frames=" + GameSessionRecorder.frameCount()
+                    + " renderer_age_ms=" + (rendererElapsed > 0 ? Math.max(0, now - rendererElapsed) : -1);
+            if (!active || generation != run || !Telemetry.isEnabled() || Thread.currentThread().isInterrupted()) return;
+            Telemetry.event("skynet.session", "linux_performance", (String) null,
+                    "skynet.performance.diagnostics", sample,
+                    "skynet.renderer.diagnostics", renderer,
+                    "skynet.linux.setup", setup,
+                    "skynet.linux.seconds_running", (now - startedElapsed) / 1000);
+        } catch (RuntimeException ignored) {}
     }
 
     private static void check(long seconds) {

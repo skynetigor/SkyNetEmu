@@ -699,7 +699,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
              * window whose frames it counts. A Linux session has no such tag: the first top-level window that draws is it.
              */
             private void selectFrameRatingWindowOfLinuxSession(Window window) {
-                if (!linuxSession || frameRatingWindowId != -1 || !isSessionApplicationWindow(window)) return;
+                if (!linuxSession || !isSessionApplicationWindow(window)) return;
+                // Telemetry must count accepted direct frames even with the HUD hidden.
+                if (activeRendererWindowId == -1) {
+                    activeRendererWindowId = window.id;
+                    if (xServerView != null) xServerView.setSessionWindowId(window.id);
+                }
+                if (frameRatingWindowId != -1) return;
                 if (!((modernHud != null && modernHud.isUserEnabled())
                         || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) return;
                 frameRatingWindowId = window.id;
@@ -720,6 +726,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onUpdateWindowContent(Window window) {
                 onApplicationWindowDrawn(window);
+                selectFrameRatingWindowOfLinuxSession(window);
 
                 if (window.id == activeRendererWindowId) GameSessionRecorder.onFrame();
 
@@ -1562,8 +1569,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 () -> handler.postDelayed(() -> onLinuxProgramExit(launcher, status), 500)));
         environment.addComponent(launcher);
 
-        com.winlator.cmod.telemetry.LinuxDiagnostics.start(new File(container.getLinuxHomeDir(), ".local/share/Steam/logs"),
-                () -> launcher.lastOutput(60), launcher.setupDescription());
+        String rendererDriver = getSelectedRendererDriverId();
+        com.winlator.cmod.telemetry.LinuxDiagnostics.start(this, new File(container.getLinuxHomeDir(), ".local/share/Steam/logs"),
+                () -> launcher.lastOutput(60), launcher.setupDescription()
+                        + " rendererRequested=" + rendererDriver
+                        + " rendererPresent=" + (shortcut != null ? shortcut.getRendererPresentMode() : container.getRendererPresentMode())
+                        + " resolution=" + xServer.screenInfo.width + "x" + xServer.screenInfo.height);
         environment.startEnvironmentComponents();
     }
 
@@ -1581,6 +1592,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String getSelectedSurfaceFormat() {
         if (shortcut != null) return shortcut.getSurfaceFormat();
         return container != null ? container.getSurfaceFormat() : "rgba8";
+    }
+
+    private String getSelectedRendererDriverId() {
+        String id = shortcut != null ? shortcut.getRendererDriverId()
+                : (container != null ? container.getRendererDriverId() : "");
+        if (id == null || id.isEmpty()) id = graphicsDriverConfig != null ? graphicsDriverConfig.get("version") : null;
+        return id;
     }
 
     private void setupUI() {
@@ -1628,11 +1646,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     || "yes".equalsIgnoreCase(validationValue);
             vkRenderer.setValidationEnabled(validationEnabled, AppUtils.getNativeLibDir(this));
 
-            String rendererDriverId = shortcut != null ? shortcut.getRendererDriverId()
-                    : (container != null ? container.getRendererDriverId() : "");
-            if (rendererDriverId == null || rendererDriverId.isEmpty()) {
-                rendererDriverId = graphicsDriverConfig != null ? graphicsDriverConfig.get("version") : null;
-            }
+            String rendererDriverId = getSelectedRendererDriverId();
             if (rendererDriverId != null && !rendererDriverId.isEmpty() && !rendererDriverId.equalsIgnoreCase("system")) {
                 try {
                     String driverPath = getFilesDir().getAbsolutePath() + "/contents/adrenotools/" + rendererDriverId + "/";

@@ -175,7 +175,16 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     /** What the session runs on, for a report: the emulator, the runtime, and whether it is proot-less / on Android's C library. */
     public String setupDescription() {
         return "emulator=" + container.getExtra("linuxEmulator") + " runtime=" + (runtime != null ? runtime.id : "") + " noProot=" + container.getExtra("linuxNoProot")
-                + " bionic=" + container.getExtra("linuxBionic");
+                + " bionic=" + container.getExtra("linuxBionic")
+                + " emulatorBuild=" + container.getExtra("linuxEmulatorId")
+                + " box64Preset=" + container.getExtra("linuxEmulatorPreset")
+                + " fexPreset=" + container.getExtra("linuxFexPreset")
+                + " fexThunks=" + container.getExtra("linuxFexThunks")
+                + " linuxDriverRequested=" + container.getExtra("linuxVulkanDriver")
+                + " vulkanOutput=" + container.getExtra("linuxVulkanPresent")
+                + " glDriver=" + container.getExtra("linuxGlDriver")
+                + " tuSysmem=" + container.getExtra("linuxTuSysmem")
+                + " cpuList=" + container.getCPUList();
     }
 
     /** Seconds since the program was started. */

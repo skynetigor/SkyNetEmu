@@ -426,6 +426,9 @@ void VulkanRendererContext::createSwapchain() {
     vk_.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice,surface,&pmCount,availablePresentModes.data());
     VkPresentModeKHR presentMode=VK_PRESENT_MODE_FIFO_KHR;
     for (auto pm:availablePresentModes) if(pm==requestedPresentMode){presentMode=pm;break;}
+    actualPresentMode.store((int)presentMode);
+    outputWidth.store(swapchainExt.width);
+    outputHeight.store(swapchainExt.height);
     if(verboseLog){
         std::string pmList;
         for(auto pm:availablePresentModes) pmList+=std::to_string((int)pm)+" ";
@@ -1433,6 +1436,7 @@ void VulkanRendererContext::renderFrame() {
     bool currentFenceWaited = false;
     VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
     if (fenceState==VK_NOT_READY) {
+        ScopedRendererTiming timing(fenceTiming, performanceDiagnostics.load(std::memory_order_relaxed));
         if (vk_.WaitForFences(device,1,&inFlightFences[currentFrame],VK_TRUE,UINT64_MAX)!=VK_SUCCESS)
             throw std::runtime_error("frame fence wait");
         currentFenceWaited = true;
@@ -1452,7 +1456,11 @@ void VulkanRendererContext::renderFrame() {
     }
 
     uint32_t imgIdx;
-    VkResult res=vk_.AcquireNextImageKHR(device,swapchain,UINT64_MAX,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
+    VkResult res;
+    {
+        ScopedRendererTiming timing(acquireTiming, performanceDiagnostics.load(std::memory_order_relaxed));
+        res=vk_.AcquireNextImageKHR(device,swapchain,UINT64_MAX,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
+    }
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR){fbResized.store(true);return;}
     if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) return;
     if (imgIdx >= swapchainFBs.size() || imgIdx >= swapchainImages.size()) {
@@ -1464,8 +1472,10 @@ void VulkanRendererContext::renderFrame() {
     if (imgInFlight.size()!=swapchainImages.size()) imgInFlight.assign(swapchainImages.size(),VK_NULL_HANDLE);
     if (imgInFlight[imgIdx]!=VK_NULL_HANDLE &&
         (!currentFenceWaited || imgInFlight[imgIdx] != inFlightFences[currentFrame])) {
-        if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, imgInFlight[imgIdx]) == VK_NOT_READY)
+        if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, imgInFlight[imgIdx]) == VK_NOT_READY) {
+            ScopedRendererTiming timing(fenceTiming, performanceDiagnostics.load(std::memory_order_relaxed));
             vk_.WaitForFences(device,1,&imgInFlight[imgIdx],VK_TRUE,UINT64_MAX);
+        }
     }
     imgInFlight[imgIdx]=inFlightFences[currentFrame];
 
@@ -1559,7 +1569,11 @@ void VulkanRendererContext::renderFrame() {
 
     vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
     rendererDraws.store((uint32_t)frameDraws.size());
-    VkResult submitResult = vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame]);
+    VkResult submitResult;
+    {
+        ScopedRendererTiming timing(submitTiming, performanceDiagnostics.load(std::memory_order_relaxed));
+        submitResult = vk_.QueueSubmit(graphicsQueue,1,&si,inFlightFences[currentFrame]);
+    }
     rendererSubmitResult.store(submitResult);
     if (submitResult!=VK_SUCCESS) {
         { std::lock_guard<std::mutex> lk(renderMutex);
@@ -1593,7 +1607,10 @@ void VulkanRendererContext::renderFrame() {
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
-    res = vk_.QueuePresentKHR(graphicsQueue, &pi);
+    {
+        ScopedRendererTiming timing(presentTiming, performanceDiagnostics.load(std::memory_order_relaxed));
+        res = vk_.QueuePresentKHR(graphicsQueue, &pi);
+    }
     rendererPresentResult.store(res);
     if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) ++rendererPresents;
 
@@ -1747,6 +1764,8 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
 }
 
 bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset) {
+    // Includes time waiting to acquire renderMutex as well as importing/updating the buffer.
+    ScopedRendererTiming timing(dmaTiming, performanceDiagnostics.load(std::memory_order_relaxed));
     AHardwareBuffer* stand = reinterpret_cast<AHardwareBuffer*>(static_cast<uintptr_t>(0x7d000000u) + static_cast<uintptr_t>(key));
     std::lock_guard<std::mutex> lk(renderMutex);
     ++dmaUpdates;
@@ -2029,15 +2048,26 @@ void VulkanRendererContext::cleanupAllAHBCache() {
 }
 
 std::string VulkanRendererContext::rendererDiagnostics() {
+    performanceDiagnostics.store(true, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lk(renderMutex);
     VkPhysicalDeviceProperties props{};
     vk_.GetPhysicalDeviceProperties(physicalDevice,&props);
-    char text[1536];
+    VkPhysicalDeviceDriverProperties driverProps{};
+    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    auto properties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(gipa(instance, "vkGetPhysicalDeviceProperties2"));
+    if (properties2 && props.apiVersion >= VK_API_VERSION_1_2) {
+        VkPhysicalDeviceProperties2 p2{};
+        p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        p2.pNext = &driverProps;
+        properties2(physicalDevice, &p2);
+    }
+    char text[2048];
     snprintf(text,sizeof(text),
         "stage=%s vk_result=%d device=%s vendor=0x%x driver=0x%x api=%u.%u.%u "
         "external_fd=%d dma_buf=%d fd_properties=%d format=BGRA8(%d) size=%dx%d stride=%d offset=%d "
         "row_pitch=%llu image_bytes=%llu buffer_bytes=%lld image_types=0x%x fd_types=0x%x "
-        "updates=%llu accepted=%llu failed=%llu submits=%llu presents=%llu draws=%u submit_result=%d present_result=%d",
+        "updates=%llu accepted=%llu failed=%llu submits=%llu presents=%llu draws=%u submit_result=%d present_result=%d "
+        "custom_driver=%d driver_id=%u driver_name=%.64s driver_info=%.128s output=%ux%u present_mode=%d",
         dmaDiagnostics.stage,(int)dmaDiagnostics.result,props.deviceName,props.vendorID,props.driverVersion,
         VK_VERSION_MAJOR(props.apiVersion),VK_VERSION_MINOR(props.apiVersion),VK_VERSION_PATCH(props.apiVersion),
         hasExternalMemoryFd,hasDmaBufExtension,vk_.GetMemoryFdPropertiesKHR!=nullptr,(int)VK_FORMAT_B8G8R8A8_UNORM,
@@ -2046,8 +2076,20 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         (long long)dmaDiagnostics.bufferBytes,dmaDiagnostics.imageTypes,dmaDiagnostics.fdTypes,
         (unsigned long long)dmaUpdates,(unsigned long long)dmaAccepted,(unsigned long long)dmaFailures,
         (unsigned long long)rendererSubmits.load(),(unsigned long long)rendererPresents.load(),rendererDraws.load(),
-        rendererSubmitResult.load(),rendererPresentResult.load());
-    return text;
+        rendererSubmitResult.load(),rendererPresentResult.load(),adrenotoolsHandle!=nullptr,
+        (unsigned)driverProps.driverID,driverProps.driverName,driverProps.driverInfo,
+        outputWidth.load(),outputHeight.load(),actualPresentMode.load());
+    std::string snapshot(text);
+    auto appendTiming = [&](const char* name, const RendererTiming& timing) {
+        char part[160];
+        snprintf(part,sizeof(part)," %s_calls=%llu %s_us=%llu %s_max_us=%llu",name,
+            (unsigned long long)timing.calls.load(),name,(unsigned long long)timing.totalUs.load(),
+            name,(unsigned long long)timing.maxUs.load());
+        snapshot += part;
+    };
+    appendTiming("fence",fenceTiming); appendTiming("acquire",acquireTiming);
+    appendTiming("submit",submitTiming); appendTiming("present",presentTiming); appendTiming("dma",dmaTiming);
+    return snapshot;
 }
 
 void VulkanRendererContext::dumpRendererInfo() {

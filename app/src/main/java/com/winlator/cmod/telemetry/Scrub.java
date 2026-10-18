@@ -18,6 +18,7 @@ final class Scrub {
             case "error.stack_trace": limit = 8192; break;
             case "skynet.linux.logs": limit = 6000; break;
             case "skynet.renderer.diagnostics": limit = 2048; break;
+            case "skynet.performance.diagnostics": limit = 4096; break;
             case "skynet.linux.setup": limit = 1000; break;
             default: limit = 300;
         }
