@@ -1,0 +1,39 @@
+{
+  "gen8-v30": {
+    "name": "Turnip Gen8 V30 Linux",
+    "repository": "https://github.com/whitebelyash/mesa-tu8.git",
+    "commit": "d185f62a24305a2ea0d2fa7f3d156e0595025d54",
+    "mesa_version": "26.2.0-devel",
+    "gpu_families": [
+      "a8xx"
+    ],
+    "patches": [
+      "gen8-v30-linux.patch"
+    ],
+    "tu_gen8_version": "",
+    "renderer_url": "https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/download/gen_8_v30/Turnip_Gen8_V30.zip",
+    "renderer_sha256": "0f57b8400bec62fdd9140e2d6fd3caa603ed56b6e532a0708c871647d85320ca",
+    "status": "experimental",
+    "meson_options": [
+      "-Dvulkan-beta=true"
+    ]
+  },
+  "mesa-26.2.2": {
+    "name": "Mesa Turnip 26.2.2 Linux",
+    "archive_url": "https://archive.mesa3d.org/mesa-26.2.2.tar.xz",
+    "archive_sha256": "eeb29ca7e56cfaa8e8a79538dcf834e3b18e501c31bef5145e959ea437cc4216",
+    "mesa_version": "26.2.2",
+    "gpu_families": [
+      "a6xx",
+      "a7xx"
+    ],
+    "patches": [
+      "kgsl-drm-node.patch",
+      "kgsl-no-calibrated-timestamps.patch"
+    ],
+    "status": "experimental",
+    "meson_options": [
+      "-Dvulkan-beta=false"
+    ]
+  }
+}

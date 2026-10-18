@@ -51,6 +51,8 @@ import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
 import com.winlator.cmod.ui.settings.RailEditor
 import com.winlator.cmod.ui.settings.CpuSelectorRow
 import com.winlator.cmod.ui.settings.RendererDriverPicker
+import com.winlator.cmod.ui.settings.LinuxDriverPicker
+import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
 import com.winlator.cmod.ui.settings.rememberRendererDriverPicker
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.container.FexDownloadPrompt
@@ -126,7 +128,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var vulkanPresent by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT)) }
     var keyboardButton by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON)) }
     var autoKeyboard by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD)) }
-    val drivers = remember { LinuxDriverManager.list(context) }
+    val linuxDriverPicker = rememberLinuxDriverPicker(driverId) { driverId = it }
     val boxBuilds = remember { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
     // Read again when FEX has been downloaded from this screen.
     var fexInstallTick by remember { mutableStateOf(0) }
@@ -412,15 +414,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     linkedMapOf("1" to "On", "0" to "Off")
                 ) { tuSysmem = it }
                 SettingsDivider()
-                SettingMappedChoice(
-                    "Turnip driver",
-                    driverId,
-                    LinkedHashMap<String, String>().apply {
-                        put("", "The one the Linux runtime brings")
-                        drivers.forEach { put(it.id, it.label()) }
-                        if (driverId.isNotEmpty() && driverId !in this) put(driverId, "$driverId (not installed)")
-                    }
-                ) { driverId = it }
+                LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 SettingsDivider()
                 SettingMappedChoice(
                     "OpenGL driver",
@@ -669,8 +663,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
 
     // As in the Windows shortcut editor: the groups in a rail (chips in portrait), saved when the screen is left.
     fun leave() {
-        if (rendererDriverPicker.installing.isNotEmpty()) {
-            android.widget.Toast.makeText(context, "Wait for the renderer driver download to finish.", android.widget.Toast.LENGTH_SHORT).show()
+        if (rendererDriverPicker.installing.isNotEmpty() || linuxDriverPicker.installing.isNotEmpty()) {
+            android.widget.Toast.makeText(context, "Wait for the driver download to finish.", android.widget.Toast.LENGTH_SHORT).show()
         } else if (sizeValid) save()
         else android.widget.Toast.makeText(context, "Fix the screen size first.", android.widget.Toast.LENGTH_SHORT).show()
     }

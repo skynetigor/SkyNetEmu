@@ -71,6 +71,8 @@ import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.box64.Box64PresetManager
+import com.winlator.cmod.ui.settings.LinuxDriverPicker
+import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
 import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.fexcore.FEXCorePreset
 import com.winlator.cmod.fexcore.FEXCorePresetManager
@@ -447,7 +449,7 @@ private fun LinuxContainerEditorBody(
     var offered by remember { mutableStateOf<LinuxRuntimeCatalog.Entry?>(null) }
 
     val runtimes = remember(refreshTick, install.finishedTick) { LinuxRuntime.listInstalled(context) }
-    val drivers = remember(refreshTick) { LinuxDriverManager.list(context) }
+    val linuxDriverPicker = rememberLinuxDriverPicker(driverId) { driverId = it }
     val boxBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
     // Read again when FEX has been downloaded from this screen.
     var fexInstallTick by remember { mutableIntStateOf(0) }
@@ -462,7 +464,7 @@ private fun LinuxContainerEditorBody(
     val freeBytes = context.filesDir.usableSpace
     val neededBytes = offered?.let { LinuxRuntimeInstaller.requiredBytes(it) } ?: 0L
     val notEnoughSpace = needsDownload && offered != null && offered!!.size > 0 && freeBytes < neededBytes
-    val busy = creating || install.running || waitingForRuntime
+    val busy = creating || install.running || waitingForRuntime || linuxDriverPicker.installing.isNotEmpty()
     val canSave = if (steam != null) editing != null && !busy else name.isNotBlank() && sizeValid && !busy && !notEnoughSpace
 
     LaunchedEffect(needsDownload) {
@@ -740,21 +742,7 @@ private fun LinuxContainerEditorBody(
                 SettingsDivider()
                 SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
                 SettingsDivider()
-                val driverEntries = LinkedHashMap<String, String>().apply {
-                    put("", "Runtime default")
-                    drivers.forEach { put(it.id, it.label()) }
-                    // A driver that was removed after being chosen stays visible until another is picked.
-                    if (driverId.isNotEmpty() && driverId !in this) put(driverId, "$driverId (not installed)")
-                }
-                SettingMappedChoice("Turnip driver", driverId, driverEntries) { driverId = it }
-                if (drivers.isEmpty()) {
-                    Text(
-                        "Import a Linux Turnip zip in Components → Linux Driver to choose another version.",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 SettingsDivider()
                 SettingMappedChoice(
                     "OpenGL driver",
@@ -870,6 +858,7 @@ private fun LinuxContainerEditorBody(
     val toastContext = LocalContext.current
     fun leave() {
         when {
+            linuxDriverPicker.installing.isNotEmpty() -> android.widget.Toast.makeText(toastContext, "Wait for the driver download to finish.", android.widget.Toast.LENGTH_SHORT).show()
             editing == null || busy -> onBack()
             canSave -> save()
             else -> android.widget.Toast.makeText(toastContext, "Fix the highlighted settings first.", android.widget.Toast.LENGTH_SHORT).show()
