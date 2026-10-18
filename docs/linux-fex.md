@@ -1,8 +1,8 @@
 # FEX in Linux containers
 
-FEX (FEX-Emu) is the second x86-64 emulator a Linux container can use, next to Box64. It has not been run on a device
-yet: everything below was written and built against FEX's sources and the two packages, and checked as far as a
-desktop machine can check it.
+FEX (FEX-Emu) is the second x86-64 emulator a Linux container can use, next to Box64. BeamNG 0.39 has been run on a
+device with Vulkan thunks under proot. The sections below retain the earlier bring-up findings; see
+[the October 18 tuning investigation](linux-fex-beamng-20261018.md) for the later physics benchmark and its limits.
 
 ## What FEX needs that Box64 does not
 
@@ -85,10 +85,9 @@ needs the ordering (a threaded one that misbehaves) wants Intermediate or Compat
   proot (`LinuxSession.runsOnFex`). Ways forward: a FEX build that sends its system calls through libc, or x86 shims that translate the socket
   and home paths inside the guest.
 
-## What is not known
+## Remaining unknowns
 
-* Whether the game gets to a picture and how fast it is next to Box64: not run past the Lua start-up, because the
-  copy of the whole game folder was not done on the device. The first run has no code cache either.
+* A controlled FEX-versus-Box64 comparison with identical active traffic, camera, vehicle models and CPU frequency limits.
 * Whether the guest's OpenGL (llvmpipe of the root filesystem or the runtime's, through the thunk) can be made to work.
 
 ## Adding a 32-bit program as a game
