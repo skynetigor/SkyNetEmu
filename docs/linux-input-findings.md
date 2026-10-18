@@ -86,3 +86,85 @@ the button mask and valuators were read from the wrong offsets). Fixed.
 - Box64 0.4.4 cannot run a binary built against glibc 2.38 (`wcslcpy`, `wcslcat` are missing from its libc
   wrapper), which is why the SuperTux AppImage does not start. It is the only AppImage SuperTux publishes,
   and the components registry offers no newer Box64.
+
+
+## Native Linux touchscreen (2026-10-18)
+
+The Linux **Touchscreen** setting now sends XI 2.2 direct-touch contacts. **Touchpad** retains mouse gestures. Windows
+keeps its existing input path. This supplies native finger events to applications that implement touch; mouse-driven game
+menus still need Touchpad or a physical mouse.
+
+Device 6 (`skyNET direct touchscreen`) is an enabled/disabled slave pointer attached to master 2. It has absolute X/Y
+valuators, an `XITouchClass` with direct mode, and capacity 32. XI 2.2 clients can select the master, source, AllDevices or
+AllMasterDevices streams. Touch contact IDs are separate from Android pointer IDs, and remain stable until completion.
+Coordinates retain fractions; contacts are targeted at their initial window. Raw touch and ownership events are supported,
+including passive touch grabs, accept/reject, pending physical ends, ungrabs, destroyed windows and disconnected clients. A
+late owner receives the original down position followed by the latest coalesced update. Raw sequences continue to their
+physical end even when all normal listeners reject or disappear.
+Native fingers never move the server pointer or inject its buttons/wheel. Deliberately configured overlay bindings and
+physical mouse input continue independently.
+
+`linuxTouchMode=native|touchpad` is saved per shortcut (Steam included), in defaults and profiles. Existing shortcuts without
+this key migrate their resolved `simTouchScreen` value once: `1` becomes native, `0` becomes touchpad. Explicit shortcut
+settings take priority. Linux defaults `SDL_TOUCH_MOUSE_EVENTS=0` and `SDL_MOUSE_TOUCH_EVENTS=0` in both modes so that
+switching from touchpad to native in the sidebar cannot enable SDL synthesis accidentally; explicit environment variables
+still override these defaults. The global Windows `touchscreen_toggle` preference does not control Linux routing.
+
+Touch updates run on an input worker with update coalescing. Linux clients' replies/events share a per-client FIFO bounded
+to 64 MiB (large enough for a native-resolution GetImage reply), with duplicated ancillary descriptors and complete packet writes. A client which stops reading is shut down
+within two seconds instead of blocking Android input. Windows socket output retains its existing synchronous path.
+
+### Reproducing the checks
+
+Build the app and tests, install both APKs with `adb install -r`, then use the existing instrumentation runner:
+
+```sh
+# Protocol encoding, ownership, lifecycle, multi-pointer routing, transforms and stalled clients
+adb shell am instrument -w -e nativeTouch 1 \
+  com.winlator.cmod.dev2.test/com.winlator.cmod.SharedLinuxInstrumentation
+# Existing container/shortcut regressions, including touch migration and environment priority
+adb shell am instrument -w \
+  com.winlator.cmod.dev2.test/com.winlator.cmod.SharedLinuxInstrumentation
+# Real SDL guest: probe=touchtest, touchtest_x64 or touchtest_x86; emulator=box64 or fex; bionic=0 or 1
+adb shell am instrument -w -e liveTouch 1 -e probe touchtest_x64 -e emulator fex \
+  com.winlator.cmod.dev2.test/com.winlator.cmod.SharedLinuxInstrumentation
+# Bare libXi decoder: selector=1 (masters), 6 (source), 0 (both); optional grab=accept, reject or pending
+adb shell am instrument -w -e liveTouch 1 -e probe xitouchtest -e selector 1 \
+  com.winlator.cmod.dev2.test/com.winlator.cmod.SharedLinuxInstrumentation
+```
+
+The live harness creates a temporary shortcut, starts its own guest session, dismisses the game startup overlay for the
+minimal probe, injects two simultaneous Android contacts (with pointer indices reordered), and removes its shortcut. It
+must run by itself: instrumentation owns the app process. The native harness uses copied samples and memory streams to
+check wire lengths and signed fixed-point fields independently of libXi. `tools/input-test/build.sh` builds the SDL probes;
+set `X11_HEADERS=/path/to/sysroot/usr/include` to also build the libXi probes with Zig. They ship only in debug assets.
+
+### Measured results
+
+Test device: Samsung SM-F976B, shared Linux container 1, `bannerlator-r9`, Box64 0.4.4 and FEX 2610. Tests use genuine
+multi-pointer Android `MotionEvent`s through `UiAutomation`, not independent single-pointer ADB swipes.
+
+| Path | Result |
+|---|---|
+| SDL native ARM64/glibc | Two independent contacts, finger motion, complete releases, no finger-derived mouse events |
+| SDL x86-64/glibc Box64 | Same |
+| SDL x86-64/FEX | Same |
+| SDL i386/FEX, thunk settings enabled | Same; software SDL renderer, not an OpenGL rendering test |
+| SDL x86-64/bionic Box64 | Same, using the bionic build's native wrapped SDL2 |
+| Android/in-process input suite | 111 checks pass: protocol, ownership, original-down replay, raw rejection/disconnect lifetime, transforms, overlays, mouse regression, packet/FD handling and slow clients |
+| Lifecycle/mixed input | Window destruction, disconnected owner transfer, two guest fingers plus one overlay finger, resize/hide release and cancellation pass |
+| Slow client | UI enqueue stays responsive; unresponsive socket is disconnected at the write deadline |
+| Socket packet/FD handling | FIFO order and SCM_RIGHTS descriptor survive the sender closing its original descriptor; a 20 MiB reply passes complete partial socket writes |
+| Touchpad/Windows boundary | Touchpad clicks/releases work, mode changes release held finger buttons, and Linux ignores the global Windows touchscreen toggle |
+| Shortcut settings | 38 device checks pass, including one-time migration, independent shortcuts and explicit SDL environment priority |
+| libXi ARM64, Box64/FEX x86-64, FEX i386, bionic Box64 | Real class/event decoding; source, master and AllDevices selectors; accept, reject and pending-end grabs pass |
+| Existing host regressions | Launch-option/Steam environment tests and shared-home migration pass |
+
+The SDL probes report a small number of mouse-motion events during initial window placement (three on glibc native/Box64,
+one on FEX/bionic). Those counts do not increase during native finger input. The strict probes distinguish this startup
+behavior from finger-derived mouse events. Applications can still synthesize mouse input themselves if configured to do so.
+
+The i386 software probe reports a Zink/Vulkan initialization warning while SDL probes video drivers, then initializes and
+receives both contacts. That warning is separate from XI touch decoding. Manual physical pinches/folding and an independent
+X.Org reference capture have not been claimed as automated coverage. No BeamNG or Tomb Raider touch-control support is
+implied by these results; their mouse-driven menus should use Touchpad.

@@ -600,10 +600,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             isMouseDisabled = shortcut.getExtra("disableMouse").equals("1");
         }
         if (linuxSession) {
-            // A Linux program is used by touch: the container says whether a finger acts where it touches (on by default),
-            // and a shortcut may say otherwise.
-            String own = shortcut != null ? GameProfiles.extra(shortcut, gameProfile, "simTouchScreen") : "";
-            simulateTouchScreen = !own.isEmpty() ? own.equals("1") : !"0".equals(container.getExtra(LinuxSession.EXTRA_TOUCHSCREEN));
+            simulateTouchScreen = com.winlator.cmod.linux.LinuxTouchMode.NATIVE.equals(
+                    com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, gameProfile));
         }
 
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
@@ -686,7 +684,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             private void onApplicationWindowDrawn(Window window) {
                 if (!winStarted[0] && isSessionApplicationWindow(window)) {
-                    if (!simulateTouchScreen && !preferences.getBoolean("touchscreen_toggle", false)) {
+                    if (!simulateTouchScreen && (linuxSession || !preferences.getBoolean("touchscreen_toggle", false))) {
                         // A finger is its own pointer, in either direct-touch mode: no cursor to draw.
                         xServerView.setCursorVisible(true);
                     }
@@ -973,6 +971,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onPause() {
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        if (inputControlsView != null) inputControlsView.cancelNativeInput();
+        if (touchpadView != null) touchpadView.cancelNativeTouches();
         super.onPause();
 
         if (!isInPictureInPictureMode()) {
@@ -1094,6 +1094,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (midiHandler != null)
             midiHandler.stop();
 
+        if (xServer != null) {
+            com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+            if (xi != null) xi.touch.close();
+        }
         LsfgManager.stopVsyncClock();
         if (environment != null)
             environment.stopEnvironmentComponents();
@@ -1157,6 +1161,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winlatorLogcatLogger = null;
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        if (xServer != null) {
+            com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+            if (xi != null) xi.touch.close();
+        }
         LsfgManager.stopVsyncClock();
         LsfgManager.endSession();
         super.onDestroy();
@@ -1243,7 +1251,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             if (touchpadView != null) touchpadView.setRealMouseConnected(realMouse);
             // The cursor is only hidden by the touch modes, so only they need it brought back.
-            if (xServerView != null && (simulateTouchScreen || preferences.getBoolean("touchscreen_toggle", false))) {
+            if (xServerView != null && (simulateTouchScreen || (!linuxSession && preferences.getBoolean("touchscreen_toggle", false)))) {
                 xServerView.setCursorVisible(realMouse);
             }
         });
@@ -1743,17 +1751,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             String simTouchScreen = shortcut.getExtra("simTouchScreen");
-            touchpadView.setSimTouchScreen(linuxSession ? simulateTouchScreen : simTouchScreen.equals("1"));
+            if (linuxSession) touchpadView.setLinuxTouchMode(simulateTouchScreen);
+            else touchpadView.setSimTouchScreen(simTouchScreen.equals("1"));
             if (simulateTouchScreen) {
                 renderer.setCursorVisible(false);
             }
         }
         else if (linuxSession && simulateTouchScreen) {
             // A container started without a shortcut (its desktop).
-            touchpadView.setSimTouchScreen(true);
+            touchpadView.setLinuxTouchMode(true);
             renderer.setCursorVisible(false);
         }
         if (linuxSession) {
+            touchpadView.setLinuxTouchMode(simulateTouchScreen);
+            applyRealMouse();
             setupLinuxKeyboard(rootView);
             xServer.addOnScreenResizeListener((w, h) -> runOnUiThread(() -> touchpadView.onScreenResized()));
         }
@@ -1863,9 +1874,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             swTouchpadMode.setChecked(!simulateTouchScreen);
             swTouchpadMode.setOnCheckedChangeListener((btn, checked) -> {
                 simulateTouchScreen = !checked;
-                if (touchpadView != null) touchpadView.setSimTouchScreen(simulateTouchScreen);
+                if (linuxSession && inputControlsView != null) inputControlsView.cancelNativeInput();
+                if (touchpadView != null) {
+                    if (linuxSession) touchpadView.setLinuxTouchMode(simulateTouchScreen);
+                    else touchpadView.setSimTouchScreen(simulateTouchScreen);
+                }
                 if (xServerView != null) xServerView.setCursorVisible(!simulateTouchScreen);
+                if (linuxSession) applyRealMouse();
                 if (shortcut != null) {
+                    if (linuxSession) shortcut.putExtra("linuxTouchMode", simulateTouchScreen ? "native" : "touchpad");
                     shortcut.putExtra("simTouchScreen", simulateTouchScreen ? "1" : "0");
                     shortcut.saveData();
                 }

@@ -58,6 +58,7 @@ public final class LinuxShortcutDefaults {
         values.put(FULLSCREEN_STRETCHED, container.isFullscreenStretched()
                 ? ("1".equals(container.getExtra("scaleGameWindow")) ? "2" : "1") : "0");
         values.put(UPSCALER, container.getExtra(UPSCALER, "0"));
+        values.put(LinuxTouchMode.EXTRA, LinuxTouchMode.resolve(container, null, null));
         values.put(TOUCHSCREEN, on(container, LinuxSession.EXTRA_TOUCHSCREEN));
         values.put(LinuxSession.EXTRA_KEYBOARD_BUTTON, on(container, LinuxSession.EXTRA_KEYBOARD_BUTTON));
         values.put(LinuxSession.EXTRA_AUTO_KEYBOARD, on(container, LinuxSession.EXTRA_AUTO_KEYBOARD));
@@ -102,6 +103,8 @@ public final class LinuxShortcutDefaults {
         for (Map.Entry<String, String> entry : effective.extras.entrySet()) {
             if (entry.getValue() != null && !entry.getValue().isEmpty()) shortcut.putExtra(entry.getKey(), entry.getValue());
         }
+        if (!effective.extras.containsKey(LinuxTouchMode.EXTRA) && effective.extras.containsKey(TOUCHSCREEN))
+            shortcut.putExtra(LinuxTouchMode.EXTRA, LinuxTouchMode.legacy(effective.extras.get(TOUCHSCREEN)));
         shortcut.saveData();
     }
 
@@ -127,7 +130,13 @@ public final class LinuxShortcutDefaults {
      * the container as it is now. Does nothing to a shortcut that has one.
      */
     public static void snapshot(Context context, Container container, Shortcut shortcut) {
-        if (shortcut == null || container == null || !container.isLinux() || "3".equals(shortcut.getExtra(VERSION))) return;
+        if (shortcut == null || container == null || !container.isLinux()) return;
+        if (!LinuxTouchMode.valid(shortcut.getExtra(LinuxTouchMode.EXTRA))) {
+            shortcut.putExtra(LinuxTouchMode.EXTRA, LinuxTouchMode.resolve(container, shortcut,
+                    GameProfiles.resolve(context, container, shortcut)));
+            shortcut.saveData();
+        }
+        if ("3".equals(shortcut.getExtra(VERSION))) return;
         boolean own = isOwn(shortcut);
         for (Map.Entry<String, String> entry : of(context, container).entrySet()) {
             String key = entry.getKey();

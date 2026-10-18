@@ -321,3 +321,20 @@ One entry per problem: symptom, cause, fix, source. **Search here first**, then 
 - **Not covered:** a shortcut to a `.sh` that starts the 32-bit binary later (the wrapper tests the file it starts); a 32-bit Vulkan
   game (the Vulkan thunk has no 32-bit guest side); a game that needs another vendor than the three choices. Only Tomb Raider (2013)
   has been played; the other 32-bit games are untested.
+
+## BeamNG 0.39.4: startup stays on “Starting up…” with Bionic enabled
+
+- **Checked on 2026-10-18:** the Steam game shortcut (`284160`, direct `-nosteam` launch) had `linuxBionic=1`. Its last
+  successful recorded launch on 2026-10-17 at 19:58 used the glibc session.
+- **Actual failure:** Box64's temporary `BOX64_SHOWSEGV=1` trace reports `Emit Divide by 0 at IP=0x102a907b3`. Disassembly
+  identifies `idivl %r11d` in the game's statically linked FMOD/Vorbis decoder region. The parent then waits for its
+  Breakpad child; the child blocks on a futex, so there is no clean process exit and the startup overlay remains.
+- **Isolation:** disabling persistent translated-code caching (`BOX64_DYNACACHE=0`) and selecting Touchpad each reproduce
+  the fault. X11 tracing shows no protocol error before the crash. These trials were reverted.
+- **Workaround:** set this shortcut's `linuxBionic=0`, preserving its other settings, including `linuxTouchMode=native`.
+  The installed touchscreen build then reaches the BeamNG 0.39.4 main menu in approximately 15 seconds. This restores
+  the working runtime; it does not fix the Bionic audio decoder failure. The underlying zero divisor is not yet explained. A second clean launch also reached the menu; loading
+  Gridmap V2 through the GE Lua console completed (`worldReadyState=1`), with the vehicle and world rendering at
+  137 FPS in one screenshot (not a sustained performance measurement).
+- **Source:** found by on-device comparison, Box64's built-in signal/thread diagnostics, and disassembly. Upstream issue
+  searches did not identify a matching existing fix. Temporary `.xtrace` and `linux-bionic.env` were removed afterward.

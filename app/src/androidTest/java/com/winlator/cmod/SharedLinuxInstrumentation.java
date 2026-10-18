@@ -21,7 +21,9 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
     private final List<File> temporary = new ArrayList<>();
     private final List<File> temporaryDirectories = new ArrayList<>();
     private final StringBuilder report = new StringBuilder();
-    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
+    private boolean nativeTouch;
+    private Bundle options;
+    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); options = arguments; nativeTouch = arguments != null && "1".equals(arguments.getString("nativeTouch")); start(); }
     private void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
         report.append("PASS ").append(message).append('\n');
@@ -36,6 +38,16 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("liveTouch"))) {
+                result.putString("stream", new NativeTouchChecks(this).live(options));
+                finish(status,result);
+                return;
+            }
+            if (nativeTouch) {
+                result.putString("stream", new NativeTouchChecks(this).run());
+                finish(status, result);
+                return;
+            }
             android.content.Context context = getTargetContext();
             ContainerManager manager = new ContainerManager(context);
             Container shared = SteamContainer.ensure(context, manager);
@@ -68,6 +80,15 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
             File b = ContainerManager.addLinuxShortcut(context, shared, prefix + "_b", "/usr/bin/true");
             temporary.add(a); temporary.add(b);
             Shortcut first = new Shortcut(shared, a), second = new Shortcut(shared, b);
+            check("native".equals(first.getExtra(LinuxTouchMode.EXTRA)), "new Linux shortcut defaults to native touch");
+            first.putExtra(LinuxTouchMode.EXTRA, null);
+            first.putExtra("simTouchScreen", "0");
+            LinuxShortcutDefaults.snapshot(context, shared, first);
+            check("touchpad".equals(first.getExtra(LinuxTouchMode.EXTRA)), "version-3 legacy touchpad shortcut migrates once");
+            first.putExtra(LinuxTouchMode.EXTRA, "native");
+            LinuxShortcutDefaults.snapshot(context, shared, first);
+            check("native".equals(first.getExtra(LinuxTouchMode.EXTRA)), "explicit native mode overrides old simulated-touch setting");
+            check("native".equals(second.getExtra(LinuxTouchMode.EXTRA)), "touch mode remains independent per shortcut");
             first.putExtra("screenSize", "960x540");
             first.putExtra("hudMode", "0");
             first.putExtra("cpuList", "0");
@@ -82,6 +103,17 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
             Container session = LinuxEmulatorSetup.of(shared, first);
             check("0".equals(session.getCPUList()) && "0".equals(session.getExtra("linuxNoProot")), "session uses shortcut CPU and proot settings");
             check(session.getLinuxRuntime().equals(shared.getLinuxRuntime()), "session resolves shortcut Linux runtime");
+            check("native".equals(session.getExtra(LinuxTouchMode.EXTRA)), "session receives shortcut touch mode");
+            java.lang.reflect.Method guestEnv = LinuxSession.class.getDeclaredMethod("guestEnv", android.content.Context.class,
+                    File.class, File.class, Container.class, File.class, String.class);
+            guestEnv.setAccessible(true);
+            List<String> nativeEnv = (List<String>)guestEnv.invoke(null, context, LinuxRuntime.rootDir(context, LinuxRuntime.resolve(context, session).id),
+                    com.winlator.cmod.xenvironment.ImageFs.find(context).getRootDir(), session, null, null);
+            check(nativeEnv.contains("SDL_TOUCH_MOUSE_EVENTS=0") && nativeEnv.contains("SDL_MOUSE_TOUCH_EVENTS=0"), "native mode disables both SDL mouse synthesis directions");
+            session.setEnvVars(session.getEnvVars() + " SDL_TOUCH_MOUSE_EVENTS=1");
+            List<String> explicitEnv = (List<String>)guestEnv.invoke(null, context, LinuxRuntime.rootDir(context, LinuxRuntime.resolve(context, session).id),
+                    com.winlator.cmod.xenvironment.ImageFs.find(context).getRootDir(), session, null, null);
+            check(explicitEnv.contains("SDL_TOUCH_MOUSE_EVENTS=1") && !explicitEnv.contains("SDL_TOUCH_MOUSE_EVENTS=0"), "explicit shortcut environment overrides SDL touch defaults");
             check("0".equals(session.getExtra("lsfgPerformanceMode")) && "fifo".equals(session.getExtra("lsfgPresentMode")),
                     "session uses shortcut frame-generation performance and present mode");
             check("1".equals(LinuxLaunchOptions.parse(first.getExtra("launchOptions"), first.getExtra("envVars")).env.get("FEX_TSOENABLED")),

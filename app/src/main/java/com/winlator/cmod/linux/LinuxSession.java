@@ -647,6 +647,7 @@ public final class LinuxSession {
 
     private static boolean isEmulatorVariable(String name) {
         return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
+                || name.equals("SDL_TOUCH_MOUSE_EVENTS") || name.equals("SDL_MOUSE_TOUCH_EVENTS")
                 || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB") || name.equals("TU_DEBUG");
     }
 
@@ -743,6 +744,10 @@ public final class LinuxSession {
         // SDL drops joystick events while its window lacks keyboard focus, and without a window manager the
         // core FocusIn never reaches SDL (see docs/linux-input-findings.md). Let pad events through regardless.
         env.put("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+        // Keep native touch and mouse independent, including when the sidebar changes mode in a running app.
+        // Explicit shortcut variables are applied after these defaults.
+        env.put("SDL_TOUCH_MOUSE_EVENTS", "0");
+        env.put("SDL_MOUSE_TOUCH_EVENTS", "0");
 
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");

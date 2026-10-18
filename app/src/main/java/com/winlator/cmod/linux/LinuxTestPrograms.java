@@ -40,6 +40,9 @@ public final class LinuxTestPrograms {
         addShortcut(context, container, "Gamepad test (x86-64)", GAMEPAD_TEST_X64);
         addShortcut(context, container, "Mouse test", MOUSE_TEST);
         addShortcut(context, container, "Mouse test (x86-64)", MOUSE_TEST_X64);
+        addShortcut(context, container, "Touch test", "touchtest");
+        addShortcut(context, container, "Touch test (x86-64)", "touchtest_x64");
+        addShortcut(context, container, "Touch test (i386)", "touchtest_x86");
     }
 
     private static void addShortcut(Context context, Container container, String name, String asset) {

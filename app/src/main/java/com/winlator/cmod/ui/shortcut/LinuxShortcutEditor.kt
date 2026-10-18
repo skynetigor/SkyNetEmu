@@ -95,7 +95,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
     var fit by remember { mutableStateOf(shortcut.getExtra(FIT)) }
     var upscaler by remember { mutableStateOf(shortcut.getExtra(UPSCALER)) }
-    var touch by remember { mutableStateOf(shortcut.getExtra("simTouchScreen")) }
+    var touch by remember { mutableStateOf(shortcut.getExtra("linuxTouchMode")) }
     var steamClient by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL)) }
     var multiplier by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER)) }
     var lsfgPerformance by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_PERFORMANCE_MODE, "1")) }
@@ -171,7 +171,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 when (key) {
                     FIT -> fit = value
                     UPSCALER -> upscaler = value
-                    "simTouchScreen" -> touch = value
+                    "simTouchScreen" -> if (!shown.extras.containsKey("linuxTouchMode")) touch = if (value == "0") "touchpad" else "native"
+                    "linuxTouchMode" -> touch = value
                     LsfgManager.EXTRA_MULTIPLIER -> multiplier = value
                     LsfgManager.EXTRA_FLOW_SCALE -> flowScale = value
                 }
@@ -205,7 +206,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra("hudMode", hud)
         shortcut.putExtra(SIZE, size.trim().ifEmpty { null })
         shortcut.putExtra(FIT, fit.ifEmpty { null })
-        shortcut.putExtra("simTouchScreen", touch.ifEmpty { null })
+        shortcut.putExtra("linuxTouchMode", touch)
+        shortcut.putExtra("simTouchScreen", if (touch == "touchpad") "0" else "1")
         shortcut.putExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL, steamClient.ifEmpty { null })
         shortcut.putExtra(UPSCALER, upscaler.ifEmpty { null })
         shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, multiplier.ifEmpty { null })
@@ -480,7 +482,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         EditorCategory(
             "input", "Input",
-            if (touch == "0") "touchpad" else "touchscreen",
+            if (touch == "touchpad") "touchpad" else "touchscreen",
             false
         ) {
             SettingsCard {
@@ -488,8 +490,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "Touchscreen mode",
                     touch,
                     linkedMapOf(
-                        "1" to "Touchscreen: a tap clicks where you touch",
-                        "0" to "Touchpad: a finger moves the pointer"
+                        "native" to "Touchscreen: native multitouch",
+                        "touchpad" to "Touchpad: a finger moves the pointer"
                     )
                 ) { touch = it }
                 SettingsDivider()

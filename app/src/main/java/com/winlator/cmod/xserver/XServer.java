@@ -23,6 +23,18 @@ import java.util.EnumMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XServer {
+    /** Linux native finger samples; no pointer state is changed. */
+    public void injectTouch(int type, int pointerId, double x, double y, long eventTime) {
+        com.winlator.cmod.xserver.extensions.XInput2Extension xi = getExtension(
+                com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+        if (xi != null) xi.touch.sample(type, pointerId, x, y, eventTime);
+    }
+    public void cancelTouches() {
+        com.winlator.cmod.xserver.extensions.XInput2Extension xi = getExtension(
+                com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+        if (xi != null) xi.touch.cancel();
+    }
+
     public enum Lockable {WINDOW_MANAGER, PIXMAP_MANAGER, DRAWABLE_MANAGER, GRAPHIC_CONTEXT_MANAGER, INPUT_DEVICE, CURSOR_MANAGER, SHMSEGMENT_MANAGER}
     public static final short VERSION = 11;
     public static final String VENDOR_NAME = "Elbrus Technologies, LLC";

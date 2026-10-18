@@ -15,13 +15,11 @@ import com.winlator.cmod.xserver.events.Event;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.List;
+import com.winlator.cmod.xserver.errors.*;
 
-/**
- * A small XInput 2.2 for glibc clients. Games that read the mouse through XI2 (BeamNG.drive, SDL with XI2) see no
- * clicks or motion without it, because they ignore the core events. There is one master pointer (id 2) and one master
- * keyboard (id 3), each with a slave (4, 5). Touch, scroll valuators, device properties and real grabs are not
- * implemented: the matching requests are answered with "nothing" or success.
- */
+/** XInput 2.2 pointer/keyboard and direct multitouch for Linux clients. */
 public class XInput2Extension implements Extension, XResourceManager.OnResourceLifecycleListener {
     public static final byte MAJOR_OPCODE = -111;
     private static final byte FIRST_EVENT_ID = 80;
@@ -62,11 +60,11 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         private static final int GET_CLIENT_POINTER = 45;
     }
 
-    private static class Selection {
-        private final XClient client;
-        private final Window window;
-        private final int deviceId;
-        private final byte[] mask;
+    static class Selection {
+        final XClient client;
+        final Window window;
+        final int deviceId;
+        final byte[] mask;
 
         private Selection(XClient client, Window window, int deviceId, byte[] mask) {
             this.client = client;
@@ -84,11 +82,16 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
 
     private final XServer xServer;
     private final ArrayList<Selection> selections = new ArrayList<>();
+    public final XInput2Touch touch;
+    private final IdentityHashMap<XClient, Integer> versions = new IdentityHashMap<>();
+    boolean touchCapable(XClient client) { synchronized (versions) { return versions.getOrDefault(client, 0) >= 202; } }
+    List<Selection> touchSelections() { synchronized (selections) { return new ArrayList<>(selections); } }
     private int lastRootX;
     private int lastRootY;
 
     public XInput2Extension(XServer xServer) {
         this.xServer = xServer;
+        touch = new XInput2Touch(this, xServer);
         xServer.windowManager.addOnResourceLifecycleListener(this);
     }
 
@@ -115,6 +118,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
     @Override
     public void onFreeResource(XResource resource) {
         if (!(resource instanceof Window)) return;
+        touch.remove(null, (Window)resource);
         synchronized (selections) {
             for (int i = selections.size() - 1; i >= 0; i--) {
                 if (selections.get(i).window == resource) selections.remove(i);
@@ -123,6 +127,8 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
     }
 
     public void removeClient(XClient client) {
+        touch.remove(client, null);
+        synchronized (versions) { versions.remove(client); }
         synchronized (selections) {
             for (int i = selections.size() - 1; i >= 0; i--) {
                 if (selections.get(i).client == client) selections.remove(i);
@@ -133,7 +139,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
     // ---- requests -------------------------------------------------------------------------------------------
 
     @Override
-    public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException {
+    public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int minor = client.getRequestData() & 0xff;
         switch (minor) {
             case 1: // XGetExtensionVersion (XI 1.x): libXi asks first
@@ -216,50 +222,23 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 client.skipRequest();
                 simpleReply(client, outputStream, 0, 0); // status: Success
                 break;
-            case Minor.PASSIVE_GRAB_DEVICE: {
-                // XIPassiveGrabDevice (XIGrabButton): parse the grab window and event mask so SDL's
-                // button grabs are honoured.  Without this, SDL registers buttons via this request
-                // (not XISelectEvents) and we answer "success" but deliver nothing → clicks ignored.
-                int gwId = xServer.windowManager.rootWindow.id;
-                int pgDeviceId = 0;
-                byte[] pgMask = new byte[0];
-                int grabType = 0;
-                try {
-                    inputStream.skip(4); // time
-                    gwId = inputStream.readInt(); // grab_window
-                    inputStream.skip(4); // cursor
-                    inputStream.skip(4); // detail (button number)
-                    pgDeviceId = inputStream.readUnsignedShort();
-                    inputStream.skip(2); // num_modifiers
-                    int maskLen = inputStream.readUnsignedShort();
-                    grabType = inputStream.readUnsignedByte();
-                    inputStream.skip(3); // grab_mode, paired_device_mode, owner_events
-                    inputStream.skip(2); // pad
-                    pgMask = new byte[maskLen * 4];
-                    inputStream.read(pgMask);
-                } catch (Exception ignored) {}
-                client.skipRequest();
-
-                if (grabType == 0) { // GrabtypeButton
-                    // Force XI_ButtonPress (bit 4) and XI_ButtonRelease (bit 5) into the mask.
-                    if (pgMask.length == 0) pgMask = new byte[1];
-                    pgMask[0] |= (byte)((1 << EVENT_BUTTON_PRESS) | (1 << EVENT_BUTTON_RELEASE));
-                    Window gw = xServer.windowManager.getWindow(gwId);
-                    if (gw == null) gw = xServer.windowManager.rootWindow;
-                    final Window fgw = gw;
-                    final int fDev = pgDeviceId;
-                    final byte[] fMask = pgMask;
-                    android.util.Log.d("XTrace", "XI PassiveGrab button gwId=" + gwId
-                            + " deviceId=" + fDev + " mask[0]=" + String.format("%02x", fMask[0] & 0xff));
-                    synchronized (selections) {
-                        for (int j = selections.size() - 1; j >= 0; j--) {
-                            Selection old = selections.get(j);
-                            if (old.client == client && old.window == fgw && old.deviceId == fDev) selections.remove(j);
-                        }
-                        selections.add(new Selection(client, fgw, fDev, fMask));
-                    }
+            case Minor.PASSIVE_GRAB_DEVICE:
+                passiveGrab(client, inputStream, outputStream);
+                break;
+            case 55:
+                passiveUngrab(client, inputStream);
+                break;
+            case 53: {
+                int time = inputStream.readInt(); // touch ownership requires CurrentTime
+                int device = inputStream.readUnsignedShort();
+                int mode = inputStream.readUnsignedByte(); inputStream.skip(1);
+                if (mode > 7) throw new BadValue(mode);
+                if (mode == 6 || mode == 7) {
+                    if (!touchCapable(client) || time != 0) throw new BadValue(mode);
+                    int id = inputStream.readInt(), window = inputStream.readInt();
+                    touch.allow(client, device, id, window, mode == 6);
                 }
-                simpleReply(client, outputStream, 0, 0);
+                client.skipRequest();
                 break;
             }
             case Minor.LIST_PROPERTIES:
@@ -302,7 +281,15 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         }
     }
 
-    private void queryVersion(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException {
+    private void queryVersion(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        int major = inputStream.readUnsignedShort(), minor = inputStream.readUnsignedShort();
+        if (major < 2) throw new BadValue(major);
+        int negotiated = major > 2 ? 202 : 200 + Math.min(minor, 2);
+        synchronized (versions) {
+            Integer previous = versions.get(client);
+            if (previous != null && previous != negotiated) throw new BadValue(major);
+            versions.put(client, negotiated);
+        }
         client.skipRequest();
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
@@ -310,7 +297,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
             outputStream.writeShort(client.getSequenceNumber());
             outputStream.writeInt(0);
             outputStream.writeShort((short)2);
-            outputStream.writeShort((short)2);
+            outputStream.writeShort((short)(negotiated - 200));
             outputStream.writePad(20);
         }
     }
@@ -319,17 +306,18 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         return (length + 3) & ~3;
     }
 
-    private void writeDevice(XOutputStream out, int id, int type, int attachment, String name, boolean pointer) {
+    private void writeDevice(XOutputStream out, int id, int type, int attachment, String name, boolean pointer, boolean touchClass) {
         out.writeShort((short)id);
         out.writeShort((short)type);
         out.writeShort((short)attachment);
-        out.writeShort((short)(pointer ? 3 : 1));
+        out.writeShort((short)((id == XInput2Touch.DEVICE ? 2 : pointer ? 3 : 1) + (touchClass ? 1 : 0)));
         out.writeShort((short)name.length());
-        out.writeByte((byte)1);
+        out.writeByte((byte)(id == XInput2Touch.DEVICE && !touch.isEnabled() ? 0 : 1));
         out.writeByte((byte)0);
         out.writeString8(name); // pads to 4 bytes itself
 
         if (pointer) {
+            if (id != XInput2Touch.DEVICE) {
             // Buttons: header 2 words + state 1 word + one label atom per button.
             out.writeShort((short)1);
             out.writeShort((short)(3 + MAX_BUTTONS));
@@ -337,6 +325,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
             out.writeShort((short)MAX_BUTTONS);
             out.writeInt(0);
             out.writePad(MAX_BUTTONS * 4);
+            }
             for (int axis = 0; axis < 2; axis++) {
                 int size = axis == 0 ? xServer.screenInfo.width : xServer.screenInfo.height;
                 out.writeShort((short)2);
@@ -346,7 +335,8 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 out.writeInt(0); // label
                 out.writeFP3232(0);
                 out.writeFP3232(size);
-                out.writeFP3232(axis == 0 ? xServer.pointer.getClampedX() : xServer.pointer.getClampedY());
+                out.writeFP3232(id == XInput2Touch.DEVICE ? touch.axisValue(axis)
+                        : axis == 0 ? xServer.pointer.getClampedX() : xServer.pointer.getClampedY());
                 out.writeInt(1000); // resolution
                 out.writeByte((byte)1); // absolute
                 out.writePad(3);
@@ -359,6 +349,10 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
             out.writeShort((short)id);
             out.writeShort((short)keys);
             for (int code = 8; code < 8 + keys; code++) out.writeInt(code);
+        }
+        if (touchClass) {
+            out.writeShort((short)8); out.writeShort((short)2);
+            out.writeShort((short)XInput2Touch.DEVICE); out.writeByte((byte)1); out.writeByte((byte)XInput2Touch.CAPACITY);
         }
     }
 
@@ -412,10 +406,10 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         int deviceId = inputStream.readUnsignedShort();
         client.skipRequest();
 
-        final String[] names = {"Virtual core pointer", "Virtual core keyboard", "skyNET virtual pointer", "skyNET virtual keyboard"};
-        final int[] ids = {DEVICE_MASTER_POINTER, DEVICE_MASTER_KEYBOARD, DEVICE_SLAVE_POINTER, DEVICE_SLAVE_KEYBOARD};
-        final int[] types = {1, 2, 3, 4};
-        final int[] attachments = {DEVICE_MASTER_KEYBOARD, DEVICE_MASTER_POINTER, DEVICE_MASTER_POINTER, DEVICE_MASTER_KEYBOARD};
+        final String[] names = {"Virtual core pointer", "Virtual core keyboard", "skyNET virtual pointer", "skyNET virtual keyboard", "skyNET direct touchscreen"};
+        final int[] ids = {DEVICE_MASTER_POINTER, DEVICE_MASTER_KEYBOARD, DEVICE_SLAVE_POINTER, DEVICE_SLAVE_KEYBOARD, XInput2Touch.DEVICE};
+        final int[] types = {1, 2, 3, 4, 3};
+        final int[] attachments = {DEVICE_MASTER_KEYBOARD, DEVICE_MASTER_POINTER, DEVICE_MASTER_POINTER, DEVICE_MASTER_KEYBOARD, DEVICE_MASTER_POINTER};
 
         ArrayList<Integer> chosen = new ArrayList<>();
         for (int i = 0; i < ids.length; i++) {
@@ -424,7 +418,8 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         }
 
         int bytes = 0;
-        for (int i : chosen) bytes += deviceSize(names[i], i % 2 == 0);
+        for (int i : chosen) bytes += deviceSize(names[i], i % 2 == 0) - (i == 4 ? 40 : 0)
+                + (touchCapable(client) && (i == 0 || i == 4) ? 8 : 0);
 
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
@@ -433,14 +428,15 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
             outputStream.writeInt(bytes / 4);
             outputStream.writeShort((short)chosen.size());
             outputStream.writePad(22);
-            for (int i : chosen) writeDevice(outputStream, ids[i], types[i], attachments[i], names[i], i % 2 == 0);
+            for (int i : chosen) writeDevice(outputStream, ids[i], types[i], attachments[i], names[i], i % 2 == 0, touchCapable(client) && (i == 0 || i == 4));
         }
     }
 
-    private void selectEvents(XClient client, XInputStream inputStream) {
+    private void selectEvents(XClient client, XInputStream inputStream) throws XRequestError {
         int windowId = inputStream.readInt();
         int count = inputStream.readUnsignedShort();
         inputStream.skip(2);
+        if (count == 0) throw new BadValue(count);
 
         Window window = xServer.windowManager.getWindow(windowId);
         for (int i = 0; i < count; i++) {
@@ -453,7 +449,12 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 for (byte b : mask) hex.append(String.format("%02x", b));
                 android.util.Log.d("XTrace", "XISelectEvents client=" + client.resourceIDBase + " window=" + windowId + (window == null ? "(gone)" : "") + " device=" + deviceId + " mask=" + hex);
             }
-            if (window == null) continue;
+            if (window == null) throw new BadWindow(windowId);
+            validateTouchMask(client, deviceId, mask);
+            if (XInput2Touch.bit(mask, 18)) synchronized (selections) {
+                for (Selection old : selections) if (old.client != client && old.window == window
+                        && XInput2Touch.bit(old.mask, 18) && XInput2Touch.overlaps(old.deviceId, deviceId)) throw new BadAccess();
+            }
 
             synchronized (selections) {
                 for (int j = selections.size() - 1; j >= 0; j--) {
@@ -491,6 +492,77 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 outputStream.writeShort((short)(s.mask.length / 4));
                 outputStream.write(s.mask);
             }
+        }
+    }
+
+    private void validateTouchMask(XClient client, int device, byte[] mask) throws XRequestError {
+        if (device < 0 || device > XInput2Touch.DEVICE) throw new BadValue(device);
+        if (XInput2Touch.bit(mask, 11) && device != 0) throw new BadValue(device);
+        boolean begin = XInput2Touch.bit(mask, 18), update = XInput2Touch.bit(mask, 19), end = XInput2Touch.bit(mask, 20);
+        if (begin != update || begin != end || (XInput2Touch.bit(mask, 21) && !begin)) throw new BadValue(18);
+        for (int bit = 18; bit < mask.length * 8; bit++) {
+            if (XInput2Touch.bit(mask, bit) && (bit > 24 || !touchCapable(client))) throw new BadValue(bit);
+        }
+    }
+    private void passiveGrab(XClient c, XInputStream in, XOutputStream out) throws IOException, XRequestError {
+        in.skip(4); int windowId = in.readInt(); in.skip(4); int detail = in.readInt();
+        int device = in.readUnsignedShort(), count = in.readUnsignedShort(), words = in.readUnsignedShort();
+        int type = in.readUnsignedByte(), mode = in.readUnsignedByte();
+        in.skip(1); boolean ownerEvents = in.readUnsignedByte() != 0; in.skip(2);
+        byte[] mask = new byte[words * 4]; in.read(mask);
+        int[] modifiers = new int[count]; for (int i = 0; i < count; i++) modifiers[i] = in.readInt();
+        c.skipRequest();
+        Window window = xServer.windowManager.getWindow(windowId);
+        if (window == null) throw new BadWindow(windowId);
+        if (type == 4) {
+            if (mode != 2 || detail != 0 || !XInput2Touch.bit(mask, 18)) throw new BadValue(mode);
+            validateTouchMask(c, device, mask);
+            List<Integer> failed = touch.grab(c, window, device, mask, modifiers, ownerEvents);
+            try (XStreamLock ignored = out.lock()) {
+                out.writeByte((byte)1); out.writeByte((byte)54); out.writeShort(c.getSequenceNumber());
+                out.writeInt(failed.size() * 2); out.writeShort((short)failed.size()); out.writePad(22);
+                for (int modifier : failed) { out.writeInt(modifier); out.writeByte((byte)10); out.writePad(3); }
+            }
+        } else {
+            // Keep the existing SDL pointer-button path independent of touch grabs.
+            if (type == 0) {
+                byte[] buttons = java.util.Arrays.copyOf(mask, Math.max(4, mask.length));
+                buttons[0] |= (1 << 4) | (1 << 5);
+                synchronized (selections) {
+                    selections.removeIf(old -> old.client == c && old.window == window && old.deviceId == device);
+                    selections.add(new Selection(c, window, device, buttons));
+                }
+            }
+            simpleReply(c, out, 0, 0);
+        }
+    }
+    private void passiveUngrab(XClient c, XInputStream in) throws XRequestError {
+        int windowId = in.readInt(), detail = in.readInt(), device = in.readUnsignedShort(), count = in.readUnsignedShort();
+        int type = in.readUnsignedByte(); in.skip(3);
+        int[] modifiers = new int[count]; for (int i = 0; i < count; i++) modifiers[i] = in.readInt();
+        c.skipRequest();
+        if (type == 4) {
+            if (detail != 0) throw new BadValue(detail);
+            Window window = xServer.windowManager.getWindow(windowId);
+            if (window == null) throw new BadWindow(windowId);
+            touch.ungrab(c, window, device, modifiers);
+        }
+    }
+    void touchHierarchy(boolean enabled) {
+        java.util.HashSet<XClient> notified = new java.util.HashSet<>();
+        for (Selection s : touchSelections()) if (s.wants(11, 2) && notified.add(s.client)) {
+            s.client.sendEvent(new Event(35) {
+                @Override public void send(short seq, XOutputStream out) throws IOException {
+                    try (XStreamLock ignored = out.lock()) {
+                        int flags = enabled ? 64 : 128;
+                        out.writeByte((byte)35); out.writeByte(MAJOR_OPCODE); out.writeShort(seq); out.writeInt(3);
+                        out.writeShort((short)11); out.writeShort((short)0); out.writeInt((int)System.currentTimeMillis());
+                        out.writeInt(flags); out.writeShort((short)1); out.writePad(10);
+                        out.writeShort((short)XInput2Touch.DEVICE); out.writeShort((short)2);
+                        out.writeByte((byte)3); out.writeByte((byte)(enabled ? 1 : 0)); out.writePad(2); out.writeInt(flags);
+                    }
+                }
+            });
         }
     }
 
@@ -560,7 +632,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
     private static class XI2Event extends Event {
         private final byte extension;
         private final int evType;
-        private final int deviceId;
+        final int deviceId;
         private final int sourceId;
         private final int detail;
         private final int rootId;
