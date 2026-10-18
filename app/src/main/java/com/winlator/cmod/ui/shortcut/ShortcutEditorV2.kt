@@ -523,6 +523,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         ShortcutCategoryItemV2("Compatibility", Icons.Outlined.Tune),
         ShortcutCategoryItemV2("Input", Icons.Outlined.Gamepad),
         ShortcutCategoryItemV2("Environment", Icons.Outlined.Terminal),
+        ShortcutCategoryItemV2("Performance tuning", Icons.Outlined.Tune),
         ShortcutCategoryItemV2("Advanced", Icons.Outlined.Terminal)
     )
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
@@ -845,6 +846,10 @@ private fun ShortcutCategoryV2(
     context: Context
 ) {
     when (category) {
+        "Performance tuning" -> {
+            val tuning = remember(s.shortcut) { com.winlator.cmod.ui.settings.PerformanceTuningEditorState(s.shortcut) }
+            com.winlator.cmod.ui.settings.PerformanceTuningGameCard(tuning) { tuning.saveTo(s.shortcut); s.shortcut.saveData() }
+        }
         "General" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard { SettingText("Name", s.name) { s.name = it } }
             SettingsCard {

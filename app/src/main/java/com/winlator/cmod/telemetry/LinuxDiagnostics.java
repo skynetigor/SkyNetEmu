@@ -113,7 +113,7 @@ public final class LinuxDiagnostics {
     private static void performance(PerfSampler perf, long run) {
         if (!active || generation != run || !Telemetry.isEnabled()) return;
         try {
-            String sample = perf.snapshot();
+            String sample = perf.snapshot() + " " + com.winlator.cmod.perf.PerformanceSession.diagnostics();
             long now = android.os.SystemClock.elapsedRealtime();
             sample += " accepted_game_frames=" + GameSessionRecorder.frameCount()
                     + " renderer_age_ms=" + (rendererElapsed > 0 ? Math.max(0, now - rendererElapsed) : -1);

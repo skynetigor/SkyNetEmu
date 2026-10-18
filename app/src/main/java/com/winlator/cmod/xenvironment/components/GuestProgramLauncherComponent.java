@@ -48,7 +48,8 @@ import java.util.ArrayList;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
-    private static int pid = -1;
+    private static volatile int pid = -1;
+    public int getPid() { return pid; }
     private String[] bindingPaths;
     private EnvVars envVars;
     private WineInfo wineInfo;

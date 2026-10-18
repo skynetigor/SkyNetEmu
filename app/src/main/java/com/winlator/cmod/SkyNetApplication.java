@@ -12,6 +12,7 @@ public class SkyNetApplication extends Application {
         // The VR process runs this too and has nothing to report.
         String process = Application.getProcessName();
         if (process == null || process.equals(getPackageName())) {
+            com.winlator.cmod.perf.PerformanceSession.recoverGpu(this);
             Telemetry.init(this);
             // The registry (game profiles, defaults) is asked of the network at every start; the saved copies are for when it cannot be reached.
             com.winlator.cmod.contents.RegistryCache.refreshInBackground(this);

@@ -96,6 +96,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             repeat(Runtime.getRuntime().availableProcessors().coerceIn(1, 32)) { add(selected.isEmpty() || it in selected) }
         }
     }
+    val performanceTuning = remember(shortcut) { com.winlator.cmod.ui.settings.PerformanceTuningEditorState(shortcut) }
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
     var fit by remember { mutableStateOf(shortcut.getExtra(FIT)) }
     var upscaler by remember { mutableStateOf(shortcut.getExtra(UPSCALER)) }
@@ -241,6 +242,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, keyboardButton.ifEmpty { null })
         shortcut.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, autoKeyboard.ifEmpty { null })
         shortcut.putExtra(LinuxShortcutDefaults.EXTRA_OWN, "1")
+        performanceTuning.saveTo(shortcut)
         shortcut.saveData()
         onClose()
     }
@@ -257,6 +259,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         ?: if (profileId == GameProfiles.NONE) "None (turned off)" else "None"
 
     val categories = listOfNotNull(
+        EditorCategory("performance_tuning", "Performance tuning", "Override global defaults", false) {
+            com.winlator.cmod.ui.settings.PerformanceTuningGameCard(performanceTuning)
+        },
         EditorCategory("game", "Game profile", gameSummary, false) {
             SettingsCard {
                 SettingMappedChoice(

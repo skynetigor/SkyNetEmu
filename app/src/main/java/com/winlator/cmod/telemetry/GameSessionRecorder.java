@@ -131,6 +131,7 @@ public final class GameSessionRecorder {
                 f.add("skynet.battery.drain_pct"); f.add(s.batteryFirstPct - s.batteryLastPct);
             }
         }
+        f.add("skynet.performance.diagnostics"); f.add(com.winlator.cmod.perf.PerformanceSession.diagnostics());
         Telemetry.event("skynet.game_session", "session_ended", f.toArray());
     }
 

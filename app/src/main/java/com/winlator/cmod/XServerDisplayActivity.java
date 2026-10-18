@@ -462,6 +462,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             shortcut = new Shortcut(container, new File(shortcutPath));
             if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
         }
+        performanceSession = new com.winlator.cmod.perf.PerformanceSession(this, shortcut);
         if (linuxSession) {
             linuxRuntime = LinuxRuntime.resolve(this, com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut));
             if (linuxRuntime == null) {
@@ -961,9 +962,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    private com.winlator.cmod.perf.PerformanceSession performanceSession;
+
     @Override
     public void onResume() {
         super.onResume();
+        if (performanceSession != null) performanceSession.resume();
 
         if (environment != null) {
             xServerView.onResume();
@@ -983,6 +987,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         super.onPause();
 
         if (!isInPictureInPictureMode()) {
+            if (performanceSession != null) performanceSession.suspend();
             if (environment != null) {
                 environment.onPause();
                 xServerView.onPause();
@@ -1084,6 +1089,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
+        if (performanceSession != null) performanceSession.close();
         com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
         GameSessionRecorder.end();
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
@@ -1149,6 +1155,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             // The process ends right after this: one bounded attempt to send the session summary.
+            if (performanceSession != null) performanceSession.awaitRestore();
             Telemetry.flushNow(1500);
             preloaderDialog.closeOnUiThread();
             runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext()));
@@ -1157,6 +1164,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (performanceSession != null) performanceSession.close();
         if (realMouseListener != null) {
             InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
             if (inputManager != null) inputManager.unregisterInputDeviceListener(realMouseListener);
@@ -1480,6 +1488,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         startGameSessionRecording();
         environment.startEnvironmentComponents();
+        if (performanceSession != null) performanceSession.setGuestRoot(guestProgramLauncherComponent.getPid());
         LsfgManager.startVsyncClock(this, container);
 
         winHandler.start();
@@ -1576,6 +1585,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         + " rendererPresent=" + (shortcut != null ? shortcut.getRendererPresentMode() : container.getRendererPresentMode())
                         + " resolution=" + xServer.screenInfo.width + "x" + xServer.screenInfo.height);
         environment.startEnvironmentComponents();
+        if (performanceSession != null) performanceSession.setGuestRoot(launcher.getPid());
     }
 
     private void createWrapperScript(String path, String content) {
@@ -2320,6 +2330,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void setupSidebarGraphicsControls() {
+        findViewById(R.id.BTPerformanceTuning).setOnClickListener(v ->
+                com.winlator.cmod.ui.settings.PerformanceTuningDialog.show(this, shortcut, performanceSession));
         final boolean isVulkanRenderer = xServerView instanceof VulkanXServerView;
 
         View reshadePanel = findViewById(R.id.LLSubReshade);

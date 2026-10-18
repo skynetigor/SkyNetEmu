@@ -35,6 +35,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private Callback<Integer> terminationCallback;
     private final Object lock = new Object();
     private int pid = -1;
+    public int getPid() { synchronized (lock) { return pid; } }
     private Thread reaper;
     private long startedAt;
 

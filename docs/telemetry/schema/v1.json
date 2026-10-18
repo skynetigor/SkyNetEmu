@@ -17,7 +17,7 @@
         "skynet.file_cache", "skynet.storage", "skynet.time_to_window_ms", "skynet.time_to_renderer_ms", "event.duration",
         "skynet.fps.avg", "skynet.fps.p1_low", "skynet.frametime.p99_ms", "skynet.cpu.avg_pct", "skynet.gpu.avg_pct",
         "skynet.temp.cpu_max_c", "skynet.temp.battery_max_c", "skynet.thermal.max_status", "skynet.memory.peak_used_bytes",
-        "skynet.battery.drain_pct", "skynet.exit.code", "skynet.exit.kind"
+        "skynet.battery.drain_pct", "skynet.exit.code", "skynet.exit.kind", "skynet.performance.diagnostics"
       ]
     },
     "skynet.error": {
