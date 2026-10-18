@@ -73,6 +73,8 @@ import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.ui.settings.LinuxDriverPicker
 import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
+import com.winlator.cmod.ui.settings.RendererDriverPicker
+import com.winlator.cmod.ui.settings.rememberRendererDriverPicker
 import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.fexcore.FEXCorePreset
 import com.winlator.cmod.fexcore.FEXCorePresetManager
@@ -383,6 +385,8 @@ private fun LinuxContainerEditorBody(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: steam?.defaults?.driver ?: "") }
+    var rendererDriverId by remember { mutableStateOf(editing?.rendererDriverId ?: "system") }
+    val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
     var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: if (steam != null) LinuxEmulator.BOX64 else LinuxEmulator.NONE) }
     var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: steam?.defaults?.emulator ?: "") }
     var emulatorPreset by remember {
@@ -464,7 +468,7 @@ private fun LinuxContainerEditorBody(
     val freeBytes = context.filesDir.usableSpace
     val neededBytes = offered?.let { LinuxRuntimeInstaller.requiredBytes(it) } ?: 0L
     val notEnoughSpace = needsDownload && offered != null && offered!!.size > 0 && freeBytes < neededBytes
-    val busy = creating || install.running || waitingForRuntime || linuxDriverPicker.installing.isNotEmpty()
+    val busy = creating || install.running || waitingForRuntime || linuxDriverPicker.installing.isNotEmpty() || rendererDriverPicker.installing.isNotEmpty()
     val canSave = if (steam != null) editing != null && !busy else name.isNotBlank() && sizeValid && !busy && !notEnoughSpace
 
     LaunchedEffect(needsDownload) {
@@ -493,6 +497,7 @@ private fun LinuxContainerEditorBody(
         // Off is written as 0 for the Steam container: no value there means "on".
         container.putExtra("scaleGameWindow", if (scaleWindow) "1" else if (SteamContainer.isManaged(container)) "0" else "")
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
+        container.setRendererDriverId(rendererDriverId)
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
         container.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulator)
@@ -739,6 +744,10 @@ private fun LinuxContainerEditorBody(
                 ) { upscaler = it }
                 SettingsDivider()
                 SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
+                if (!softwareOutput) {
+                    SettingsDivider()
+                    RendererDriverPicker(rendererDriverId, rendererDriverPicker) { rendererDriverId = it }
+                }
                 SettingsDivider()
                 SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
                 SettingsDivider()
@@ -858,7 +867,7 @@ private fun LinuxContainerEditorBody(
     val toastContext = LocalContext.current
     fun leave() {
         when {
-            linuxDriverPicker.installing.isNotEmpty() -> android.widget.Toast.makeText(toastContext, "Wait for the driver download to finish.", android.widget.Toast.LENGTH_SHORT).show()
+            linuxDriverPicker.installing.isNotEmpty() || rendererDriverPicker.installing.isNotEmpty() -> android.widget.Toast.makeText(toastContext, "Wait for the driver download to finish.", android.widget.Toast.LENGTH_SHORT).show()
             editing == null || busy -> onBack()
             canSave -> save()
             else -> android.widget.Toast.makeText(toastContext, "Fix the highlighted settings first.", android.widget.Toast.LENGTH_SHORT).show()
