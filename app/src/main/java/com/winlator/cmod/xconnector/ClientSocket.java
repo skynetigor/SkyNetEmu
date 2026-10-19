@@ -83,7 +83,7 @@ public class ClientSocket {
 
     private native int sendAncillaryMsg(int clientFd, ByteBuffer data, int length, int ancillaryFd);
 
-    /** Complete packet write with a deadline; used by the Linux X server's output worker. */
+    /** Cancellable complete packet write; used by the Linux X server's output worker. */
     public native boolean sendPacket(ByteBuffer data, int length, int ancillaryFd);
     public native void abort();
 }

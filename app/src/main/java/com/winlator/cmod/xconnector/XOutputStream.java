@@ -164,7 +164,7 @@ public class XOutputStream {
                         close();
                         buffer.clear();
                         ancillaryFd = -1;
-                        throw new IOException("X11 client stopped consuming output");
+                        throw new IOException("X11 output closed or pending queue exceeded " + MAX_PENDING_BYTES + " bytes");
                     }
                     ByteBuffer copy = ByteBuffer.allocateDirect(buffer.remaining());
                     copy.put(buffer).flip();

@@ -11,47 +11,16 @@
 #include <jni.h>
 #include <android/log.h>
 #include <errno.h>
-#include <time.h>
+#include "xconnector_send_packet.h"
 
-/* Linux X11 output is serialized on one worker per client. A stalled client must
- * not hold server locks, lose a partial packet, or retain a worker indefinitely. */
+/* Linux X11 output is serialized on one cancellable worker per client. */
 JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_xconnector_ClientSocket_sendPacket(JNIEnv *env, jobject obj,
                                                          jobject data, jint length, jint ancillaryFd) {
     jclass cls = (*env)->GetObjectClass(env, obj);
     int fd = (*env)->GetIntField(env, obj, (*env)->GetFieldID(env, cls, "fd", "I"));
     char *bytes = (*env)->GetDirectBufferAddress(env, data);
-    struct timespec start, now;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    int offset = 0;
-    while (offset < length) {
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        long elapsed = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
-        if (elapsed >= 2000) return JNI_FALSE;
-        struct pollfd pfd = {.fd = fd, .events = POLLOUT};
-        int ready = poll(&pfd, 1, 2000 - elapsed);
-        if (ready < 0 && errno == EINTR) continue;
-        if (ready <= 0 || (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))) return JNI_FALSE;
-        struct iovec iov = {.iov_base = bytes + offset, .iov_len = length - offset};
-        char control[CMSG_SPACE(sizeof(int))];
-        struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1};
-        if (ancillaryFd >= 0) {
-            memset(control, 0, sizeof(control));
-            msg.msg_control = control;
-            msg.msg_controllen = sizeof(control);
-            struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-            cmsg->cmsg_level = SOL_SOCKET;
-            cmsg->cmsg_type = SCM_RIGHTS;
-            cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-            memcpy(CMSG_DATA(cmsg), &ancillaryFd, sizeof(int));
-        }
-        ssize_t sent = sendmsg(fd, &msg, MSG_DONTWAIT | MSG_NOSIGNAL);
-        if (sent < 0 && (errno == EAGAIN || errno == EINTR)) continue;
-        if (sent <= 0) return JNI_FALSE;
-        ancillaryFd = -1;
-        offset += sent;
-    }
-    return JNI_TRUE;
+    return xconnector_send_packet(fd, bytes, length, ancillaryFd) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL

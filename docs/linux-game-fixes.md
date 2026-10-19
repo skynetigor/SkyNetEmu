@@ -3,6 +3,64 @@
 One entry per problem: symptom, cause, fix, source. **Search here first**, then the internet (see the `fix-game` skill).
 "Found by experiment" means no outside source was used; replace it with a link when one turns up.
 
+## BeamNG.drive 0.34: X11 disconnect during map loading (2026-10-19)
+
+- **Setup:** SM-F976B, Box64 `box64-0.4.4-r2` Performance, `bannerlator-r9`, glibc
+  without proot, Turnip `turnip-v26.3.0-20261011-a8xx-linux`, native Vulkan output.
+  The user reported Italy and Gridmap V2 freezing and Android reporting the app
+  unresponsive.
+- **Cause:** the asynchronous X11 output worker imposed a **two-second deadline
+  on each complete packet**. A game can legitimately stop draining its X11
+  connection while loading assets. Once the socket fills, `sendPacket` returned
+  false and `writePending` closed/shut down the connection. This is separate from
+  keeping Android's UI responsive: the send already runs on a dedicated worker.
+- **Reproduction:** Gridmap V2 reached gameplay on the original settings after
+  about 272 seconds, mostly spent cooking uncached terrain textures. During a
+  subsequent Italy load, a 30-second ADB touchpad swipe reproduced an X11
+  disconnect at 13:01:11, logged as `X11 client stopped consuming output` and
+  `Client fd=234 closed its end of the connection`. The earlier user-session log
+  also records a disconnect while terrain conversion is running. A zero-FPS
+  loading interval alone does not establish a deadlock or emulator crash.
+- **Fix:** `xconnector_send_packet.h` waits for socket writability without a
+  fixed deadline. The existing 64 MiB pending-output limit remains in force;
+  explicit close or queue overflow calls `shutdown`, waking a blocked writer.
+  Partial writes retain their position and send an ancillary descriptor once.
+- **Regression validation:** `tools/xconnector-test/send_packet_test.c` runs on
+  the phone. The original send loop fails when a reader pauses for over three
+  seconds. The fixed loop passes delayed/interrupted reads, byte integrity and
+  packet order after partial writes, exactly one received descriptor, peer
+  disconnect, and cancellation via shutdown. Debug APK assembly passed.
+- **Additional memory failure:** after installing the fix, Italy passed terrain
+  and object loading without the X11 disconnect, but Android killed the app
+  during physics collision initialization. `ApplicationExitInfo` explicitly
+  reports `reason=3 (LOW_MEMORY)` at 13:04:39; the original build had also been
+  killed for low memory at 13:02:38. Smaller Box64 blocks and FEX reproduced the
+  memory kill. This is separate from X11 backpressure.
+- **Phone workaround and gameplay check:** changing only this version's
+  `GraphicTextureQuality` from `Normal` to `Lowest` allowed Italy to load in
+  about 40 seconds from process startup with its terrain cache prepared.
+  `Low` reached the ready state but was killed shortly afterward, so it was
+  insufficient. With `Lowest`, gameplay visibly rendered, the ready state
+  persisted through 123 seconds of process runtime, touchpad input worked and
+  the Android in-game drawer opened. Other graphics settings and the original
+  Box64 Performance shortcut settings were retained. One screenshot showed
+  35 FPS; this is not a performance benchmark or a long stability test.
+- **Second map and cleanup:** the fixed APK also loaded Gridmap V2 with the
+  same settings (ready at about 31 seconds from startup), with touchpad input
+  during loading and no X11 output/input-timeout errors in its app log.
+  Both original shortcut files were byte-for-byte unchanged. FEX experiments
+  were removed and its original configuration restored; the temporary Lua
+  extension and shortcut were removed. The original 0.34 game settings are
+  backed up inside the container at
+  `/root/.skynet/backups/beamng034-settings-before-fix-20261019.tar`.
+- **Separate investigation:** two early automatic Italy probes aborted in
+  native `realloc` with Box64/libassimp frames. Other runs with unchanged Box64
+  settings passed that stage; neither the allocator mode experiments nor FEX
+  established a verified fix for that separate abort. No speculative emulator
+  or allocator override is part of the X11 fix.
+- **Source:** app source, socket-pair regression, and on-device session logs in
+  `/tmp/skynet-beamng034-20261019`. This is an experimentally identified app bug.
+
 ## BeamNG.drive 0.34: failed CPU detection and slow terrain loading (2026-10-17)
 
 - **Setup:** native Linux 0.34.0.0, `BinLinux/BeamNG.drive.x64 -nosteam` from shared storage; Box64 0.4.4 Performance,
