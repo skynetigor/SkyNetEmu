@@ -298,6 +298,19 @@ public final class NativeTouchChecks {
             check(mouseRelease.await(1,java.util.concurrent.TimeUnit.SECONDS)&&mouse[0]==1&&mouse[1]==1,"Linux touchpad still clicks and mode switch releases its mouse button");
             check(server.pointer.getX()==0&&server.pointer.getY()==0,"Linux touchpad ignores Windows global touchscreen toggle");
         }finally{prefs.edit().putBoolean("touchscreen_toggle",global).apply();}
+        driver.runOnMainSync(() -> {
+            view[0].setLinuxTouchMode(false);
+            server.setRelativeMouseMovement(true);
+            server.injectPointerMove(100,100);
+            for(int action:new int[]{0,2,1}) {
+                float x=action==0?200:260, y=action==0?200:240;
+                MotionEvent e=motion(down,action,new int[]{0},new float[]{x},new float[]{y});
+                view[0].onTouchEvent(e);e.recycle();
+            }
+        });
+        check(server.pointer.getX()>100 && server.pointer.getY()>100,
+                "Linux touchpad moves the X pointer with Relative Mouse enabled (no Wine helper)");
+        server.setRelativeMouseMovement(false);
 
 
     }
@@ -352,6 +365,40 @@ public final class NativeTouchChecks {
             Field preloader=XServerDisplayActivity.class.getDeclaredField("preloaderDialog");preloader.setAccessible(true);
             Object dialog=preloader.get(activity);dialog.getClass().getMethod("closeOnUiThread").invoke(dialog);
             driver.waitForIdleSync();
+            if ("1".equals(args.getString("cursorUi"))) {
+                try {
+                    driver.runOnMainSync(() -> {
+                        androidx.drawerlayout.widget.DrawerLayout drawer=activity.findViewById(com.winlator.cmod.R.id.DrawerLayout);
+                        drawer.openDrawer(androidx.core.view.GravityCompat.START, false);
+                        activity.findViewById(com.winlator.cmod.R.id.BTItemInput).performClick();
+                    });
+                    driver.waitForIdleSync();
+                    driver.runOnMainSync(() -> {
+                        android.widget.Switch mode=activity.findViewById(com.winlator.cmod.R.id.SWTouchpadMode);
+                        android.widget.Switch disabled=activity.findViewById(com.winlator.cmod.R.id.SWDisableMouse);
+                        check(mode!=null && disabled!=null,"flyout exposes touchpad mode");
+                        check(mode.getGlobalVisibleRect(new android.graphics.Rect()),"touchpad mode is visible without scrolling");
+                        mode.setChecked(false);
+                        disabled.setChecked(true);
+                        mode.setChecked(true);
+                        check(!disabled.isChecked(),"enabling touchpad clears Disable Mouse");
+                        try {
+                            Field rendered=activity.getClass().getDeclaredField("xServerView");rendered.setAccessible(true);
+                            Object renderer=rendered.get(activity);
+                            Field visible=renderer.getClass().getDeclaredField("cursorVisible");visible.setAccessible(true);
+                            check(visible.getBoolean(renderer),"touchpad on shows the cursor automatically");
+                            Field touch=activity.getClass().getDeclaredField("touchpadView");touch.setAccessible(true);
+                            TouchpadView pad=(TouchpadView)touch.get(activity);
+                            check(!pad.isNativeTouch(),"touchpad on uses mouse input");
+                            mode.setChecked(false);
+                            check(!visible.getBoolean(renderer) && pad.isNativeTouch(),"touchpad off hides cursor and restores touchscreen input");
+                            mode.setChecked(true);
+                            check(visible.getBoolean(renderer) && !pad.isNativeTouch(),"re-enabling touchpad restores cursor and mouse input together");
+                        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+                    });
+                    return report.toString();
+                } finally { driver.runOnMainSync(activity::finish); }
+            }
             Field field=XServerDisplayActivity.class.getDeclaredField("touchpadView");field.setAccessible(true);
             TouchpadView view=(TouchpadView)field.get(activity);
             driver.runOnMainSync(()->{

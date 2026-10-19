@@ -237,6 +237,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean isRelativeMouseMovement = false;
     private boolean isMouseDisabled = false;
     private boolean simulateTouchScreen = false;
+    private boolean realMouseConnected;
 
     private SensorManager sensorManager;
 
@@ -606,6 +607,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, gameProfile));
         }
 
+        if (!simulateTouchScreen) isMouseDisabled = false;
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
         this.dxwrapperConfig = DXVKConfigDialog.parseConfig(dxwrapperConfig);
 
@@ -645,6 +647,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         displayxConfig.put("precisePresentation", precisePresentation ? "1" : "0");
         if ("native".equals(screenSize.trim())) screenSize = nativeScreenSize();
         xServer = new XServer(new ScreenInfo(screenSize), useDisplayX ? "displayx" : "egl", displayxConfig);
+        xServer.setNativeMouseInput(linuxSession);
         if (linuxSession) {
             // A Linux program can list the container's resolution and the standard ones below it and pick one (RandR): the
             // screen takes its size, and the picture is scaled to the display as before.
@@ -688,7 +691,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (!winStarted[0] && isSessionApplicationWindow(window)) {
                     if (!simulateTouchScreen && (linuxSession || !preferences.getBoolean("touchscreen_toggle", false))) {
                         // A finger is its own pointer, in either direct-touch mode: no cursor to draw.
-                        xServerView.setCursorVisible(true);
+                        applyCursorVisibility();
                     }
                     preloaderDialog.closeOnUiThread();
                     winStarted[0] = true;
@@ -826,7 +829,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         Runnable runnable = () -> {
             setupUI();
-            setupSidebarInputControls();
+            applyCursorVisibility();
+        setupSidebarInputControls();
             if (controlsProfile.isEmpty()) {
 
                 simulateConfirmInputControlsDialog();
@@ -1245,8 +1249,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /**
-     * With a real mouse connected the touch emulation of a mouse (touchpad, touch screen, simulated touch) is
-     * switched off, and the cursor, which the touch modes hide, is shown. Follows the mouse being plugged in or out.
+     * Track physical mouse devices. Explicit touchpad mode still accepts fingers; cursor visibility follows the mode.
      */
     private void watchRealMouse() {
         InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
@@ -1267,12 +1270,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         final boolean realMouse = connected;
         runOnUiThread(() -> {
-            if (touchpadView != null) touchpadView.setRealMouseConnected(realMouse);
-            // The cursor is only hidden by the touch modes, so only they need it brought back.
-            if (xServerView != null && (simulateTouchScreen || (!linuxSession && preferences.getBoolean("touchscreen_toggle", false)))) {
-                xServerView.setCursorVisible(realMouse);
-            }
+            realMouseConnected = realMouse;
+            applyCursorVisibility();
         });
+    }
+
+    private void applyCursorVisibility() {
+        if (android.os.Looper.myLooper() != getMainLooper()) {
+            runOnUiThread(this::applyCursorVisibility);
+            return;
+        }
+        if (isDestroyed()) return;
+        boolean touchpad = !simulateTouchScreen;
+        if (touchpadView != null) {
+            touchpadView.setTouchpadMode(touchpad);
+            touchpadView.setRealMouseConnected(realMouseConnected && !touchpad);
+        }
+        if (xServerView != null) {
+            xServerView.setForceCursor(touchpad);
+            xServerView.setCursorVisible(touchpad);
+        }
     }
 
     @Override
@@ -1924,24 +1941,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
             swTouchpadMode.setChecked(!simulateTouchScreen);
             swTouchpadMode.setOnCheckedChangeListener((btn, checked) -> {
                 simulateTouchScreen = !checked;
+                if (checked) {
+                    isMouseDisabled = false;
+                    Switch disabled = findViewById(R.id.SWDisableMouse);
+                    if (disabled != null) disabled.setChecked(false);
+                    if (touchpadView != null) touchpadView.setMouseEnabled(true);
+                }
                 if (linuxSession && inputControlsView != null) inputControlsView.cancelNativeInput();
                 if (touchpadView != null) {
                     if (linuxSession) touchpadView.setLinuxTouchMode(simulateTouchScreen);
                     else touchpadView.setSimTouchScreen(simulateTouchScreen);
                 }
-                if (xServerView != null) xServerView.setCursorVisible(!simulateTouchScreen);
-                if (linuxSession) applyRealMouse();
+                applyCursorVisibility();
                 if (shortcut != null) {
                     if (linuxSession) shortcut.putExtra("linuxTouchMode", simulateTouchScreen ? "native" : "touchpad");
                     shortcut.putExtra("simTouchScreen", simulateTouchScreen ? "1" : "0");
+                    if (checked) {
+                        shortcut.putExtra("disableMouse", "0");
+                    }
                     shortcut.saveData();
                 }
             });
         }
 
+        applyCursorVisibility();
         Switch swRelativeMouse = findViewById(R.id.SWRelativeMouse);
         if (swRelativeMouse != null) {
-            swRelativeMouse.setChecked(isRelativeMouseMovement);
+            swRelativeMouse.setEnabled(!linuxSession);
+            swRelativeMouse.setChecked(!linuxSession && isRelativeMouseMovement);
             swRelativeMouse.setOnCheckedChangeListener((btn, checked) -> {
                 isRelativeMouseMovement = checked;
                 if (xServer != null)
@@ -1956,6 +1983,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 isMouseDisabled = checked;
                 if (touchpadView != null)
                     touchpadView.setMouseEnabled(!isMouseDisabled);
+                applyCursorVisibility();
             });
         }
 

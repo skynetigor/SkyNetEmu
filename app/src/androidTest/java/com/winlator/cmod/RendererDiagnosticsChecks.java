@@ -98,8 +98,20 @@ final class RendererDiagnosticsChecks {
         consumer.start();
         ImageReader reader = ImageReader.newInstance(64, 64, PixelFormat.RGBA_8888, 3,
                 HardwareBuffer.USAGE_GPU_COLOR_OUTPUT | HardwareBuffer.USAGE_CPU_READ_OFTEN);
+        java.util.concurrent.atomic.AtomicReference<Long> imageHash = new java.util.concurrent.atomic.AtomicReference<>();
         reader.setOnImageAvailableListener(source -> {
-            try (Image image = source.acquireLatestImage()) { /* Release each presented image. */ }
+            try (Image image = source.acquireLatestImage()) {
+                if (image != null) {
+                    Image.Plane plane = image.getPlanes()[0];
+                    java.nio.ByteBuffer pixels = plane.getBuffer();
+                    java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+                    for (int y=0; y<image.getHeight(); y++) for (int x=0; x<image.getWidth(); x++) {
+                        int offset=y*plane.getRowStride()+x*plane.getPixelStride();
+                        for (int c=0;c<4;c++) crc.update(pixels.get(offset+c));
+                    }
+                    imageHash.set(crc.getValue());
+                }
+            }
         }, new Handler(consumer.getLooper()));
         VulkanXServerView[] view = new VulkanXServerView[1];
         XServer server = new XServer(new ScreenInfo(64, 64), "vortek", null);
@@ -189,6 +201,24 @@ final class RendererDiagnosticsChecks {
                     "unsupported physical display feedback is unavailable, never fabricated");
             report.append("PIPELINE ").append(flow).append('\n');
 
+            com.winlator.cmod.xserver.Drawable arrow = (com.winlator.cmod.xserver.Drawable)
+                    field(VulkanXServerView.class, "rootCursorDrawable").get(view[0]);
+            com.winlator.cmod.xserver.Cursor hidden = new com.winlator.cmod.xserver.Cursor(123,0,0,arrow,null,null);
+            hidden.setVisible(false);
+            field(VulkanXServerView.class,"lastCursor").set(view[0],hidden);
+            view[0].setCursorVisible(true); // Guest-hidden cursor should still be hidden.
+            deadline=SystemClock.elapsedRealtime()+3000;
+            while(imageHash.get()==null && SystemClock.elapsedRealtime()<deadline) SystemClock.sleep(20);
+            Long withoutCursor=imageHash.get();
+            check(withoutCursor!=null,"capture cursor test baseline");
+            view[0].setForceCursor(true);
+            deadline=SystemClock.elapsedRealtime()+3000;
+            while(withoutCursor.equals(imageHash.get()) && SystemClock.elapsedRealtime()<deadline) SystemClock.sleep(20);
+            check(!withoutCursor.equals(imageHash.get()),"forced app cursor changes presented pixels despite guest-hidden cursor");
+            view[0].setForceCursor(false);
+            deadline=SystemClock.elapsedRealtime()+3000;
+            while(!withoutCursor.equals(imageHash.get()) && SystemClock.elapsedRealtime()<deadline) SystemClock.sleep(20);
+            check(withoutCursor.equals(imageHash.get()),"disabling forced cursor restores guest-hidden cursor pixels");
             report.append("NATIVE ").append(presented).append('\n');
         } finally {
             if (view[0] != null) {

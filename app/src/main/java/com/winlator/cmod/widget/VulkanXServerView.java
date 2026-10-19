@@ -57,6 +57,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public int surfaceHeight;
     private String[] unviewableWMClasses = null;
     private boolean cursorVisible = false;
+    private boolean forceCursor;
     private String driverPath = null;
     private ExecutorService initExecutor = null;
     private boolean requireDmaBufImport;
@@ -220,7 +221,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
                         updateTransform();
-                        nativeSetCursorVisible(nativeHandle, cursorVisible);
+                        sendCursorToNative(lastCursor);
                         initComplete = true;
                         return;
                     }
@@ -245,7 +246,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     updateTransform();
-                    nativeSetCursorVisible(nativeHandle, cursorVisible);
+                    sendCursorToNative(lastCursor);
 
                     if (isColdInit) {
                         Window root = xServer.windowManager.rootWindow;
@@ -435,6 +436,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     private void sendCursorToNative(Cursor cursor) {
         if (nativeHandle == 0) return;
+        if (forceCursor) cursor = null;
         Drawable cd; short hotX = 0, hotY = 0;
         boolean effVis = cursorVisible;
         if (cursor != null) {
@@ -755,6 +757,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         cursorVisible = visible;
         synchronized (lock) {
             if (nativeHandle != 0) { nativeSetCursorVisible(nativeHandle, visible); if (visible) sendCursorToNative(lastCursor); }
+        }
+    }
+
+    @Override public void setForceCursor(boolean force) {
+        synchronized (lock) {
+            forceCursor = force;
+            sendCursorToNative(lastCursor);
         }
     }
 

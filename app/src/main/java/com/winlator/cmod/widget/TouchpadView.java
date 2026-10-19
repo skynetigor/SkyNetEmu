@@ -48,11 +48,14 @@ public class TouchpadView extends View {
     private Runnable fingerUpCallback;
     private final float[] xform = XForm.getInstance();
     private boolean simTouchScreen = false;
+    private Boolean explicitTouchpadMode;
+    public void setTouchpadMode(boolean enabled) { explicitTouchpadMode = enabled; }
     private boolean linuxInput, nativeTouch, freshNativeGesture;
     private final java.util.Set<Integer> guestTouches = new java.util.HashSet<>();
 
     public boolean isNativeTouch() { return linuxInput && nativeTouch; }
     public void setLinuxTouchMode(boolean nativeMode) {
+        xServer.setNativeMouseInput(true);
         cancelNativeTouches();
         linuxInput = true; nativeTouch = nativeMode;
         setSimTouchScreen(false);
@@ -263,7 +266,8 @@ public class TouchpadView extends View {
         // A real mouse is plugged in: a finger no longer drives the pointer (the mouse's own events, and a stylus, still do).
         if (realMouseConnected && isFingerOnTouchscreen(event)) return true;
 
-        boolean isTouchscreenMode = !linuxInput && preferences.getBoolean("touchscreen_toggle", false);
+        boolean isTouchscreenMode = !linuxInput && (explicitTouchpadMode != null
+                ? !explicitTouchpadMode : preferences.getBoolean("touchscreen_toggle", false));
 
         // Reset the timeout timer to keep controls visible
         resetTouchscreenTimeout();  // <-- Ensure the controls stay visible

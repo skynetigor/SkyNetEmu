@@ -42,6 +42,8 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract boolean isFullscreen();
 
     public abstract void setCursorVisible(boolean visible);
+    /** Draw the app pointer instead of a game cursor that may be blank or hidden. */
+    public abstract void setForceCursor(boolean force);
     public abstract void setScreenOffsetYRelativeToCursor(boolean relative);
     public abstract void setMagnifierZoom(float zoom);
     public abstract float getMagnifierZoom();

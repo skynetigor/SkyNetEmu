@@ -764,6 +764,7 @@ void DisplayX::changeZOrder(Window *window) {
 }
 
 void DisplayX::updateCursor(Cursor *cursor) {
+    if (forceCursor) cursor = cursorManager->getRootCursor();
     pfnASurfaceTransactionSetBuffer(cursorTransaction, cursorManager->control, cursor && (cursor->visible && cursorVisible) ? cursor->image->ahb : nullptr, -1);
     pfnASurfaceTransactionApply(cursorTransaction);
 }
@@ -775,6 +776,7 @@ void DisplayX::updateCursorPosition() {
     jint id = env->GetIntField(pointWindowObj, cache->windowID);
     auto pointWindow = windowManager->getWindow(id);
     auto cursor = (pointWindow != nullptr) ? pointWindow->cursor : nullptr;
+    if (forceCursor) cursor = nullptr;
     auto rootCursor = cursorManager->getRootCursor();
     int x = std::clamp(cursorManager->pointer.posX, 0, windowManager->getRootWindow()->width - 1);
     int y = std::clamp(cursorManager->pointer.posY, 0, windowManager->getRootWindow()->height - 1);

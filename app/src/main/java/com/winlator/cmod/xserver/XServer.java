@@ -62,6 +62,7 @@ public class XServer {
     private WinHandler winHandler;
     private final EnumMap<Lockable, ReentrantLock> locks = new EnumMap<>(Lockable.class);
     private boolean relativeMouseMovement = false;
+    private boolean nativeMouseInput;
     private boolean simulateTouchScreen = false;
     private boolean disableMouse = false;
     private boolean isGrabbed = false;
@@ -112,12 +113,18 @@ public class XServer {
     }
 
     public boolean isRelativeMouseMovement() {
-        return relativeMouseMovement;
+        return relativeMouseMovement && !nativeMouseInput;
+    }
+
+    /** Linux uses X core/XInput events, never the Wine helper's relative-mouse channel. */
+    public void setNativeMouseInput(boolean enabled) {
+        nativeMouseInput = enabled;
+        cursorLocker.setEnabled(!isRelativeMouseMovement());
     }
 
     public void setRelativeMouseMovement(boolean relativeMouseMovement) {
-        cursorLocker.setEnabled(!relativeMouseMovement);
         this.relativeMouseMovement = relativeMouseMovement;
+        cursorLocker.setEnabled(!isRelativeMouseMovement());
     }
 
     public boolean isSimulateTouchScreen() { return simulateTouchScreen; }
