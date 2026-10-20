@@ -20,8 +20,8 @@ a successful installation alone does not establish compatibility.
 `Renderer driver: Auto (match GPU)` resolves through `registry/renderer-drivers.json`, with a bundled copy in the APK.
 Rules list exact Adreno models/variants, Android API bounds, priority, DMA-BUF capability, an HTTPS package URL and its SHA-256.
 The catalog records tested GPUs separately from candidates. Adreno 830 defaults to the AdrenoTools registry's standard
-[Turnip v26.2.0-R8 package](https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/tag/v26.2.0-R8), with its archive SHA-256 pinned.
-This mapping still needs validation on Adreno 830: upstream release notes list A6xx/A7xx only. Adreno 840 retains DD-Turnip v0.1.1,
+[Turnip Gen8 V30 package](https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/tag/gen_8_v30), with its archive SHA-256 pinned.
+Upstream lists experimental Adreno 830 support; this mapping still needs validation on that hardware. Adreno 840 retains DD-Turnip v0.1.1,
 which has device validation. Unlisted variants and Android versions do not inherit a family-wide match.
 
 Registry refresh downloads updates in the background. A launch reads the cached/bundled rules; if the selected package is missing,

@@ -56,8 +56,8 @@ public final class RendererDriverRegistryChecks {
         List<RendererDriverCatalog.Entry> entries = RendererDriverCatalog.parse(json);
         check(!entries.isEmpty(), "bundled Android renderer mapping parses");
         RendererDriverCatalog.Entry entry = entries.get(0);
-        check(entry.matches("Adreno (TM) 830", 37, true) && "Turnip v26.2.0-R8".equals(entry.id),
-                "SM-S931B Adreno 830 defaults to registry Turnip 26.2.0 R8");
+        check(entry.matches("Adreno (TM) 830", 37, true) && "Turnip Gen8 V30".equals(entry.id),
+                "SM-S931B Adreno 830 defaults to registry Turnip Gen8 V30");
         check(!entry.matches("Adreno (TM) 840", 37, true), "Adreno 830 default does not replace the tested 840 driver");
         check(entries.stream().anyMatch(candidate -> candidate.matches("Adreno (TM) 840", 37, true)
                 && "DD-Turnip v0.1.1".equals(candidate.id)), "tested Adreno 840 retains DD-Turnip v0.1.1");
