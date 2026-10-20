@@ -89,6 +89,7 @@ import com.winlator.cmod.xenvironment.components.LinuxProgramLauncherComponent;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
+import com.winlator.cmod.core.WindowsLaunchPlan;
 import com.winlator.cmod.core.WineRegistryEditor;
 import com.winlator.cmod.core.WineRequestHandler;
 import com.winlator.cmod.core.WineStartMenuCreator;
@@ -256,6 +257,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String screenEffectProfile;
 
     private GuestProgramLauncherComponent guestProgramLauncherComponent;
+    private WindowsLaunchPlan windowsLaunchPlan;
     private EnvVars overrideEnvVars;
 
     private void createNotifcationChannel() {
@@ -536,6 +538,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             wineInfo = WineInfo.fromIdentifier(this, contentsManager, wineVersion);
 
             imageFs.setWinePath(wineInfo.path);
+            try {
+                windowsLaunchPlan = WindowsLaunchPlan.resolve(imageFs, container, shortcut, wineInfo);
+            } catch (IllegalArgumentException error) {
+                Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
         }
 
         ProcessHelper.removeAllDebugCallbacks();
@@ -840,14 +849,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     setupLinuxEnvironment();
                     return;
                 }
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
-                applyGameRefreshRateUnlock();
                 try {
+                    if (windowsLaunchPlan.nativeArm64) {
+                        String components = shortcut != null ? shortcut.getExtra("wincomponents", container.getWinComponents()) : container.getWinComponents();
+                        if (!dxwrapper.equals("wined3d") || components.contains("=1"))
+                            throw new IllegalArgumentException("Use the Windows ARM64 preset with Wine builtin DLLs. The selected DirectX wrappers or Windows components contain x86/x64 DLLs.");
+                    }
+                    setupWineSystemFiles();
+                    windowsLaunchPlan.installHelper(this, container);
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                    applyGameRefreshRateUnlock();
                     setupXEnvironment();
-                } catch (PackageManager.NameNotFoundException e) {
-                    throw new RuntimeException(e);
+                } catch (PackageManager.NameNotFoundException | java.io.IOException | IllegalArgumentException e) {
+                    Log.e("WindowsLaunch", "Unable to prepare Windows game", e);
+                    runOnUiThread(() -> showProgramExitDialog(e.getMessage()));
                 }
             });
         };
@@ -1422,9 +1438,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             guestProgramLauncherComponent.setContainer(this.container);
             guestProgramLauncherComponent.setWineInfo(this.wineInfo);
 
-            String guestExecutable = "wine explorer /desktop=shell," + xServer.screenInfo + " " + getWineStartCommand();
-
-            guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
+            if (windowsLaunchPlan.nativeArm64) {
+                guestProgramLauncherComponent.setNativeArm64Arguments(windowsLaunchPlan.wineArguments(xServer.screenInfo.toString(), shortcut));
+            } else {
+                guestProgramLauncherComponent.setGuestExecutable("wine explorer /desktop=shell," + xServer.screenInfo + " " + getWineStartCommand());
+            }
 
             envVars.putAll(container.getEnvVars());
 
@@ -1434,6 +1452,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             applyFileCache();
 
             applyOpenGLDriverEnvVars();
+            windowsLaunchPlan.applyEnvironment(envVars);
 
             if (!wineCpuTopologyValue.isEmpty()) {
                 envVars.put("WINE_CPU_TOPOLOGY", wineCpuTopologyValue);
@@ -3489,7 +3508,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File system32dlls = null;
         File syswow64dlls = null;
 
-        if (wineInfo.isArm64EC())
+        if (wineInfo.isArm64EC() || (windowsLaunchPlan != null && windowsLaunchPlan.nativeArm64))
             system32dlls = new File(imageFs.getWinePath() + "/lib/wine/aarch64-windows");
         else
             system32dlls = new File(imageFs.getWinePath() + "/lib/wine/x86_64-windows");

@@ -26,6 +26,13 @@ public enum ExecutableKind {
         return this == LINUX_X64 || this == LINUX_ARM64 || this == LINUX_SCRIPT || this == LINUX_X86;
     }
 
+    /** Architecture of a selected Windows program. Installers and scripts keep the ordinary Wine path. */
+    public static WindowsExecutable.Architecture windowsArchitecture(File file) {
+        if (file == null || !file.getName().toLowerCase(Locale.ENGLISH).endsWith(".exe"))
+            return WindowsExecutable.Architecture.UNKNOWN;
+        return WindowsExecutable.detect(file);
+    }
+
     public static ExecutableKind of(File file) {
         if (file == null || !file.isFile()) return NONE;
         String name = file.getName().toLowerCase(Locale.ENGLISH);

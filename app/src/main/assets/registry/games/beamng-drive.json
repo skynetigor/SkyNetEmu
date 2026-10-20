@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "revision": 2,
+ "revision": 4,
  "id": "beamng-drive",
  "name": "BeamNG.drive",
  "steam": {
@@ -10,7 +10,8 @@
  "windows": {
   "executables": [
    "BeamNG.drive.exe",
-   "Bin64/BeamNG.drive.x64.exe"
+   "Bin64/BeamNG.drive.x64.exe",
+   "BinArm64/BeamNG.drive.arm64.exe"
   ]
  },
  "linux": {
@@ -37,7 +38,7 @@
    "label": "0.40.x",
    "status": "works",
    "default": true,
-   "notes": "Native Linux x86-64: startup and Automation Test Track loading verified with Box64 0.4.4-r3 on Snapdragon 8 Elite Gen 5. Broader device and long-session stability remain unverified. No Wine configuration is recommended for this version.",
+   "notes": "Native Linux x86-64: startup and Automation Test Track loading verified with Box64 0.4.4-r3 on Snapdragon 8 Elite Gen 5. Windows ARM64: GridMapv2 loading and an in-game scene verified with Proton 9 and DD-Turnip native Vulkan. The ARM64 profile remains experimental; broader device and long-session stability remain unverified.",
    "testedOn": "Samsung Galaxy Z Fold8 Ultra (SM-F976B), Snapdragon 8 Elite Gen 5",
    "match": {
     "versionFile": {
@@ -49,7 +50,8 @@
     }
    },
    "containers": [
-    "beamng-040-linux-box64-r3"
+    "beamng-040-linux-box64-r3",
+    "beamng-040-windows-arm64-proton9-dd-turnip"
    ],
    "preferredContainer": "beamng-040-linux-box64-r3",
    "linux": {

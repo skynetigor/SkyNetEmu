@@ -38,6 +38,22 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("nativeMissingRuntime"))) {
+                result.putString("stream", com.winlator.cmod.ui.addgame.NativeWindowsChecks.missingRuntime(this));
+                finish(status, result); return;
+            }
+            if (options != null && "1".equals(options.getString("nativeCatalog"))) {
+                result.putString("stream", NativeCatalogChecks.run(this));
+                finish(status, result); return;
+            }
+            if (options != null && "1".equals(options.getString("windowsLive"))) {
+                result.putString("stream", WindowsLiveChecks.run(this, options));
+                finish(status, result); return;
+            }
+            if (options != null && "1".equals(options.getString("nativeWindows"))) {
+                result.putString("stream", com.winlator.cmod.ui.addgame.NativeWindowsChecks.run(this, options));
+                finish(status, result); return;
+            }
             if (options != null && "1".equals(options.getString("fexVulkan"))) {
                 result.putString("stream", FexVulkanCompatChecks.run(this));
                 finish(status,result);return;

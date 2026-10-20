@@ -62,6 +62,8 @@ import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.contents.RegistryCache
 import com.winlator.cmod.core.DeviceInfo
 import com.winlator.cmod.core.ExecutableKind
+import com.winlator.cmod.core.WineInfo
+import com.winlator.cmod.core.WindowsExecutable
 import com.winlator.cmod.gameprofile.ConfigChooser
 import com.winlator.cmod.gameprofile.GameMatcher
 import com.winlator.cmod.gameprofile.GameProfile
@@ -110,7 +112,7 @@ class AddGameFragment : Fragment() {
 
     private sealed class Pick {
         class Registry(val config: ContainerConfigCatalog.Config) : Pick()
-        class Standard(val arm64ec: Boolean) : Pick()
+        class Standard(val mode: StandardContainer.Mode) : Pick()
         class StandardLinux : Pick()
         class Existing(val container: Container) : Pick()
         class Imported(val envelope: ContainerProfile.Envelope) : Pick()
@@ -120,6 +122,8 @@ class AddGameFragment : Fragment() {
     private lateinit var exe: File
     /** What the picked file runs on: decides the container kind, the registry programs it is matched with and the configs offered. */
     private var kind = ExecutableKind.WINDOWS
+    private var windowsArchitecture = WindowsExecutable.Architecture.UNKNOWN
+    private val nativeArm64 get() = windowsArchitecture == WindowsExecutable.Architecture.ARM64
     private val platform get() = if (kind.isLinux) GameProfile.Platform.LINUX else GameProfile.Platform.WINDOWS
     private var match: GameMatcher.Result? = null
     private var configs: Map<String, ContainerConfigCatalog.Config> = emptyMap()
@@ -129,6 +133,7 @@ class AddGameFragment : Fragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         exe = File(requireArguments().getString("exe").orEmpty())
         kind = ExecutableKind.of(exe).takeIf { it != ExecutableKind.NONE } ?: ExecutableKind.WINDOWS
+        windowsArchitecture = if (kind.isLinux) WindowsExecutable.Architecture.UNKNOWN else WindowsExecutable.detect(exe)
         if (phase is Phase.Loading) load()
         return ComposeView(requireContext()).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -157,7 +162,18 @@ class AddGameFragment : Fragment() {
             Telemetry.event("skynet.funnel", if (found == null) "game_unrecognised" else "game_recognised",
                 "skynet.game.id", found?.game?.id, "skynet.game.version", found?.version?.id)
             // Only the configs made for the file's platform: a Windows exe never gets a Linux container, nor the other way round.
-            val all = ContainerConfigCatalog.all(context, true).filterValues { it.platform == platform }
+            val all = ContainerConfigCatalog.all(context, true).filterValues { config ->
+                config.platform == platform && when {
+                    kind.isLinux -> true
+                    config.windowsArchitecture.isNotEmpty() -> (config.windowsArchitecture == "arm64") == nativeArm64
+                    // Older indexes have no architecture field. Inspect only a cached/bundled profile;
+                    // creating the chosen environment downloads its profile when it is needed.
+                    else -> runCatching {
+                        val profile = ContainerConfigCatalog.profileText(context, config, false)
+                        if (profile == null) !nativeArm64 else isNativeProfile(ContainerProfile.parse(profile).container) == nativeArm64
+                    }.getOrDefault(!nativeArm64)
+                }
+            }
             val soc = DeviceInfo.soc(context)
             val manager = ContainerManager(context)
             val model = buildModel(found, all, soc, manager)
@@ -186,6 +202,7 @@ class AddGameFragment : Fragment() {
         }
 
         var recommended: Tile? = null
+        var nativeRuntimeMissing = false
         val tiles = mutableListOf<Tile>()
         val version = found?.version
         if (found != null) {
@@ -205,15 +222,26 @@ class AddGameFragment : Fragment() {
                 else "The app's default Linux settings: the Linux runtime and Turnip driver, the ARM64 program run as it is.",
                 if (found == null) "A good start for a program the list does not know." else "Not tuned for this game.", 2
             ) { choose(Pick.StandardLinux()) })
-        } else for (arm64ec in listOf(false, true)) {
-            if (StandardContainer.runtimeFor(context, arm64ec) == null) continue
+        } else for (mode in if (nativeArm64) listOf(StandardContainer.Mode.ARM64_NATIVE)
+            else listOf(StandardContainer.Mode.X64, StandardContainer.Mode.ARM64EC)) {
+            if (StandardContainer.runtimeFor(context, mode) == null) {
+                if (mode == StandardContainer.Mode.ARM64_NATIVE) nativeRuntimeMissing = true
+                continue
+            }
             tiles.add(Tile(
                 Icons.Outlined.DesktopWindows,
-                if (arm64ec) "Standard Windows, ARM64EC" else "Standard Windows, x86_64",
-                if (arm64ec) "The app's default settings on an ARM64EC Wine or Proton, run through FEX."
-                else "The app's default settings on an x86_64 Wine or Proton, run through Box64.",
+                when (mode) {
+                    StandardContainer.Mode.ARM64_NATIVE -> "Standard Windows, ARM64 native"
+                    StandardContainer.Mode.ARM64EC -> "Standard Windows, ARM64EC"
+                    StandardContainer.Mode.X64 -> "Standard Windows, x86_64"
+                },
+                when (mode) {
+                    StandardContainer.Mode.ARM64_NATIVE -> "Runs the ARM64 game directly in Wine or Proton. Vulkan games use the native graphics path."
+                    StandardContainer.Mode.ARM64EC -> "The app's default settings on an ARM64EC Wine or Proton, run through FEX."
+                    StandardContainer.Mode.X64 -> "The app's default settings on an x86_64 Wine or Proton, run through Box64."
+                },
                 if (found == null) "A good start for a game the list does not know." else "Not tuned for this game.", 2
-            ) { choose(Pick.Standard(arm64ec)) })
+            ) { choose(Pick.Standard(mode)) })
         }
         val others = all.values.filter { it.id !in shown }
         if (others.isNotEmpty()) {
@@ -221,7 +249,12 @@ class AddGameFragment : Fragment() {
                 "Takes the settings made for another game from the list, for a game that is similar.", "Pick one from the list.", 2) { pickOther(others) })
         }
         // Only the containers of the file's platform that can run it (a Linux one: the emulator, the root filesystem it needs).
-        val mine = manager.containers.filter { !kind.isLinux && !it.isLinux }
+        val contents = ContentsManager(context).apply { syncContents() }
+        val mine = manager.containers.filter {
+            !kind.isLinux && !it.isLinux && if (nativeArm64) {
+                isNativeContainer(it) && WineInfo.fromIdentifier(context, contents, it.wineVersion).supportsNativeArm64()
+            } else !isNativeContainer(it)
+        }
         if (mine.isNotEmpty()) {
             val refusals = if (kind.isLinux) mine.associateWith { LinuxProgramSupport.refusal(context, it, kind) } else emptyMap()
             val fits = mine.filter { refusals[it] == null }
@@ -241,8 +274,15 @@ class AddGameFragment : Fragment() {
             found == null -> "The list has nothing for this ${if (kind.isLinux) "Linux program" else "game"}. Choose how to run it."
             version == null -> "${found.game.name}. The version was not recognised."
             else -> "${found.game.name} ${version.label} · ${soc.label()}"
-        } + if (kind.isLinux && found != null) " · Linux" else ""
-        return Model(found?.game?.name ?: ShortcutWriter.smartName(exe), subtitle, recommended, tiles)
+        } + when {
+            nativeArm64 -> " · Windows ARM64"
+            kind.isLinux && found != null -> " · Linux"
+            else -> ""
+        }
+        val runtimeNotice = if (nativeArm64 && nativeRuntimeMissing && all.isEmpty() && mine.isEmpty())
+            "\nNo native ARM64 environment is available. Install an ARM64-capable Wine/Proton runtime in Settings > Components, then retry."
+        else ""
+        return Model(found?.game?.name ?: ShortcutWriter.smartName(exe), subtitle + runtimeNotice, recommended, tiles)
     }
 
     private fun pickOther(others: List<ContainerConfigCatalog.Config>) {
@@ -274,6 +314,12 @@ class AddGameFragment : Fragment() {
             if (envelope.container.optString("type") == Container.TYPE_LINUX != kind.isLinux) {
                 Toast.makeText(requireContext(),
                     if (kind.isLinux) "This profile is for a Windows environment, the program is a Linux one." else "This profile is for a Linux environment, the game is a Windows one.",
+                    Toast.LENGTH_LONG).show()
+                return
+            }
+            if (!kind.isLinux && isNativeProfile(envelope.container) != nativeArm64) {
+                Toast.makeText(requireContext(),
+                    if (nativeArm64) "Choose a profile for native Windows ARM64 games." else "This profile is for native Windows ARM64 games.",
                     Toast.LENGTH_LONG).show()
                 return
             }
@@ -363,6 +409,12 @@ class AddGameFragment : Fragment() {
 
     // -- making the container and the shortcut ---------------------------------------------------------------------------
 
+    private fun isNativeContainer(container: Container): Boolean =
+        container.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY) == WineInfo.NATIVE_ARM64_CONTAINER_VALUE
+
+    private fun isNativeProfile(data: org.json.JSONObject): Boolean =
+        data.optJSONObject("extraData")?.optString(WineInfo.NATIVE_ARM64_CONTAINER_KEY) == WineInfo.NATIVE_ARM64_CONTAINER_VALUE
+
     private fun choose(pick: Pick) {
         val context = requireContext().applicationContext
         val game = match
@@ -370,7 +422,7 @@ class AddGameFragment : Fragment() {
             "skynet.game.id", game?.game?.id, "skynet.game.version", game?.version?.id,
             "skynet.config.id", when (pick) {
                 is Pick.Registry -> pick.config.id
-                is Pick.Standard -> if (pick.arm64ec) StandardContainer.CONFIG_ARM64EC else StandardContainer.CONFIG_X64
+                is Pick.Standard -> pick.mode.configId
                 is Pick.StandardLinux -> StandardLinuxContainer.configId(kind)
                 is Pick.Existing -> "existing"
                 is Pick.Imported -> "imported"
@@ -392,7 +444,7 @@ class AddGameFragment : Fragment() {
                 }
                 is Pick.Standard -> {
                     phase = Phase.Working("Making the environment…")
-                    StandardContainer.ensure(context, manager, contents, pick.arm64ec)
+                    StandardContainer.ensure(context, manager, contents, pick.mode)
                         .also { if (it == null) warnings.add("No installed Wine or Proton of this kind. Install one in Settings.") }
                 }
                 is Pick.StandardLinux -> {
@@ -414,12 +466,22 @@ class AddGameFragment : Fragment() {
                 phase = Phase.Failed(why)
                 return@Thread
             }
+            if (nativeArm64 && (!isNativeContainer(container)
+                        || !WineInfo.fromIdentifier(context, contents, container.wineVersion).supportsNativeArm64())) {
+                phase = Phase.Failed("This environment does not support native Windows ARM64 games. Install a compatible Wine or Proton runtime and choose the ARM64 native environment.")
+                return@Thread
+            }
             Telemetry.event("skynet.funnel", "container_created", "skynet.game.id", game?.game?.id)
             phase = Phase.Working("Adding the game…")
             val settings = game?.game?.effective(game.version, platform)
             val extras = LinkedHashMap<String, String?>()
             extras.putAll(linuxSettings)
             if (settings != null) extras.putAll(settings.extras)
+            // The native BeamNG preset has an explicit cache choice; retain it over the game's
+            // generic Windows default. The shortcut remains editable after it has been created.
+            if (nativeArm64 && game?.game?.id == "beamng-drive") {
+                container.getExtra("fileCache").takeIf { it.isNotEmpty() }?.let { extras["fileCache"] = it }
+            }
             if (game != null) {
                 extras[GameProfiles.EXTRA_PROFILE] = game.game.id
                 game.version?.let { extras[GameProfiles.EXTRA_VERSION] = it.id }

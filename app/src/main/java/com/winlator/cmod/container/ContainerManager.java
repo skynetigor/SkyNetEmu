@@ -482,12 +482,15 @@ public class ContainerManager {
 
         if (result) {
             try {
-                if (wineInfo.isArm64EC())
-                    extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener); // arm64ec only
+                if (wineInfo.usesArm64WindowsFiles())
+                    extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener);
                 else
                     extractCommonDlls(wineInfo, "x86_64-windows", "system32", containerDir, onExtractFileListener);
 
-                extractCommonDlls(wineInfo, "i386-windows", "syswow64", containerDir, onExtractFileListener);
+                // A pure ARM64 Wine need not ship a WoW64 runtime. ARM64EC and x64 packages retain
+                // their existing mandatory 32-bit setup for translated Windows programs.
+                if (!"arm64".equals(wineInfo.getArch()) || new File(wineInfo.path, "lib/wine/i386-windows").isDirectory())
+                    extractCommonDlls(wineInfo, "i386-windows", "syswow64", containerDir, onExtractFileListener);
             }
             catch (JSONException e) {
                 Log.e("ContainerManager", "Preparing the Wine DLLs failed: " + e.getMessage());

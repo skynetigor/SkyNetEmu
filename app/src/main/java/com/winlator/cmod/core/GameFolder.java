@@ -16,7 +16,7 @@ import java.util.Locale;
  * or the folder above it when the exe sits in a binaries folder (Bin64, x64, ...).
  */
 public final class GameFolder {
-    private static final String BINARIES = "(?i)bin|bin32|bin64|binaries|win64|x64|x86_64|game";
+    private static final String BINARIES = "(?i)bin|bin32|bin64|binarm64|binaries|win64|x64|x86_64|arm64|game";
 
     /** The exe as a path on the device. */
     public final File exe;
@@ -55,10 +55,8 @@ public final class GameFolder {
 
     /** The exe of a shortcut as a unix path, or null. */
     public static String unixExePath(ImageFs imageFs, Container container, String shortcutPath) {
-        if (shortcutPath == null) return null;
-        String p = shortcutPath.replace("\"", "").trim();
-        int exe = p.toLowerCase(Locale.ENGLISH).indexOf(".exe");
-        if (exe >= 0) p = p.substring(0, exe + 4);
+        String p = executablePath(shortcutPath);
+        if (p == null) return null;
         if (p.length() > 2 && p.charAt(1) == ':' && (p.charAt(2) == '\\' || p.charAt(2) == '/')) {
             // A Windows path: the drive letter says where it is on the device.
             String letter = p.substring(0, 1).toLowerCase(Locale.ENGLISH);
@@ -73,6 +71,26 @@ public final class GameFolder {
             return base == null ? null : base + rest;
         }
         return p.startsWith("/") ? p : null;
+    }
+
+    /** The selected program before inline arguments; a quoted path may contain ".exe" in a directory name. */
+    public static String executablePath(String shortcutPath) {
+        if (shortcutPath == null) return null;
+        String path = shortcutPath.trim();
+        if (path.startsWith("\"")) {
+            int end = path.indexOf('"', 1);
+            return end > 0 ? path.substring(1, end) : null;
+        }
+        String lower = path.toLowerCase(Locale.ENGLISH);
+        int offset = 0;
+        while (offset < lower.length()) {
+            int exe = lower.indexOf(".exe", offset);
+            if (exe < 0) break;
+            int end = exe + 4;
+            if (end == path.length() || path.charAt(end) == ' ' || path.charAt(end) == '\t') return path.substring(0, end);
+            offset = end;
+        }
+        return path;
     }
 
     /** True when the folder is inside the app's own storage. */

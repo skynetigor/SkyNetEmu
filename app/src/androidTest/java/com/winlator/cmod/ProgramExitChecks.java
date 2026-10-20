@@ -43,6 +43,9 @@ public final class ProgramExitChecks {
         code = run("echo 'Pointer tag for 0x1234 was truncated' >&2; exit 0", fatal);
         check(code == 0 && fatal.hasFailure(code), "fatal child error survives a successful launcher exit");
         check(fatal.exitMessage(code, 1).contains("fatal error"), "successful launcher status is not described as a nonzero exit");
+        ProgramOutput helper = new ProgramOutput();
+        helper.append("winhandler: could not start 'missing.exe' (Windows error 2)");
+        check(helper.hasFailure(0), "native helper failure survives a successful Wine explorer exit");
         for (int i = 0; i < 150; i++) fatal.append("later diagnostic " + i);
         check(fatal.lastOutput(12).contains("Pointer tag") && fatal.lastOutput(12).split("\n").length == 12,
                 "fatal diagnostic survives a bounded noisy output tail");

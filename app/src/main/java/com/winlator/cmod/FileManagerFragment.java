@@ -40,10 +40,14 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerManager;
 import com.winlator.cmod.container.ShortcutWriter;
+import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.ExeIconExtractor;
+import com.winlator.cmod.core.ExecutableKind;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.WineUtils;
+import com.winlator.cmod.core.WineInfo;
+import com.winlator.cmod.core.WindowsExecutable;
 import com.winlator.cmod.ui.FileManagerLandscapeNavHost;
 import com.winlator.cmod.ui.theme.WinlatorLegacyTheme;
 import com.winlator.cmod.xenvironment.ImageFs;
@@ -707,6 +711,15 @@ public class FileManagerFragment extends Fragment {
 
     private void performContainerAction(File file, ContainerAction action) {
         ArrayList<Container> containers = containerManager.getWineContainers();
+        if (isNativeArm64Executable(file)) {
+            ContentsManager contents = new ContentsManager(requireContext());
+            contents.syncContents();
+            containers.removeIf(container -> !supportsNativeArm64(container, contents));
+            if (containers.isEmpty()) {
+                routeNativeAddGame(file);
+                return;
+            }
+        }
         if (containers == null || containers.isEmpty()) {
             Toast.makeText(getContext(), "Create a container first!", Toast.LENGTH_SHORT).show();
             return;
@@ -730,6 +743,27 @@ public class FileManagerFragment extends Fragment {
                     .setItems(names, (dialog, which) -> action.onContainerSelected(containers.get(which)))
                     .show();
         }
+    }
+
+    private boolean isNativeArm64Executable(File file) {
+        return ExecutableKind.windowsArchitecture(file) == WindowsExecutable.Architecture.ARM64;
+    }
+
+    private boolean supportsNativeArm64(Container container, ContentsManager contents) {
+        return WineInfo.NATIVE_ARM64_CONTAINER_VALUE.equals(container.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY))
+                && WineInfo.fromIdentifier(requireContext(), contents, container.getWineVersion()).supportsNativeArm64();
+    }
+
+    /** ARM64 creation uses the same runtime/profile checks as Library > Add Game, including from a container browser. */
+    private boolean routeNativeAddGame(File file) {
+        if (!isNativeArm64Executable(file)) return false;
+        if (requireActivity() instanceof MainActivity) {
+            ((MainActivity) requireActivity()).onGamePicked(file);
+        } else {
+            Toast.makeText(requireContext(), "Add this executable from Library > Add Game and choose a Windows ARM64 native environment.",
+                    Toast.LENGTH_LONG).show();
+        }
+        return true;
     }
 
     private String getContainerWineHome(Container container) {
@@ -832,6 +866,14 @@ public class FileManagerFragment extends Fragment {
 
     private void runFileDirectly(File file, Container container) {
         try {
+            if (isNativeArm64Executable(file)) {
+                ContentsManager contents = new ContentsManager(requireContext());
+                contents.syncContents();
+                if (!supportsNativeArm64(container, contents)) {
+                    routeNativeAddGame(file);
+                    return;
+                }
+            }
             if (!ShortcutWriter.ensureExternalStorageMapped(container, file)) {
                 Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
                 return;
@@ -861,6 +903,7 @@ public class FileManagerFragment extends Fragment {
 
     private void createShortcutDirectly(File file, Container container) {
         try {
+            if (routeNativeAddGame(file)) return;
             if (!ShortcutWriter.ensureExternalStorageMapped(container, file)) {
                 Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
                 return;
@@ -912,6 +955,7 @@ public class FileManagerFragment extends Fragment {
     }
 
     private void writeShortcut(File file, Container container, String displayName) {
+        if (routeNativeAddGame(file)) return;
         if (ShortcutWriter.write(requireContext(), file, container, displayName, null, null) != null) {
             Toast.makeText(getContext(), "Game added to Library!", Toast.LENGTH_SHORT).show();
         }
@@ -1192,7 +1236,7 @@ public class FileManagerFragment extends Fragment {
             popup.getMenu().add("Add this game").setOnMenuItemClickListener(item -> {
                 if (pickingGame() && requireActivity() instanceof MainActivity) {
                     ((MainActivity) requireActivity()).onGamePicked(file);
-                } else {
+                } else if (!routeNativeAddGame(file)) {
                     performContainerAction(file, container -> createShortcutDirectly(file, container));
                 }
                 return true;

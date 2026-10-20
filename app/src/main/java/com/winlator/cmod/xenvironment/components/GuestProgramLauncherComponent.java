@@ -49,6 +49,8 @@ import java.util.ArrayList;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
+    private String[] nativeArm64Arguments;
+    public void setNativeArm64Arguments(String[] arguments) { nativeArm64Arguments = arguments.clone(); }
     private static volatile int pid = -1;
     public int getPid() { return pid; }
     private String[] bindingPaths;
@@ -222,8 +224,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         try {
             int launchedPid;
             synchronized (lock) {
-                if (wineInfo.isArm64EC()) extractEmulatorsDlls();
-                else extractBox64Files();
+                if (nativeArm64Arguments == null) {
+                    if (wineInfo.isArm64EC()) extractEmulatorsDlls();
+                    else extractBox64Files();
+                }
                 checkDependencies();
                 launchedPid = execGuestProgram();
                 pid = launchedPid;
@@ -360,12 +364,14 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         EnvVars execEnvVars = new EnvVars();
 
-        addBox64EnvVars(execEnvVars, enableBox64Logs);
-        execEnvVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        if (nativeArm64Arguments == null) {
+            addBox64EnvVars(execEnvVars, enableBox64Logs);
+            execEnvVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        }
 
         String renderer = GPUInformation.getRenderer(null, null);
 
-        if (renderer.contains("Mali")) 
+        if (nativeArm64Arguments == null && renderer.contains("Mali"))
             execEnvVars.put("BOX64_MMAP32", "0");
 
         if (execEnvVars.get("BOX64_MMAP32").equals("1") && !wineInfo.isArm64EC()) {
@@ -582,7 +588,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             }
         }
 
-        LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
+        // The bundled LSFG injection DLL is x64; native Vulkan needs no PE graphics wrapper.
+        if (nativeArm64Arguments == null) LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
 
         String emulator = container.getEmulator();
         if (shortcut != null)
@@ -590,7 +597,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         String command = "";
         String overriddenCommand = execEnvVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
-        if (!overriddenCommand.isEmpty()) {
+        if (nativeArm64Arguments != null) {
+            // Native games use the Android ARM64 Wine loader and matching helper. No translator is provisioned.
+            execEnvVars.remove("HODLL");
+            execEnvVars.remove("WINE_NO_DUPLICATE_EXPLORER");
+            execEnvVars.remove("GUEST_PROGRAM_LAUNCHER_COMMAND");
+        } else if (!overriddenCommand.isEmpty()) {
             String[] parts = overriddenCommand.split(";");
             for (String part : parts)
                 command += part + " ";
@@ -612,7 +624,13 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             FileUtils.chmod(box64File, 0755);
         }
 
-        return ProcessHelper.exec(command, execEnvVars.toStringArray(), rootDir, (status) -> {
+        String[] argv;
+        if (nativeArm64Arguments != null) {
+            argv = nativeArm64Arguments.clone();
+            argv[0] = winePath + "/wine";
+            Log.i("WindowsLaunch", "Native ARM64: " + java.util.Arrays.toString(argv));
+        } else argv = ProcessHelper.splitCommand(command);
+        return ProcessHelper.exec(argv, execEnvVars.toStringArray(), rootDir, (status) -> {
             synchronized (lock) {
                 pid = -1;
             }

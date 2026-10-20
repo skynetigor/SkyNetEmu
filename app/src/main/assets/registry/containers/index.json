@@ -148,6 +148,30 @@
       "testedOn": [
         "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
       ]
+    },
+    {
+      "id": "beamng-040-windows-arm64-proton9-dd-turnip",
+      "name": "BeamNG 0.40 \u2014 Windows ARM64 native (experimental)",
+      "platform": "windows",
+      "file": "containers/beamng-040-windows-arm64-proton9-dd-turnip.wcfg",
+      "description": "Experimental Windows ARM64 build with Proton 9 and DD-Turnip v0.1.1, native Vulkan, Wine built-in libraries, ALSA audio and a 1280x720 desktop. GridMapv2 loading and an in-game scene verified on Snapdragon 8 Elite Gen 5. Broader device and long-session stability remain unverified.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Windows ARM64",
+        "Native",
+        "Vulkan",
+        "Proton 9",
+        "DD-Turnip",
+        "Experimental"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ],
+      "windowsArchitecture": "arm64"
     }
-  ]
+  ],
+  "revision": 1
 }

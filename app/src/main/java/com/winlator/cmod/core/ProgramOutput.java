@@ -14,7 +14,8 @@ public final class ProgramOutput {
             "Pointer tag for .* was truncated|"
                     + "err:seh:NtRaiseException.*unable to dispatch exception|"
                     + "wine: Unhandled (?:page fault|exception)|"
-                    + "wine: could not load kernel32\\.dll", Pattern.CASE_INSENSITIVE);
+                    + "wine: could not load kernel32\\.dll|"
+                    + "winhandler: (?:could not start|helper startup failed:)", Pattern.CASE_INSENSITIVE);
     private final ArrayDeque<String> lines = new ArrayDeque<>();
     private String fatal = "";
     private boolean startFailed;
