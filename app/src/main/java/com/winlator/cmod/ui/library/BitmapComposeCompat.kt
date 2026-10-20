@@ -345,6 +345,7 @@ internal fun CompactArtworkCard(item: LibraryItem, cb: LibraryCallbacks) {
                         if (item.steam) { Spacer(Modifier.width(8.dp)); SteamBadge() }
                     }
                     Text(item.containerName, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    GameVersionBadge(item.version)
                 }
                 PlayCompat(item, cb, false)
                 MenuButtonCompat(item, cb, false)
@@ -373,7 +374,10 @@ internal fun CoverArtworkCard(item: LibraryItem, cb: LibraryCallbacks) {
                 Text(item.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(item.containerName, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodySmall)
             }
-            if (item.steam) Box(Modifier.align(Alignment.TopStart).padding(10.dp)) { SteamBadge() }
+            Column(Modifier.align(Alignment.TopStart).padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (item.steam) SteamBadge()
+                GameVersionBadge(item.version)
+            }
             Box(Modifier.align(Alignment.TopEnd)) { MenuButtonCompat(item, cb, true) }
             Box(Modifier.align(Alignment.BottomEnd).padding(9.dp)) { PlayCompat(item, cb, true) }
         }

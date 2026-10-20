@@ -187,6 +187,8 @@ public class ShortcutsFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        // Re-publish on every app return: the background metadata pass rechecks game-profile detectors,
+        // including Steam manifests and version files changed while the app was away.
         if (manager != null && libraryController != null) loadShortcutsList();
     }
 
@@ -507,7 +509,8 @@ public class ShortcutsFragment extends Fragment {
                     shortcut.icon,
                     "1".equals(shortcut.getExtra("favorite", "0")),
                     parseLastRunAt(shortcut),
-                    shortcut.isContainerOwned()
+                    shortcut.isContainerOwned(),
+                    ""
             ));
         }
         libraryController.setItems(items);

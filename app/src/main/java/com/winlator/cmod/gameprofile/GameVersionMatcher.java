@@ -34,6 +34,26 @@ public final class GameVersionMatcher {
     private GameVersionMatcher() {}
 
     /**
+     * The installed version for display, never a manually chosen or default compatibility profile.
+     * Prefer the exact number read using the profile's version-file detector, even when a newer release
+     * is outside the profile's supported ranges. Build IDs and file signatures identify a profile label.
+     * Reads the installation afresh on each call; call off the UI thread.
+     */
+    public static String installedLabel(GameProfile profile, File gameDir, long steamBuildId) {
+        if (gameDir != null && gameDir.isDirectory()) {
+            for (GameProfile.Version version : profile.versions) {
+                if (version.match == null || version.match.versionFile == null) continue;
+                String found = versionIn(version.match.versionFile, gameDir);
+                if (found != null && !found.trim().isEmpty()) return found.trim();
+            }
+        }
+        for (GameProfile.Version version : profile.versions) {
+            if (version.match != null && matches(version.match, gameDir, steamBuildId) != null) return version.label;
+        }
+        return "";
+    }
+
+    /**
      * The first version, in the profile's order, that one of its detectors recognises; the profile's default version when
      * none is; null when the profile has no default either. {@code gameDir} may be null (nothing to look at) and
      * {@code steamBuildId} is -1 when the game is not known to Steam.
