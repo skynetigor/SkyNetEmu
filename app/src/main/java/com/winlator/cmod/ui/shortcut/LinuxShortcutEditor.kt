@@ -40,6 +40,7 @@ import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxEmulatorSetup
 import com.winlator.cmod.linux.LinuxFex
+import com.winlator.cmod.linux.LinuxGpuMemory
 import com.winlator.cmod.linux.LinuxLaunchOptions
 import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRootfs
@@ -125,6 +126,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var rendererDriverId by remember { mutableStateOf(shortcut.getRendererDriverId()) }
     val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
     var driverId by remember { mutableStateOf(shortcut.getExtra(LinuxDriverManager.EXTRA_DRIVER)) }
+    var gpuMemory by remember { mutableStateOf(LinuxGpuMemory.normalize(shortcut.getExtra(LinuxGpuMemory.EXTRA))) }
     var glDriver by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_GL_DRIVER)) }
     var vulkanPresent by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT)) }
     var keyboardButton by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON)) }
@@ -237,6 +239,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, tuSysmem.ifEmpty { null })
         shortcut.setRendererDriverId(rendererDriverId)
         shortcut.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId.ifEmpty { null })
+        shortcut.putExtra(LinuxGpuMemory.EXTRA, gpuMemory)
         shortcut.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver.ifEmpty { null })
         shortcut.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, vulkanPresent.ifEmpty { null })
         shortcut.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, keyboardButton.ifEmpty { null })
@@ -420,6 +423,14 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 ) { tuSysmem = it }
                 SettingsDivider()
                 LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
+                SettingsDivider()
+                SettingMappedChoice("Max GPU memory", gpuMemory, linkedMapOf(
+                    "0" to "Default (driver)", "512" to "512 MB", "1024" to "1 GB", "2048" to "2 GB",
+                    "4096" to "4 GB", "8192" to "8 GB", "12288" to "12 GB", "16384" to "16 GB"
+                )) { gpuMemory = it }
+                Text("Graphics memory reported to Vulkan games and Zink. Uses shared phone RAM; does not limit total game RAM. Restart the game to apply.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 SettingsDivider()
                 SettingMappedChoice(
                     "OpenGL driver",

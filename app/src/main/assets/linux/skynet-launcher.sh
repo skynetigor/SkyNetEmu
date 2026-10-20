@@ -34,6 +34,7 @@ while [ "${#cmd[@]}" -gt 0 ]; do
 done
 # The emulator of this game: the shortcut that started it left the variables (LinuxSession.writeSteamEmulatorEnv); the Steam client
 # may be running with the ones of another game's session.
+export SKY_GPU_MEMORY_MB=0
 [ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.env" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.env"
 # The Steam runtime wraps every x86 game, 32-bit or 64-bit: what the game needs depends on the class of its executables
 # (game32 = it has 32-bit ones and no 64-bit one).
@@ -125,6 +126,10 @@ fi
 # shortcut editor win over launch-option assignments too (LinuxSession.writeSteamLaunchOptions merges them).
 sky_wrap=(); sky_args=()
 [ -n "$SteamAppId" ] && [ -f "$HOME/.skynet/steam-emulator/$SteamAppId.launch" ] && . "$HOME/.skynet/steam-emulator/$SteamAppId.launch"
+if [ -f "${SKY_GPU_MEMORY_SCRIPT:-}" ]; then
+    . "$SKY_GPU_MEMORY_SCRIPT"
+    sky_gpu_memory_apply || exit 1
+fi
 [ "${#sky_wrap[@]}" -gt 0 ] && cmd=("${sky_wrap[@]}" "${cmd[@]}")
 [ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
 {

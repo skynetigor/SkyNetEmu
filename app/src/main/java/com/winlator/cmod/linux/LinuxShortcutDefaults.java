@@ -47,6 +47,7 @@ public final class LinuxShortcutDefaults {
         if (container == null || !container.isLinux()) return values;
         values.put(EXTRA_OWN, "1");
         values.put(VERSION, "3");
+        values.put(LinuxGpuMemory.EXTRA,LinuxGpuMemory.normalize(container.getExtra(LinuxGpuMemory.EXTRA)));
         values.put(RUNTIME, container.getLinuxRuntime());
         values.put("envVars", Container.DEFAULT_ENV_VARS.equals(container.getEnvVars()) ? "" : container.getEnvVars());
         values.put("cpuList", container.getCPUList(true));

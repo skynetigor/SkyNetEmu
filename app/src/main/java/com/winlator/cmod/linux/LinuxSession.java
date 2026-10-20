@@ -435,7 +435,8 @@ public final class LinuxSession {
         argv.add("-i");
         String programGuestPath = programGuestPath(guestCommand);
         List<String> guestEnv = guestEnv(context, rt, imageFsRoot, container,
-                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath);
+                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath,
+                !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER));
         argv.addAll(guestEnv);
         writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
@@ -647,6 +648,7 @@ public final class LinuxSession {
 
     private static boolean isEmulatorVariable(String name) {
         return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
+                || name.startsWith("SKY_GPU_MEMORY_")
                 || name.equals("SDL_TOUCH_MOUSE_EVENTS") || name.equals("SDL_MOUSE_TOUCH_EVENTS")
                 || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB") || name.equals("TU_DEBUG");
     }
@@ -682,7 +684,7 @@ public final class LinuxSession {
         return null;
     }
 
-    private static List<String> guestEnv(Context context, File rt, File imageFsRoot, Container container, File program, String programGuestPath) {
+    private static List<String> guestEnv(Context context, File rt, File imageFsRoot, Container container, File program, String programGuestPath, boolean directProgram) {
         File programFolder = program != null ? program.getParentFile() : null;
         Map<String, String> env = new LinkedHashMap<>();
         env.put("HOME", "/root");
@@ -876,6 +878,8 @@ public final class LinuxSession {
 
         env.putAll(userEnv(container));
         env.putAll(debugEnv(context));
+        // Bionic reconstructs the environment with its own loader ABI in LinuxBionicSession.build.
+        LinuxGpuMemory.prepare(context,container,env,false,directProgram && !LinuxBionicSession.enabled(container),program==null ? 0 : elfMachine(program));
         if (emulator != null && LinuxEmulator.BOX64.equals(emulator.emulator) && !LinuxBionicSession.enabled(container))
             FramePipelineDiagnostics.prepare(context, env, com.winlator.cmod.lsfg.LsfgManager.getMultiplier(container)>=2);
 

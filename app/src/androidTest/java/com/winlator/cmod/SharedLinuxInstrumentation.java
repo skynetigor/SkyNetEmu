@@ -38,6 +38,10 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("gpuMemory"))) {
+                result.putString("stream", LinuxGpuMemoryChecks.run(this));
+                finish(status,result);return;
+            }
             if (options != null && "1".equals(options.getString("programExit"))) {
                 result.putString("stream", new ProgramExitChecks(this).run());
                 finish(status, result); return;

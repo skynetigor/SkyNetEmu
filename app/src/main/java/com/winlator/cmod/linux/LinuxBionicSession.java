@@ -133,6 +133,14 @@ public final class LinuxBionicSession {
                 env.put(key, value);
             }
         }
+        java.util.Map<String,String> memoryEnv=new java.util.LinkedHashMap<>();
+        for (String pair:env.toStringArray()) {
+            int eq=pair.indexOf('=');if(eq>0)memoryEnv.put(pair.substring(0,eq),pair.substring(eq+1));
+        }
+        LinuxGpuMemory.prepare(context,container,memoryEnv,true,true);
+        for (String key:new String[]{"VK_INSTANCE_LAYERS","VK_LAYER_PATH","VK_ADD_LAYER_PATH"})
+            if (!memoryEnv.containsKey(key)) env.remove(key);
+        for (java.util.Map.Entry<String,String> pair:memoryEnv.entrySet()) env.put(pair.getKey(),pair.getValue());
         LinuxRootfs.Installed x86 = LinuxRootfs.resolve(context, container);
         if (x86 == null) {
             java.util.List<LinuxRootfs.Installed> all = LinuxRootfs.list(context);
