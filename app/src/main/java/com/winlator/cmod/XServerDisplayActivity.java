@@ -1496,7 +1496,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         guestProgramLauncherComponent.setEnvVars(envVars);
         guestProgramLauncherComponent.setTerminationCallback((status) -> {
             GameSessionRecorder.onGuestExit(status);
-            runOnUiThread(this::exit);
+            runOnUiThread(() -> onWineProgramExit(guestProgramLauncherComponent, status));
         });
 
         environment.addComponent(guestProgramLauncherComponent);
@@ -1520,6 +1520,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     }
 
+    private void onWineProgramExit(GuestProgramLauncherComponent launcher, int status) {
+        if (exiting.get() || isFinishing() || isDestroyed()) return;
+        if (!launcher.getOutput().hasFailure(status)) {
+            exit();
+            return;
+        }
+        String message = launcher.getOutput().exitMessage(status, launcher.secondsRunning());
+        com.winlator.cmod.telemetry.ErrorReporter.report("wine_program_exit", "WineProgramExit", message);
+        showProgramExitDialog(message);
+    }
+
     /** A Linux program ended: a failure is explained to the user before the session is closed. */
     private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
         int status = launcher.guestStatus(prootStatus);
@@ -1535,12 +1546,48 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String output = launcher.lastOutput(12);
         String message = "The program " + reason + " after " + launcher.secondsRunning() + " s."
                 + (output.isEmpty() ? "" : "\n\n" + output);
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("The program stopped")
+        showProgramExitDialog(message);
+    }
+
+    private boolean programExitDialogShown;
+
+    private void showProgramExitDialog(String message) {
+        if (programExitDialogShown || exiting.get() || isFinishing() || isDestroyed()) return;
+        programExitDialogShown = true;
+        preloaderDialog.closeOnUiThread();
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.program_stopped)
                 .setMessage(message)
                 .setPositiveButton(android.R.string.ok, (d, w) -> exit())
+                .setNeutralButton(R.string.copy_error, null)
                 .setOnCancelListener(d -> exit())
-                .show();
+                .create();
+        dialog.setOnShowListener(d -> {
+            android.widget.TextView text = dialog.findViewById(android.R.id.message);
+            if (text != null) {
+                text.setTextIsSelectable(true);
+                // Selectable text otherwise takes initial focus and can scroll straight to the last
+                // diagnostic. Start at the exit explanation; long-press selection still works.
+                for (android.view.ViewParent parent = text.getParent(); parent instanceof View;
+                     parent = parent.getParent()) {
+                    if (parent instanceof android.widget.ScrollView) {
+                        android.widget.ScrollView scroll = (android.widget.ScrollView) parent;
+                        scroll.setFocusableInTouchMode(true);
+                        scroll.setDescendantFocusability(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+                        scroll.requestFocus();
+                        scroll.post(() -> scroll.scrollTo(0, 0));
+                        break;
+                    }
+                }
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
+                        getSystemService(CLIPBOARD_SERVICE);
+                if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                        getString(R.string.program_stopped), message));
+            });
+        });
+        dialog.show();
     }
 
     /** Starts the X server, audio and the Linux program (the desktop, or the shortcut's program) under proot. */

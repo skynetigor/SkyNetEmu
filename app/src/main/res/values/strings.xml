@@ -21,6 +21,8 @@
     <string name="installing_system_files">Installing System Files…</string>
     <string name="updating_system_files">Updating System Files…</string>
     <string name="starting_up">Starting up…</string>
+    <string name="program_stopped">The program stopped</string>
+    <string name="copy_error">Copy error</string>
     <string name="remove_loading_bar_when_booting_games">Remove loading bar when booting games</string>
     <string name="unable_to_install_system_files">Unable to install system files</string>
     <string name="keyboard">Keyboard</string>

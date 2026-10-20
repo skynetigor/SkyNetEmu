@@ -23,6 +23,7 @@ import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.ProcessHelper;
+import com.winlator.cmod.core.ProgramOutput;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.fexcore.FEXCoreManager;
@@ -61,6 +62,18 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private final ContentProfile wineProfile;
     private Container container;
     private final Shortcut shortcut;
+    private final ProgramOutput output = new ProgramOutput();
+    private final java.util.concurrent.atomic.AtomicBoolean terminationDelivered = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean stopping;
+    private long startedAt;
+
+    public ProgramOutput getOutput() { return output; }
+    public long secondsRunning() { return (System.nanoTime() - startedAt) / 1_000_000_000L; }
+
+    private void onProcessExit(int status) {
+        if (!stopping && terminationDelivered.compareAndSet(false, true) && terminationCallback != null)
+            terminationCallback.call(status);
+    }
 
     public void setWineInfo(WineInfo wineInfo) {
         this.wineInfo = wineInfo;
@@ -202,13 +215,27 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void start() {
-        synchronized (lock) {
-            if (wineInfo.isArm64EC())
-                extractEmulatorsDlls();
-            else
-                extractBox64Files();
-            checkDependencies();
-            pid = execGuestProgram();
+        stopping = false;
+        terminationDelivered.set(false);
+        output.clear();
+        startedAt = System.nanoTime();
+        try {
+            int launchedPid;
+            synchronized (lock) {
+                if (wineInfo.isArm64EC()) extractEmulatorsDlls();
+                else extractBox64Files();
+                checkDependencies();
+                launchedPid = execGuestProgram();
+                pid = launchedPid;
+            }
+            if (launchedPid == -1 && !terminationDelivered.get()) {
+                output.failedToStart("The launcher process could not be created. Check the runtime and emulator installation.");
+                onProcessExit(-1);
+            }
+        } catch (RuntimeException error) {
+            output.failedToStart(error.getClass().getSimpleName() + ": " + error.getMessage());
+            Log.e("GuestProgramLauncher", "Unable to start Wine/Proton", error);
+            onProcessExit(-1);
         }
     }
 
@@ -242,6 +269,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void stop() {
+        stopping = true;
         synchronized (lock) {
             if (pid != -1) {
                 Process.killProcess(pid);
@@ -589,9 +617,9 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 pid = -1;
             }
 
-            if (terminationCallback != null)
-                terminationCallback.call(status);
-        });
+            Log.i("GuestProgramLauncher", "Wine/Proton launcher exited with status " + status);
+            onProcessExit(status);
+        }, output::append);
     }
 
     private void addBox64EnvVars(EnvVars envVars, boolean enableLogs) {
