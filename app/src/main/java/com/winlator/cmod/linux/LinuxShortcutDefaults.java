@@ -56,6 +56,7 @@ public final class LinuxShortcutDefaults {
         values.put(LinuxSession.EXTRA_NO_PROOT, on(container, LinuxSession.EXTRA_NO_PROOT));
 
         values.put(SCREEN_SIZE, container.getScreenSize());
+        values.put("rendererDriverId", container.getRendererDriverId());
         values.put(FULLSCREEN_STRETCHED, container.isFullscreenStretched()
                 ? ("1".equals(container.getExtra("scaleGameWindow")) ? "2" : "1") : "0");
         values.put(UPSCALER, container.getExtra(UPSCALER, "0"));
@@ -113,7 +114,16 @@ public final class LinuxShortcutDefaults {
                                                org.json.JSONObject data) throws org.json.JSONException {
         Container template = new Container(-1, manager);
         template.loadData(data);
-        return of(context, template);
+        Map<String, String> values = of(context, template);
+        // Older native-output profiles omit the separate Android driver. Give newly imported shortcuts Auto;
+        // explicit profile choices and existing shortcuts are never migrated over a user's choice.
+        if (!data.has("rendererDriverId")) {
+            org.json.JSONObject extra = data.optJSONObject("extraData");
+            if (extra != null && "native".equals(extra.optString(LinuxSession.EXTRA_VULKAN_PRESENT)))
+                values.put("rendererDriverId", "auto");
+            else values.remove("rendererDriverId");
+        }
+        return values;
     }
 
     /** A setting that is on unless the container turned it off. */

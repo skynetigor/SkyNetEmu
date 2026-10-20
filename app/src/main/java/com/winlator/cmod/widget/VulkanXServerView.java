@@ -61,10 +61,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private String driverPath = null;
     private ExecutorService initExecutor = null;
     private boolean requireDmaBufImport;
+    private boolean requireSelectedDriver;
     private java.util.function.Consumer<String> initializationError;
 
     public void requireDmaBufImport(java.util.function.Consumer<String> onError) {
         requireDmaBufImport = true;
+        initializationError = onError;
+    }
+
+    public void requireSelectedDriver(java.util.function.Consumer<String> onError) {
+        requireSelectedDriver = true;
         initializationError = onError;
     }
 
@@ -124,7 +130,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native long nativeInit(Surface surface,
                                    int screenWidth, int screenHeight,
                                    String driverPath, String libraryName, String nativeLibDir,
-                                   boolean validationEnabled, boolean requireDmaBufImport, boolean pipelineEnabled);
+                                   boolean validationEnabled, boolean requireDmaBufImport, boolean requireSelectedDriver, boolean pipelineEnabled);
     private native void nativeResize(long handle, int width, int height);
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
@@ -231,7 +237,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeHandle = nativeInit(
                             surface,
                             xServer.screenInfo.width, xServer.screenInfo.height,
-                            driverPath, driverLibraryName, nativeLibDir, validationEnabled, requireDmaBufImport, com.winlator.cmod.linux.FramePipelineDiagnostics.enabled());
+                            driverPath, driverLibraryName, nativeLibDir, validationEnabled, requireDmaBufImport, requireSelectedDriver, com.winlator.cmod.linux.FramePipelineDiagnostics.enabled());
                 } catch (IllegalStateException error) {
                     Log.e("VulkanXServerView", "Renderer initialization failed", error);
                     if (initializationError != null) post(() -> initializationError.accept(error.getMessage()));

@@ -38,6 +38,10 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("rendererRegistry"))) {
+                result.putString("stream", RendererDriverRegistryChecks.run(this));
+                finish(status, result); return;
+            }
             if (options != null && "1".equals(options.getString("nativeMissingRuntime"))) {
                 result.putString("stream", com.winlator.cmod.ui.addgame.NativeWindowsChecks.missingRuntime(this));
                 finish(status, result); return;

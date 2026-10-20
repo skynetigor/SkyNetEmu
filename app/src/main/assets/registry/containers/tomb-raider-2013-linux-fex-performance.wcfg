@@ -8,6 +8,7 @@
     "name": "Tomb Raider (2013), Linux (FEX Performance + TSO)",
     "screenSize": "native",
     "fullscreenStretched": true,
+    "rendererDriverId": "auto",
     "linuxRuntime": "bannerlator-r9",
     "envVars": "FEX_TSOENABLED=1",
     "extraData": {

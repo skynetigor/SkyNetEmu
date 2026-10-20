@@ -121,7 +121,7 @@ public final class RegistryCache {
      */
     public static boolean refreshAll(Context context) {
         boolean all = true;
-        for (String rel : new String[]{"games.json", "linux.json", "socs.json", "containers/index.json"}) {
+        for (String rel : new String[]{"games.json", "linux.json", "socs.json", "containers/index.json", "renderer-drivers.json"}) {
             Result result = load(context, rel, TTL_NONE, true);
             all &= result.source == Source.NETWORK || result.source == Source.MEMORY;
         }

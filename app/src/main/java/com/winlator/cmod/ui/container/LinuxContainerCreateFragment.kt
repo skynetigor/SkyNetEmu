@@ -385,7 +385,7 @@ private fun LinuxContainerEditorBody(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: steam?.defaults?.driver ?: "") }
-    var rendererDriverId by remember { mutableStateOf(editing?.rendererDriverId ?: "system") }
+    var rendererDriverId by remember { mutableStateOf(editing?.rendererDriverId ?: "auto") }
     val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
     var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: if (steam != null) LinuxEmulator.BOX64 else LinuxEmulator.NONE) }
     var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: steam?.defaults?.emulator ?: "") }

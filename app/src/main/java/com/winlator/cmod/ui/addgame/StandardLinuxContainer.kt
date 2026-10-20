@@ -77,6 +77,7 @@ internal object StandardLinuxContainer {
             .put("screenSize", Container.DEFAULT_SCREEN_SIZE)
             .put("linuxRuntime", runtime)
             .put("envVars", "")
+            .put("rendererDriverId", "auto")
             .put("extraData", extra)
         val plan = ContainerImporter.planLinux(context, data)
         if (plan.unavailable.isNotEmpty()) {

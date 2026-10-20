@@ -85,6 +85,7 @@ public class RendererOptionsDialog extends ContentDialog {
         AdrenotoolsManager atm = new AdrenotoolsManager(ctx);
         List<String> driverLabels = new ArrayList<>();
         List<String> driverIds    = new ArrayList<>();
+        driverLabels.add("Auto (match GPU)"); driverIds.add("auto");
         driverLabels.add("System");  driverIds.add("system");
         for (String id : atm.enumerateRendererDrivers()) {
             driverLabels.add(atm.getDriverName(id) + " " + atm.getDriverVersion(id));
@@ -92,7 +93,7 @@ public class RendererOptionsDialog extends ContentDialog {
         }
         setAmoledAdapter(ctx, spDriver, driverLabels);
         String curDrv = config.getRendererDriverId();
-        int drvSel = 0;
+        int drvSel = 1;
         for (int i = 0; i < driverIds.size(); i++) {
             if (driverIds.get(i).equals(curDrv)) { drvSel = i; break; }
         }

@@ -8,6 +8,7 @@
     "type": "linux",
     "name": "BeamNG.drive, Linux (Box64 Performance)",
     "screenSize": "1280x720",
+    "rendererDriverId": "auto",
     "linuxRuntime": "bannerlator-r9",
     "envVars": "",
     "extraData": {

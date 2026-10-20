@@ -168,6 +168,7 @@ public class ContainerManager {
             data.put("type", Container.TYPE_LINUX);
             // The Wine default carries Wine and DXVK variables that mean nothing in a Linux session.
             if (!data.has("envVars")) data.put("envVars", "");
+            if (!data.has("rendererDriverId")) data.put("rendererDriverId", "auto");
 
             File containerDir = new File(homeDir, ImageFs.USER + "-" + id);
             if (!containerDir.mkdirs()) {

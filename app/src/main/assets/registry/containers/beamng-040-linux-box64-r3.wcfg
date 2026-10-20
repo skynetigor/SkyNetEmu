@@ -10,6 +10,7 @@
     "screenSize": "native",
     "linuxRuntime": "bannerlator-r9",
     "envVars": "",
+    "rendererDriverId": "auto",
     "extraData": {
       "linuxEmulator": "box64",
       "linuxEmulatorId": "box64-0.4.4-r3",

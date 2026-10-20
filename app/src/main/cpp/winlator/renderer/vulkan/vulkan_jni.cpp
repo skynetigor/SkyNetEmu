@@ -59,7 +59,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     JNIEnv* env, jobject ,
     jobject surface, jint w, jint h,
     jstring jDriverPath, jstring jLibraryName, jstring jNativeLibDir,
-    jboolean validationEnabled, jboolean requireDmaBufImport, jboolean pipelineEnabled)
+    jboolean validationEnabled, jboolean requireDmaBufImport, jboolean requireSelectedDriver, jboolean pipelineEnabled)
 {
     ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
     if (!win) return 0;
@@ -90,7 +90,8 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     }
 
     const bool strict = requireDmaBufImport == JNI_TRUE;
-    if (strict && jDriverPath &&
+    const bool strictDriver = strict || requireSelectedDriver == JNI_TRUE;
+    if (strictDriver && jDriverPath &&
             (!adrenotoolsHandle || !dlsym(adrenotoolsHandle, "vkGetInstanceProcAddr"))) {
         ANativeWindow_release(win);
         if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
@@ -105,12 +106,12 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     } catch (const std::exception& error) {
         ANativeWindow_release(win);
         if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
-        if (strict) env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), error.what());
+        if (strictDriver) env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), error.what());
         return 0;
     } catch (...) {
         ANativeWindow_release(win);
         if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
-        if (strict) env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), "Vulkan renderer initialization failed.");
+        if (strictDriver) env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), "Vulkan renderer initialization failed.");
         return 0;
     }
     if (strict && !renderer->supportsDmaBufImport()) {

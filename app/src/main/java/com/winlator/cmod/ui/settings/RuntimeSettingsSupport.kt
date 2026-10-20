@@ -225,7 +225,7 @@ internal suspend fun loadSettingsCatalog(
     }
 
     val adreno = AdrenotoolsManager(context)
-    val rendererDrivers = linkedMapOf("system" to "System")
+    val rendererDrivers = linkedMapOf("auto" to "Auto (match GPU)", "system" to "System")
     val driverOptions = linkedMapOf<String, DriverOption>()
 
     context.resources.getStringArray(R.array.wrapper_graphics_driver_version_entries).forEach { version ->
@@ -801,7 +801,7 @@ internal suspend fun loadAdrenoDriverOptions(
     context: Context, selectedDriver: String = "", includeRemote: Boolean = true
 ): List<DriverOption> = withContext(Dispatchers.IO) {
     val adreno = AdrenotoolsManager(context)
-    val options = linkedMapOf("system" to DriverOption("system", "System", true))
+    val options = linkedMapOf("auto" to DriverOption("auto", "Auto (match GPU)", true), "system" to DriverOption("system", "System", true))
     val sources = mutableSetOf<String>()
     runCatching { adreno.enumerateRendererDrivers() }.getOrNull().orEmpty().forEach { id ->
         val label = listOf(adreno.getDriverName(id), adreno.getDriverVersion(id))

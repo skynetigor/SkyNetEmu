@@ -258,6 +258,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private GuestProgramLauncherComponent guestProgramLauncherComponent;
     private WindowsLaunchPlan windowsLaunchPlan;
+    private String resolvedRendererDriverId;
     private EnvVars overrideEnvVars;
 
     private void createNotifcationChannel() {
@@ -868,11 +869,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         };
 
-        if (xServer.screenInfo.height > xServer.screenInfo.width) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            configChangedCallback = runnable;
-        } else
-            runnable.run();
+        Runnable begin = () -> {
+            if (isFinishing() || isDestroyed() || exiting.get()) return;
+            if (xServer.screenInfo.height > xServer.screenInfo.width) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                configChangedCallback = runnable;
+            } else runnable.run();
+        };
+        if ("auto".equalsIgnoreCase(getSelectedRendererDriverId()) && !isDisplayXEnabled() && !useEglRenderer()) {
+            Thread prepareRenderer = new Thread(() -> {
+                try {
+                    preloaderDialog.setStatusText("Selecting Android renderer driver…");
+                    resolvedRendererDriverId = com.winlator.cmod.contents.RendererDriverCatalog.resolve(
+                            getApplicationContext(), "auto", isLinuxNativeOutput(), preloaderDialog::setStatusText);
+                    Log.i("RendererDriver", "requested=auto selected=" + resolvedRendererDriverId);
+                    preloaderDialog.setStatusText(getString(R.string.starting_up));
+                    runOnUiThread(begin);
+                } catch (Exception error) {
+                    runOnUiThread(() -> showRendererDriverFailure(error.getMessage()));
+                }
+            }, "RendererDriverSelection");
+            prepareRenderer.setDaemon(true);
+            prepareRenderer.start();
+        } else begin.run();
     }
 
     /** The window that means the program has started: Wine's marked main window, or a native program's top-level window. */
@@ -1691,10 +1710,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private String getSelectedRendererDriverId() {
+        if (resolvedRendererDriverId != null) return resolvedRendererDriverId;
         String id = shortcut != null ? shortcut.getRendererDriverId()
                 : (container != null ? container.getRendererDriverId() : "");
         if (id == null || id.isEmpty()) id = graphicsDriverConfig != null ? graphicsDriverConfig.get("version") : null;
         return id;
+    }
+
+    private boolean isLinuxNativeOutput() {
+        return linuxSession && container != null
+                && "native".equals(linuxSetting(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
+    }
+
+    private boolean useEglRenderer() {
+        return !isDisplayXEnabled() && ((linuxSession && !isLinuxNativeOutput())
+                || (shortcut != null ? shortcut.getRendererNative() : container != null && container.getRendererNative()));
+    }
+
+    private void showRendererDriverFailure(String message) {
+        if (isFinishing() || isDestroyed() || exiting.get()) return;
+        String selected = getSelectedRendererDriverId();
+        String diagnostics = "rendererRequested=" + (resolvedRendererDriverId == null ? selected : "auto")
+                + " rendererSelected=" + selected;
+        Log.e("RendererDriver", diagnostics + " error=" + message);
+        com.winlator.cmod.telemetry.Telemetry.event("skynet.error", "launch", "failure",
+                "error.type", "renderer_initialization_failed", "error.message", message,
+                "skynet.renderer.diagnostics", diagnostics);
+        preloaderDialog.closeOnUiThread();
+        new android.app.AlertDialog.Builder(this).setTitle("Renderer driver unavailable")
+                .setMessage(message + "\n\nRenderer driver: " + selected
+                        + "\nChoose Auto or a compatible Android Turnip driver in the shortcut's Renderer driver setting.")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> exit())
+                .setOnCancelListener(dialog -> exit()).show();
     }
 
     private void setupUI() {
@@ -1704,10 +1751,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // The Vulkan renderer loads a bionic driver prepared for Wine containers, so Linux sessions use EGL.
         // "Native" Vulkan output hands frames over as dma-bufs, which only the Vulkan renderer can import.
-        boolean linuxNativeOutput = linuxSession && container != null
-                && "native".equals(linuxSetting(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
-        boolean useEGL = !useDisplayX && ((linuxSession && !linuxNativeOutput) || (shortcut != null ? shortcut.getRendererNative()
-                : (container != null && container.getRendererNative())));
+        boolean linuxNativeOutput = isLinuxNativeOutput();
+        boolean useEGL = useEglRenderer();
 
         if (useDisplayX || useEGL) {
             xServerView = new XServerView(this, xServer);
@@ -1721,16 +1766,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (renderer instanceof VulkanXServerView) {
             VulkanXServerView vkRenderer = (VulkanXServerView) renderer;
             if (linuxNativeOutput) {
-                vkRenderer.requireDmaBufImport(message -> {
-                    if (isFinishing() || isDestroyed() || exiting.get()) return;
-                    preloaderDialog.closeOnUiThread();
-                    new android.app.AlertDialog.Builder(this)
-                            .setTitle("Renderer driver unavailable")
-                            .setMessage(message + "\n\nChoose an Android Turnip driver compatible with your GPU in the shortcut's Renderer driver setting.")
-                            .setPositiveButton(android.R.string.ok, (d, w) -> exit())
-                            .setOnCancelListener(d -> exit())
-                            .show();
-                });
+                vkRenderer.requireDmaBufImport(this::showRendererDriverFailure);
+            } else if (resolvedRendererDriverId != null && !"system".equalsIgnoreCase(resolvedRendererDriverId)) {
+                vkRenderer.requireSelectedDriver(this::showRendererDriverFailure);
             }
 
             EnvVars vulkanStartupVars = new EnvVars();
@@ -1753,10 +1791,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     String libraryName = adrenotoolsManager.getLibraryName(rendererDriverId);
                     String nativeLibDir = AppUtils.getNativeLibDir(this);
-                    if (linuxNativeOutput || !libraryName.isEmpty())
+                    if (linuxNativeOutput || resolvedRendererDriverId != null || !libraryName.isEmpty())
                         vkRenderer.setDriverInfo(driverPath, libraryName, nativeLibDir);
                 } catch (Exception error) {
-                    if (linuxNativeOutput) {
+                    if (linuxNativeOutput || resolvedRendererDriverId != null) {
                         vkRenderer.setDriverInfo(getFilesDir().getAbsolutePath() + "/contents/adrenotools/" + rendererDriverId + "/", "", AppUtils.getNativeLibDir(this));
                     }
                     android.util.Log.e("XServerDisplayActivity", "Unable to prepare renderer driver " + rendererDriverId, error);

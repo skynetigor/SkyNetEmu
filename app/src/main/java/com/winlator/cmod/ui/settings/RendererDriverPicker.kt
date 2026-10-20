@@ -14,7 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 
 internal class RendererDriverPickerState {
-    var options by mutableStateOf(listOf(DriverOption("system", "System", true)))
+    var options by mutableStateOf(listOf(DriverOption("auto", "Auto (match GPU)", true), DriverOption("system", "System", true)))
     var installing by mutableStateOf<Set<String>>(emptySet())
     var loading by mutableStateOf(true)
     var install: (DriverOption) -> Unit = {}
@@ -71,4 +71,5 @@ internal fun RendererDriverPicker(selected: String, state: RendererDriverPickerS
         if (state.installing.isEmpty()) onSelected(it)
     })
     if (state.loading) Text("Loading available drivers…")
+    if (selected == "auto") Text("Chooses an Android driver for your GPU and downloads it when needed.")
 }

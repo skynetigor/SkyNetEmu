@@ -119,15 +119,15 @@ final class RendererDiagnosticsChecks {
             VulkanXServerView.loadNativeLibrary();
             driver.runOnMainSync(() -> view[0] = new VulkanXServerView(context, server));
             long handle = (Long) method("nativeInit", Surface.class, int.class, int.class,
-                    String.class, String.class, String.class, boolean.class, boolean.class, boolean.class).invoke(view[0], reader.getSurface(),
-                    64, 64, null, null, context.getApplicationInfo().nativeLibraryDir, false, false, true);
+                    String.class, String.class, String.class, boolean.class, boolean.class, boolean.class, boolean.class).invoke(view[0], reader.getSurface(),
+                    64, 64, null, null, context.getApplicationInfo().nativeLibraryDir, false, false, false, true);
             check(handle != 0, "real Vulkan renderer initializes on an offscreen Android surface");
             try {
                 method("nativeInit", Surface.class, int.class, int.class,
-                        String.class, String.class, String.class, boolean.class, boolean.class, boolean.class)
+                        String.class, String.class, String.class, boolean.class, boolean.class, boolean.class, boolean.class)
                         .invoke(view[0], reader.getSurface(), 64, 64,
                                 new File(context.getCacheDir(), "missing-renderer-driver").getAbsolutePath() + "/",
-                                "missing-driver.so", context.getApplicationInfo().nativeLibraryDir, false, true, false);
+                                "missing-driver.so", context.getApplicationInfo().nativeLibraryDir, false, true, false, false);
                 throw new AssertionError("native output silently accepted an unavailable custom driver");
             } catch (java.lang.reflect.InvocationTargetException error) {
                 check(error.getCause() instanceof IllegalStateException

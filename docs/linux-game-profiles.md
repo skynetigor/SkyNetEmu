@@ -15,6 +15,28 @@ reports custom-driver loading or frame-import failures, and does not fall back t
 an explicitly chosen Android driver fails. A driver must support the device GPU and importing the Linux game's frames;
 a successful installation alone does not establish compatibility.
 
+## Automatic Android renderer selection
+
+`Renderer driver: Auto (match GPU)` resolves through `registry/renderer-drivers.json`, with a bundled copy in the APK.
+Rules list exact Adreno models/variants, Android API bounds, priority, DMA-BUF capability, an HTTPS package URL and its SHA-256.
+The catalog records tested GPUs separately from candidates. Adreno 830 defaults to the AdrenoTools registry's standard
+[Turnip v26.2.0-R8 package](https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/tag/v26.2.0-R8), with its archive SHA-256 pinned.
+This mapping still needs validation on Adreno 830: upstream release notes list A6xx/A7xx only. Adreno 840 retains DD-Turnip v0.1.1,
+which has device validation. Unlisted variants and Android versions do not inherit a family-wide match.
+
+Registry refresh downloads updates in the background. A launch reads the cached/bundled rules; if the selected package is missing,
+a worker downloads it and checks the archive hash before importing its Android half. The loading screen reports that step. No game,
+shortcut or shared-container setting is rewritten with the resolved driver ID. Explicit System/custom choices are preserved.
+
+New Linux environments default to Auto. New imports of older native-output profiles also get Auto when the profile omitted a renderer;
+existing shortcuts retain their choices. Existing affected shortcuts can select Auto in their Renderer driver picker.
+Linux game-side Turnip remains separate. Native output still checks the actual driver's external-memory FD/DMA-BUF support;
+a catalog match alone does not prove rendering works. Automatic custom-driver load failures never silently use System.
+Initialization failures emit an opt-in error event with requested/resolved renderer IDs, including failures before the game starts.
+
+Device check: `adb shell am instrument -w -e rendererRegistry 1 com.winlator.cmod.dev2.test/com.winlator.cmod.SharedLinuxInstrumentation`.
+Publish this JSON under the components repository's `registry/` directory to update mappings without a new app build.
+
 ## Game profiles
 
 The registry (`games.json` in the components repository, see its README, "Game profiles") says how to start a game and what works
