@@ -79,7 +79,9 @@ public final class LinuxFex {
         appendOption(config, "RootFS", rootfs.dir.getPath());
         appendDiskCache(config, container);
         if (thunks) {
-            appendOption(config, "ThunkHostLibs", new File(emulator.dir, "lib/fex-emu/HostThunks").getPath());
+            try {
+                appendOption(config, "ThunkHostLibs", LinuxFexVulkanCompat.hostLibraries(context, emulator).getPath());
+            } catch (java.io.IOException e) { return "Cannot prepare FEX Vulkan compatibility: " + e.getMessage(); }
             appendOption(config, "ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
         }
         // The guest's own environment: our x86-64 shims (the gamepad's evdev ioctls and uevent socket, and CEF's

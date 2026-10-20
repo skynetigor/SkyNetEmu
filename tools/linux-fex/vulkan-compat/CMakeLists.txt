@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(fex_vulkan_generator C CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(FMT_INSTALL OFF)
+add_subdirectory(/work/FEX/External/fmt fmt)
+add_subdirectory(/work/FEX/ThunkLibs/Generator generator)
