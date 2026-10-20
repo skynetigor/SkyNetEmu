@@ -69,6 +69,11 @@ add_library(fscache SHARED
 )
 
 target_compile_options(fscache PRIVATE -Wall -Wextra -fvisibility=hidden)
+# Keep compiler-rt's emulated TLS private as well. Its weak, default-visible
+# __emutls_get_address otherwise binds to Box64's runtime during preload. An
+# early cache call then shares TLS allocator state with later Vulkan layers;
+# loading LSFG can abort in Box64's TLS realloc with a truncated pointer tag.
+target_link_options(fscache PRIVATE "-Wl,--exclude-libs,ALL")
 
 target_link_libraries(fscache
         dl

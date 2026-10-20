@@ -11,6 +11,16 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// A host executable can export its own emulated-TLS runtime (as Box64 does).
+// The preload shim must keep its TLS private rather than enter that runtime.
+// This test has no emulated TLS of its own; any call is an interposition bug.
+__attribute__((visibility("default"))) void *__emutls_get_address(void *control) {
+    (void)control;
+    static const char msg[] = "FAIL: filesystem cache entered the host's TLS runtime\n";
+    write(STDERR_FILENO, msg, sizeof msg - 1);
+    _exit(99);
+}
+
 static int fails;
 #define CHECK(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); fails++; } else printf("ok:   %s\n", msg); } while (0)
 
