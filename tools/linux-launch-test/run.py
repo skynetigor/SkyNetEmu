@@ -12,6 +12,16 @@ TOOLS = Path(__file__).resolve().parent
 
 
 class LinuxLaunchTest(unittest.TestCase):
+    def test_program_paths(self):
+        java_bin = Path(os.environ["JAVA_HOME"]) / "bin" if "JAVA_HOME" in os.environ else Path("/usr/bin")
+        with tempfile.TemporaryDirectory() as work:
+            subprocess.run([
+                str(java_bin / "javac"), "-d", work,
+                str(ROOT / "app/src/main/java/com/winlator/cmod/linux/LinuxProgramPaths.java"),
+                str(TOOLS / "LinuxProgramPathsTest.java"),
+            ], check=True)
+            subprocess.run([str(java_bin / "java"), "-cp", work, "LinuxProgramPathsTest", work], check=True)
+
     def test_options(self):
         java_bin = Path(os.environ["JAVA_HOME"]) / "bin" if "JAVA_HOME" in os.environ else Path("/usr/bin")
         with tempfile.TemporaryDirectory() as work:

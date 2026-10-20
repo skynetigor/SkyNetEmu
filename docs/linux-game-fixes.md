@@ -3,6 +3,24 @@
 One entry per problem: symptom, cause, fix, source. **Search here first**, then the internet (see the `fix-game` skill).
 "Found by experiment" means no outside source was used; replace it with a link when one turns up.
 
+## FEX: adding a game already inside Linux asks to copy it again (2026-10-19)
+
+- **Symptom:** selecting BeamNG 0.34 from the container's
+  `.local/share/BeemNG_0_34_Steam_Depot/BinLinux` displays “Copy into the container?”
+  and incorrectly claims that the container cannot see the file. Steam games
+  skip this dialog because they use the Steam launch path.
+- **Cause/fix:** the program importer only allowed x86-64 Box64 programs on
+  shared storage to run in place. It now recognizes canonical paths inside the
+  selected container's Linux home, for all executable types and emulators.
+  Both add-game entry points save these files as `/root/...` guest paths.
+  Shared-storage FEX programs still require importing, and paths outside the
+  selected home (including symlink escapes) retain their copy checks.
+- **Validation:** host launch/path tests cover Android-style path aliases,
+  internal symlinks, traversal and home-prefix boundaries. Device import checks
+  exercise ELF architectures and scripts on internal/shared storage, the real
+  copied BeamNG executable, its guest-to-host round trip, and the installed
+  FEX launch plan. Debug APK assembly and in-place installation completed.
+
 ## BeamNG.drive 0.34: X11 disconnect during map loading (2026-10-19)
 
 - **Setup:** SM-F976B, Box64 `box64-0.4.4-r2` Performance, `bannerlator-r9`, glibc

@@ -297,7 +297,7 @@ class AddGameFragment : Fragment() {
             phase = Phase.Failed("This container cannot run this program: $refusal.")
             return null
         }
-        var guest = exe.absolutePath
+        var guest = LinuxProgramInstaller.guestPath(configured, exe)
         if (LinuxProgramInstaller.needsCopy(configured, exe)) {
             val mode = askCopyMode(container) ?: run {
                 phase = Phase.Failed("Nothing was added.")

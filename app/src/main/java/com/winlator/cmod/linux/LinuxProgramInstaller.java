@@ -30,14 +30,20 @@ public final class LinuxProgramInstaller {
     private LinuxProgramInstaller() {}
 
     /**
-     * False only for an x86-64 program that Box64 reads where it lies (Box64 reads a program instead of mapping it) on the
-     * internal storage that every container binds. FEX maps the program and its libraries as executable, shared storage
-     * refuses that, scripts start programs of their own, and other volumes are not bound: all of those are copied in.
+     * Programs already in this container's Linux home can run there with any emulator. Box64 can also read an x86-64
+     * program from shared storage. FEX needs executable mappings, so programs on shared storage still need importing.
      */
     public static boolean needsCopy(Container container, File file) {
+        if (LinuxProgramPaths.inHome(container.getLinuxHomeDir(), file) != null) return false;
         if (LinuxSession.elfMachine(file) != 62) return true;
         if (!LinuxEmulator.BOX64.equals(LinuxEmulator.choice(container))) return true;
         return !file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/");
+    }
+
+    /** Files picked inside the Linux home must be saved as /root/... rather than their Android-private host path. */
+    public static String guestPath(Container container, File file) {
+        String guest = LinuxProgramPaths.inHome(container.getLinuxHomeDir(), file);
+        return guest != null ? guest : file.getAbsolutePath();
     }
 
     /** Why {@link #needsCopy} says yes, in a sentence for the person adding the program (the reason depends on what the program is). */
