@@ -220,8 +220,9 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var wineRenderer by mutableStateOf(readConfig(wrapperConfig, "renderer", ',').ifBlank { "vulkan" })
     var videoMemory by mutableStateOf(readConfig(wrapperConfig, "videoMemorySize", ',').ifBlank { "2048" })
 
-    private val emulatorRaw = StringUtils.parseIdentifier(shortcut.getExtra("emulator", container.getEmulator()))
-    var emulator by mutableStateOf(if (!arm64) "Box64" else if (emulatorRaw.equals("FEXCore", true)) "FEXCore" else "WOWBox64")
+    // Native ARM64 containers intentionally have no x86 emulator (the inherited value can be null).
+    private val emulatorRaw = if (nativeArm64) "" else StringUtils.parseIdentifier(shortcut.getExtra("emulator", container.getEmulator()).orEmpty())
+    var emulator by mutableStateOf(if (nativeArm64) "" else if (!arm64) "Box64" else if (emulatorRaw.equals("FEXCore", true)) "FEXCore" else "WOWBox64")
     var fexVersion by mutableStateOf(shortcut.getExtra("fexcoreVersion", container.getFEXCoreVersion().orEmpty()))
     var boxVersion by mutableStateOf(shortcut.getExtra("box64Version", container.getBox64Version().orEmpty()))
     var fexPreset by mutableStateOf(shortcut.getExtra("fexcorePreset", container.getFEXCorePreset()))

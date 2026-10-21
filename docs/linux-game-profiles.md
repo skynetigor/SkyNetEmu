@@ -111,6 +111,19 @@ config that suits (a config made for any processor family counts when the prefer
 screen shows it as "Recommended" for `BinLinux/BeamNG.drive.x64`. Box64 reads the program, so it can stay on shared storage (no copy).
 The registry lives in the components repository: these files must be published there, or the app's cached copy replaces them after its TTL.
 
+## BeamNG.drive 0.40: Windows ARM64 native
+
+`containers/beamng-040-windows-arm64-proton9-dd-turnip-device.wcfg` retains `proton-9.0-arm64ec`, the
+checksum-pinned Proton 9 ARM64EC package. Native Windows ARM64 executables use its AArch64 loader and ARM64
+Windows builtins without Box64/FEX. `gpuName=Device` keeps the current device GPU identity instead of spoofing a GTX 1060.
+The profile retains DD-Turnip v0.1.1, native Vulkan, ALSA and a 1280x720 desktop.
+
+Proton 9 previously loaded GridMapv2. Standard Proton 11.0-1 and CachyOS 11 both failed during Vulkan device creation
+on the test device, so the profile stays on Proton 9. Incremented catalog revisions replace the Proton 11 recommendation;
+the `-device` profile ID avoids reusing a cached original Proton 9 `.wcfg` that still spoofed a GTX 1060.
+Existing prefixes and shortcuts are not migrated automatically. Publish these registry files in the components repository
+to make the profile available through registry refresh in existing installations.
+
 ## Tomb Raider (2013): Linux only (FEX Performance + TSO)
 
 `games/tomb-raider-2013.json` replaces the former Windows profile, keeping its game id and Steam app id (`203160`).

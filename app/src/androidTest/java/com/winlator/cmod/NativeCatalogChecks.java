@@ -5,6 +5,7 @@ import android.content.Context;
 
 import com.winlator.cmod.container.ContainerProfile;
 import com.winlator.cmod.contents.ContainerConfigCatalog;
+import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.contents.RegistryCache;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.gameprofile.ConfigChooser;
@@ -18,7 +19,7 @@ import java.util.Map;
 
 /** Read-only checks of the shipped/native registry selection using Android's real JSON parser. */
 public final class NativeCatalogChecks {
-    private static final String NATIVE_CONFIG = "beamng-040-windows-arm64-proton9-dd-turnip";
+    private static final String NATIVE_CONFIG = "beamng-040-windows-arm64-proton9-dd-turnip-device";
     private static final String LINUX_CONFIG = "beamng-040-linux-box64-r3";
     private static final String SOC = "snapdragon-8-elite-gen-5";
 
@@ -83,14 +84,28 @@ public final class NativeCatalogChecks {
                         && old.containers.contains("cachyos-x64-box64-dd-turnip"),
                 "BeamNG 0.34 retains its existing CachyOS option", report);
 
-        JSONObject nativeProfile = ContainerProfile.parse(ContainerConfigCatalog.profileText(context, all.get(NATIVE_CONFIG), false)).container;
+        ContainerProfile.Envelope envelope = ContainerProfile.parse(ContainerConfigCatalog.profileText(context, all.get(NATIVE_CONFIG), false));
+        JSONObject nativeProfile = envelope.container;
+        check("Proton".equals(envelope.components.getJSONObject(0).optString("type"))
+                        && "proton-9.0-arm64ec".equals(envelope.components.getJSONObject(0).optString("version")),
+                "native profile component hint requests the same Proton 9 runtime as the container", report);
         check("proton-9.0-arm64ec".equals(nativeProfile.optString("wineVersion"))
                         && "wined3d".equals(nativeProfile.optString("dxwrapper"))
                         && !nativeProfile.optString("wincomponents").contains("=1"),
-                "native profile uses Proton 9 and ARM64 Wine builtins", report);
+                "native profile uses Proton 9 ARM64EC and ARM64 Wine builtins", report);
         check("DD-Turnip v0.1.1".equals(nativeProfile.optString("rendererDriverId"))
                         && nativeProfile.optString("graphicsDriverConfig").contains("version=DD-Turnip v0.1.1;"),
                 "native profile selects the verified DD-Turnip graphics path", report);
+        check(nativeProfile.optString("graphicsDriverConfig").contains(";gpuName=Device")
+                        && !nativeProfile.toString().contains("GTX 1060"),
+                "native profile reports the current device GPU without GTX 1060 spoofing", report);
+        com.winlator.cmod.core.ProtonPackageManager.PackageInfo runtime =
+                com.winlator.cmod.core.ProtonPackageManager.getPackage(nativeProfile.optString("wineVersion"));
+        check(runtime != null && runtime.directUrl != null && runtime.sha256.matches("[a-f0-9]{64}"),
+                "Proton 9 profile runtime has a supported download with a pinned checksum", report);
+        if (com.winlator.cmod.core.ProtonPackageManager.isInstalled(context, runtime.identifier))
+            check(WineInfo.fromIdentifier(context, new ContentsManager(context), runtime.identifier).supportsNativeArm64(),
+                    "installed Proton 9 runtime has an AArch64 loader and ARM64 Windows builtins", report);
         String serialized = nativeProfile.toString();
         check(!serialized.contains("GUEST_PROGRAM_LAUNCHER_COMMAND") && !serialized.contains("/data/user/")
                         && !serialized.contains("-userpath"),

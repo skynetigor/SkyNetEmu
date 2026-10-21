@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "revision": 4,
+ "revision": 6,
  "id": "beamng-drive",
  "name": "BeamNG.drive",
  "steam": {
@@ -38,7 +38,7 @@
    "label": "0.40.x",
    "status": "works",
    "default": true,
-   "notes": "Native Linux x86-64: startup and Automation Test Track loading verified with Box64 0.4.4-r3 on Snapdragon 8 Elite Gen 5. Windows ARM64: GridMapv2 loading and an in-game scene verified with Proton 9 and DD-Turnip native Vulkan. The ARM64 profile remains experimental; broader device and long-session stability remain unverified.",
+   "notes": "Native Linux x86-64: startup and Automation Test Track loading verified with Box64 0.4.4-r3 on Snapdragon 8 Elite Gen 5. Windows ARM64: retain Proton 9 ARM64EC with DD-Turnip native Vulkan and the current device GPU identity. Proton 9 previously loaded GridMapv2; standard Proton 11 and CachyOS 11 failed during Vulkan device creation on the test device. The ARM64 profile remains experimental.",
    "testedOn": "Samsung Galaxy Z Fold8 Ultra (SM-F976B), Snapdragon 8 Elite Gen 5",
    "match": {
     "versionFile": {
@@ -51,7 +51,7 @@
    },
    "containers": [
     "beamng-040-linux-box64-r3",
-    "beamng-040-windows-arm64-proton9-dd-turnip"
+    "beamng-040-windows-arm64-proton9-dd-turnip-device"
    ],
    "preferredContainer": "beamng-040-linux-box64-r3",
    "linux": {

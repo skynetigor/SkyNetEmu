@@ -38,6 +38,10 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("shortcutEditor"))) {
+                result.putString("stream", ShortcutEditorChecks.run(this));
+                finish(status, result); return;
+            }
             if (options != null && "1".equals(options.getString("rendererRegistry"))) {
                 result.putString("stream", RendererDriverRegistryChecks.run(this));
                 finish(status, result); return;
