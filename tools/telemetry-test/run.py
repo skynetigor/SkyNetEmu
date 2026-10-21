@@ -28,10 +28,13 @@ with tempfile.TemporaryDirectory(prefix='telemetry-test-') as work:
     sources = root / 'app/src/main/java/com/winlator/cmod/telemetry'
     subprocess.run([str(java / 'javac'), '-d', work, str(sources / 'Scrub.java'),
                     str(sources / 'RendererLog.java'), str(sources / 'DevicePerformanceSnapshot.java'),
+                    str(sources / 'LinuxLaunchOutput.java'), str(sources / 'LinuxProcessTracker.java'), str(sources / 'NativeCrashTrace.java'),
+                    str(Path(__file__).with_name('LinuxLaunchDiagnosticsTest.java')),
                     str(Path(__file__).with_name('DevicePerformanceSnapshotTest.java')),
                     str(Path(__file__).with_name('TelemetryTextTest.java'))], check=True)
     subprocess.run([str(java / 'java'), '-cp', work, 'com.winlator.cmod.telemetry.TelemetryTextTest'], check=True)
     subprocess.run([str(java / 'java'), '-cp', work, 'com.winlator.cmod.telemetry.DevicePerformanceSnapshotTest'], check=True)
+    subprocess.run([str(java / 'java'), '-cp', work, 'com.winlator.cmod.telemetry.LinuxLaunchDiagnosticsTest'], check=True)
     timing_test = str(Path(work) / 'renderer-timing-test')
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-pthread',
                     '-I' + str(root / 'app/src/main/cpp/winlator/renderer/vulkan'),

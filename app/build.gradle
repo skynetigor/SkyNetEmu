@@ -138,7 +138,7 @@ android {
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
 
-        versionCode 26
+        versionCode 27
         versionName "2.0.1"
 
         // External native build from Winlator
@@ -172,7 +172,7 @@ android {
     // Keep Winlator’s buildTypes
     buildTypes {
         debug {
-            versionNameSuffix "-pre.2"
+            versionNameSuffix "-pre.3"
             buildConfigField 'String', 'COMPONENTS_BRANCH', "\"${debugComponentsBranch.get()}\""
             minifyEnabled false
             // A separate app next to the release build: its own package, so no data or signature is shared.

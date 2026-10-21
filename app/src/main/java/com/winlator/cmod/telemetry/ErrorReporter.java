@@ -89,14 +89,18 @@ public final class ErrorReporter {
     /** A Linux program that ended badly: how, after how long, in which setup, and the last lines it printed. */
     public static void linuxExit(int status, long seconds, String setup, String lastOutput) {
         if (!Telemetry.isEnabled()) return;
-        Telemetry.event("skynet.error", "linux_program_exit", "failure",
+        java.util.function.Supplier<String> evidence = LinuxDiagnostics.evidenceCollector();
+        Uploader.background(() -> {
+            if (!Telemetry.isEnabled()) return;
+            Telemetry.event("skynet.error", "linux_program_exit", "failure",
                 "skynet.error.stage", "linux_program_exit",
                 "error.type", status > 128 ? "signal_" + (status - 128) : "exit_" + status,
                 "error.message", Scrub.text(lastOutput.isEmpty() ? "no output" : lastOutput.substring(Math.max(0, lastOutput.length() - 1500)), 1500),
                 "skynet.exit.code", status,
                 "skynet.linux.seconds_running", seconds,
                 "skynet.linux.setup", setup,
-                "skynet.linux.logs", LinuxDiagnostics.collect());
+                "skynet.linux.logs", evidence.get());
+        });
     }
 
     /** A failed download: the server's name and what went wrong, never the path of the file. */

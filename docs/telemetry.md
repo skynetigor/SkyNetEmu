@@ -77,7 +77,7 @@ With telemetry enabled, Linux sessions send bounded diagnostic excerpts rather t
 | `skynet.renderer.diagnostics` | 2048 characters | GPU/driver identity, external-memory capabilities, last DMA import stage and Vulkan result, buffer geometry, memory requirements/type masks, accepted/rejected update counts, GPU submit/present results and counts |
 | `skynet.linux.setup` | 1000 characters | Linux runtime, emulator and launch configuration |
 | `skynet.linux.seconds_running` | 0–604800 | Elapsed seconds |
-| `skynet.linux.logs` | 6000 characters total | Renderer messages when the debug logcat collector is running, the last 30 lines of game output, and up to 25 lines from each of Steam's five newest text logs |
+| `skynet.linux.logs` | 6000 characters total | Bounded process state, matching Android exit/tombstone evidence, startup/notable/recent program output, and small renderer/Steam excerpts |
 
 These fields are allowed on `skynet.session` and `skynet.error`. All text is scrubbed on the phone before it is sent. The renderer
 excerpt keeps at most 24 distinct consecutive messages and 3000 characters; it excludes unrelated logcat tags. Release builds still
@@ -89,11 +89,21 @@ An import rejection sends one immediate `skynet.error` event per Linux session (
 checks at 40 and 120 seconds. Rejected DMA imports do not increase the game/HUD frame count. Accepted imports or successful Android
 presentation calls alone do not establish that the game's pixels are visible.
 
+### Linux launch evidence
+
+Setup descriptions are evaluated when a report is made, rather than frozen before the command is built. They include `executionMode`, `launcherPhase`, root PID and root exit status. The Linux launcher uses a process-scoped merged stdout/stderr callback; its startup, first fatal/notable errors and recent output have separate budgets. Paths and personal text are scrubbed before the telemetry buffer retains them. The normal local error dialog still uses its own bounded output tail.
+
+At 1 and 3 seconds the monitor observes the session process tree; periodic samples at 10 seconds and then every 30 seconds refresh it. Only same-UID descendants or previously observed descendants with matching start times are followed. Snapshots include safe roles (guest/emulator/helper/other), PID/PPID, state including zombie/blocked, threads, CPU ticks, RSS/swap, and optional kernel wait channel/current syscall number. Command lines are used locally to identify the selected guest; they and environment variables are never uploaded. Reparented observed children remain visible, and reused PIDs are excluded. An unseen guest or unreadable `/proc` entry is not proof of a crash.
+
+Zero-frame checks and failed exits collect Android `ApplicationExitInfo` for the session's observed PIDs (plus its root), restricted to records since launch. API 31+ native tombstones are decoded using Android's `tombstone.proto`: signal/code, the blocked syscall number when explicitly present in a seccomp cause, and up to 12 frames from the crashing thread. Memory dumps, command lines, log buffers, thread names and arbitrary protobuf strings are omitted. Reads are capped at 256 KiB; complete fields before that limit can still be reported as `tombstone=partial`. Collection runs off the UI/render thread. Each section has its own budget so renderer output cannot displace all game evidence; no Elasticsearch mapping change is required.
+
+Access limitations are explicit (`processes=unavailable`, `android_exit_info=no_matching_records`, `tombstone=unavailable/unreadable/too_large`). Android may not register glibc/Box64 children in its app exit history, and a short-lived child may die between observations. A kernel-killed SIGSYS without a system tombstone cannot reliably reveal its syscall/backtrace to the unprivileged app; ADB capture may still be required. This monitoring reports evidence and does not terminate a slow-loading game or change signal handling.
+
 ### Linux performance diagnosis
 
 Opted-in Linux sessions also send `skynet.session` / `linux_performance` after 10 seconds, then every 30 seconds
 with fixed delay. Sampling runs on a background-priority worker, independently of the HUD. It does not wait for a clean exit
-and does not upload game log tails on every sample. Turning telemetry off suppresses collection and events.
+and uploads a bounded process snapshot, without game log tails, on each sample. Turning telemetry off suppresses collection and events.
 
 `skynet.performance.diagnostics` is a numeric-only, versioned text snapshot, bounded to 4096 characters. Missing or denied
 readings are `-1`, including the first CPU utilization reading. It contains:

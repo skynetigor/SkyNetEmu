@@ -1578,6 +1578,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         preloaderDialog.closeOnUiThread();
         com.winlator.cmod.telemetry.ErrorReporter.linuxExit(status, launcher.secondsRunning(), launcher.setupDescription(), launcher.lastOutput(40));
+        // Exit reporting captured this session's suppliers; a dead launcher must not trigger later stall warnings.
+        com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
         String reason = status > 128
                 ? "was stopped by signal " + (status - 128) + (status == 139 ? " (a crash)" : "")
                 : "exited with code " + status;
@@ -1685,10 +1687,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String rendererDriver = getSelectedRendererDriverId();
         com.winlator.cmod.telemetry.LinuxDiagnostics.start(this, new File(container.getLinuxHomeDir(), ".local/share/Steam/logs"),
-                () -> launcher.lastOutput(60), launcher.setupDescription()
+                launcher::diagnosticOutput, () -> launcher.setupDescription()
                         + " rendererRequested=" + rendererDriver
                         + " rendererPresent=" + (shortcut != null ? shortcut.getRendererPresentMode() : container.getRendererPresentMode())
-                        + " resolution=" + xServer.screenInfo.width + "x" + xServer.screenInfo.height);
+                        + " resolution=" + xServer.screenInfo.width + "x" + xServer.screenInfo.height,
+                launcher::processSnapshot, launcher::crashEvidence);
         environment.startEnvironmentComponents();
         if (performanceSession != null) performanceSession.setGuestRoot(launcher.getPid());
     }

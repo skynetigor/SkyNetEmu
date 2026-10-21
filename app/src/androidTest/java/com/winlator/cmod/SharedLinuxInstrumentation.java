@@ -38,6 +38,10 @@ public final class SharedLinuxInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_OK;
         try {
+            if (options != null && "1".equals(options.getString("linuxLaunchDiagnostics"))) {
+                result.putString("stream", com.winlator.cmod.telemetry.LinuxLaunchDiagnosticsChecks.run(this));
+                finish(status, result); return;
+            }
             if (options != null && "1".equals(options.getString("prootSettings"))) {
                 result.putString("stream", ProotSettingsChecks.run(this));
                 finish(status, result); return;
