@@ -56,7 +56,7 @@ internal object StandardLinuxContainer {
         else LinuxRuntime.listInstalled(context).firstOrNull()?.id ?: defaults.runtime
         val emulatorId = if (!box64) "" else if (LinuxEmulator.isInstalled(context, defaults.emulator)) defaults.emulator
         else LinuxEmulator.list(context, LinuxEmulator.BOX64).firstOrNull()?.id ?: defaults.emulator
-        val driver = if (LinuxDriverManager.isInstalled(context, defaults.driver)) defaults.driver
+        val driver = if (defaults.gpuDriverMapped || LinuxDriverManager.isInstalled(context, defaults.driver)) defaults.driver
         else LinuxDriverManager.list(context).firstOrNull()?.id ?: defaults.driver
 
         val extra = JSONObject()

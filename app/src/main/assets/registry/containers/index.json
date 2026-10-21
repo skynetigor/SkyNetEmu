@@ -171,7 +171,27 @@
         "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
       ],
       "windowsArchitecture": "arm64"
+    },
+    {
+      "id": "beamng-linux-box64-adreno735-performance",
+      "name": "Linux, Adreno 735 / POCO F6",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-adreno735-performance.wcfg",
+      "description": "Linux BeamNG with Box64 Performance, Mesa Turnip 26.2.2 for Adreno 735, Zink and native Vulkan output. Android renderer Auto selects Turnip 26.2.0-R8. Source/binary GPU support verified; device gameplay remains unverified.",
+      "socs": [
+        "snapdragon-8s-gen-3"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "Adreno 735",
+        "POCO F6",
+        "Box64",
+        "Turnip",
+        "Zink"
+      ],
+      "testedOn": []
     }
   ],
-  "revision": 3
+  "revision": 5
 }

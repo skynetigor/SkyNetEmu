@@ -106,6 +106,14 @@ public final class NativeCatalogChecks {
         if (com.winlator.cmod.core.ProtonPackageManager.isInstalled(context, runtime.identifier))
             check(WineInfo.fromIdentifier(context, new ContentsManager(context), runtime.identifier).supportsNativeArm64(),
                     "installed Proton 9 runtime has an AArch64 loader and ARM64 Windows builtins", report);
+        GameProfile.Version pocoVersion = profile.version("0.31");
+        ConfigChooser.Choice pocoChoice = ConfigChooser.choose(pocoVersion, "snapdragon-8s-gen-3", all, GameProfile.Platform.LINUX);
+        check(pocoChoice != null && "beamng-linux-box64-adreno735-performance".equals(pocoChoice.configId),
+                "BeamNG 0.31 on POCO F6 chooses the Adreno 735 Linux profile", report);
+        JSONObject pocoProfile = ContainerProfile.parse(ContainerConfigCatalog.profileText(context, all.get(pocoChoice.configId), false)).container;
+        check("turnip-mesa-26.2.2-linux-aarch64".equals(pocoProfile.getJSONObject("extraData").optString("linuxVulkanDriver"))
+                        && "auto".equals(pocoProfile.optString("rendererDriverId")),
+                "POCO profile separates Linux Mesa Turnip from Android renderer Auto", report);
         String serialized = nativeProfile.toString();
         check(!serialized.contains("GUEST_PROGRAM_LAUNCHER_COMMAND") && !serialized.contains("/data/user/")
                         && !serialized.contains("-userpath"),

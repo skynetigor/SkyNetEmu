@@ -61,6 +61,21 @@ public final class RendererDriverRegistryChecks {
         check(!entry.matches("Adreno (TM) 840", 37, true), "Adreno 830 default does not replace the tested 840 driver");
         check(entries.stream().anyMatch(candidate -> candidate.matches("Adreno (TM) 840", 37, true)
                 && "DD-Turnip v0.1.1".equals(candidate.id)), "tested Adreno 840 retains DD-Turnip v0.1.1");
+        RendererDriverCatalog.Entry poco = entries.stream().filter(candidate -> candidate.matches("Adreno (TM) 735", 34, true)).findFirst().orElse(null);
+        check(poco != null && "Turnip v26.2.0-R8".equals(poco.id), "POCO F6 API 34 Auto selects the Android A7xx driver");
+        check(!poco.matches("Adreno (TM) 735v2", 34, true), "POCO mapping does not assume support for other GPU variants");
+        String linuxJson;
+        try (java.io.InputStream in = context.getAssets().open("registry/linux.json")) {
+            linuxJson = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        check("turnip-mesa-26.2.2-linux-aarch64".equals(com.winlator.cmod.steam.SteamContainer.driverForGpu(linuxJson, "Adreno (TM) 735", "original")),
+                "Adreno 735 Linux default uses glibc Mesa 26.2.2, not the A8xx driver");
+        for (String gpu : new String[]{"Adreno (TM) 735v2", "Adreno (TM) 840", "Mali-G715"})
+            check("original".equals(com.winlator.cmod.steam.SteamContainer.driverForGpu(linuxJson, gpu, "original")),
+                    "Linux GPU mapping preserves the default for " + gpu);
+        String absent = new JSONObject(linuxJson).put("drivers", new JSONArray()).toString();
+        check("original".equals(com.winlator.cmod.steam.SteamContainer.driverForGpu(absent, "Adreno (TM) 735", "original")),
+                "Linux GPU map cannot select a package absent from its catalog");
         check(!entry.matches("Adreno (TM) 830v2", 37, true), "GPU variants require an explicit mapping");
         check(!entry.matches("Adreno (TM) 730", 37, true) && !entry.matches("Mali-G715", 37, true), "unlisted GPUs are never matched as the same family");
         check(!entry.matches("Adreno (TM) 830", 28, true) && !entry.matches("Adreno (TM) 830", 99, true), "Android version bounds are enforced");

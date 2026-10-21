@@ -40,6 +40,8 @@ public final class SteamContainer {
         public final String emulator;
         public final String emulatorPreset;
         public final String driver;
+        /** Exact GPU mapping: an unrelated installed driver must not stand in for it. */
+        public final boolean gpuDriverMapped;
         public final String glDriver;
         public final String vulkanPresent;
         /** FEX and the x86-64 root filesystem that run a game's 32-bit code (Box64 cannot): ids of the catalog. */
@@ -47,13 +49,14 @@ public final class SteamContainer {
         public final String rootfs;
 
         Defaults(String runtime, String emulator, String emulatorPreset, String driver, String glDriver, String vulkanPresent,
-                 String fex, String rootfs) {
+                 String fex, String rootfs, boolean gpuDriverMapped) {
             this.fex = fex;
             this.rootfs = rootfs;
             this.runtime = runtime;
             this.emulator = emulator;
             this.emulatorPreset = emulatorPreset;
             this.driver = driver;
+            this.gpuDriverMapped = gpuDriverMapped;
             this.glDriver = glDriver;
             this.vulkanPresent = vulkanPresent;
         }
@@ -90,23 +93,44 @@ public final class SteamContainer {
     /** The configuration of a new Steam container: the registry's "steam" block, or the built-in one when it cannot be read. */
     public static Defaults defaults(Context context, boolean allowNetwork) {
         Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4-r2", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native",
-                "fex-2610", "rootfs-ubuntu-24-04-2026-08-11");
+                "fex-2610", "rootfs-ubuntu-24-04-2026-08-11", false);
         String text = RegistryCache.get(context, "linux.json", RegistryCache.TTL_INDEX, allowNetwork);
         if (text == null) return builtIn;
         try {
             JSONObject steam = new JSONObject(text).optJSONObject("steam");
             if (steam == null) return builtIn;
+            String globalDriver = id(steam, "driver", builtIn.driver);
+            String mappedDriver = driverForGpu(text, com.winlator.cmod.core.GPUInformation.getRenderer(null, context), globalDriver);
             return new Defaults(
                     id(steam, "runtime", builtIn.runtime), id(steam, "emulator", builtIn.emulator),
-                    steam.optString("emulatorPreset", builtIn.emulatorPreset), id(steam, "driver", builtIn.driver),
+                    steam.optString("emulatorPreset", builtIn.emulatorPreset), mappedDriver,
                     steam.optString("glDriver", builtIn.glDriver).equals("software") ? "software" : "zink",
                     steam.optString("vulkanPresent", builtIn.vulkanPresent).equals("sw") ? "sw" : "native",
-                    id(steam, "fex", builtIn.fex), id(steam, "rootfs", builtIn.rootfs));
+                    id(steam, "fex", builtIn.fex), id(steam, "rootfs", builtIn.rootfs), !mappedDriver.equals(globalDriver));
         }
         catch (JSONException e) {
             Log.w(TAG, "Bad steam block in linux.json", e);
             return builtIn;
         }
+    }
+
+    /** Exact-model Linux driver defaults from the catalog; never guesses a neighboring Adreno model. */
+    public static String driverForGpu(String catalog, String renderer, String fallback) {
+        try {
+            JSONObject root = new JSONObject(catalog);
+            JSONObject steam = root.optJSONObject("steam");
+            JSONObject mappings = steam == null ? null : steam.optJSONObject("driverByGpu");
+            if (mappings == null) return fallback;
+            String model = com.winlator.cmod.contents.RendererDriverCatalog.adrenoModel(renderer);
+            String selected = mappings.optString(model, "");
+            if (!selected.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) return fallback;
+            org.json.JSONArray drivers = root.optJSONArray("drivers");
+            for (int i = 0; drivers != null && i < drivers.length(); i++) {
+                JSONObject driver = drivers.optJSONObject(i);
+                if (driver != null && selected.equals(driver.optString("id"))) return selected;
+            }
+        } catch (Exception ignored) {}
+        return fallback;
     }
 
     private static String id(JSONObject object, String key, String fallback) {
@@ -123,7 +147,7 @@ public final class SteamContainer {
     }
 
     private static boolean driverReady(Context context, Defaults defaults) {
-        return LinuxDriverManager.isInstalled(context, defaults.driver) || !LinuxDriverManager.list(context).isEmpty();
+        return LinuxDriverManager.isInstalled(context, defaults.driver) || (!defaults.gpuDriverMapped && !LinuxDriverManager.list(context).isEmpty());
     }
 
     /** FEX and an x86-64 root filesystem are installed: what a 32-bit game (Tomb Raider, 2013) runs on. */
@@ -157,7 +181,7 @@ public final class SteamContainer {
         }
         if (!driverReady(context, defaults)) {
             LinuxRuntimeCatalog.Entry entry = pick(LinuxRuntimeCatalog.fetchDrivers(), defaults.driver);
-            if (entry == null) return failed("The Turnip driver is not in the catalog. Check the connection.");
+            if (entry == null || (defaults.gpuDriverMapped && !defaults.driver.equals(entry.id))) return failed("The GPU-matched Turnip driver is not in the catalog. Check the connection.");
             install.add(entry);
         }
         // 32-bit games need FEX and a root filesystem with the 32-bit libraries. A catalog that cannot be read does not stop Steam,
@@ -221,7 +245,7 @@ public final class SteamContainer {
         List<LinuxEmulator.Installed> boxes = LinuxEmulator.list(context, LinuxEmulator.BOX64);
         String box64 = LinuxEmulator.isInstalled(context, defaults.emulator) ? defaults.emulator : boxes.isEmpty() ? "" : boxes.get(0).id;
         List<LinuxDriverManager.Installed> drivers = LinuxDriverManager.list(context);
-        String driver = LinuxDriverManager.isInstalled(context, defaults.driver) ? defaults.driver : drivers.isEmpty() ? "" : drivers.get(0).id;
+        String driver = LinuxDriverManager.isInstalled(context, defaults.driver) || defaults.gpuDriverMapped ? defaults.driver : drivers.isEmpty() ? "" : drivers.get(0).id;
         if (runtime.isEmpty() || box64.isEmpty()) return null;
         try {
             JSONObject data = new JSONObject();

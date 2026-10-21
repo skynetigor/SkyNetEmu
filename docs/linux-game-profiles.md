@@ -102,6 +102,22 @@ width allows (720 dp or more), otherwise they are sections that open and close; 
    in Big Picture.
 4. Settings on the unfolded display (list on the left) and the cover display (sections).
 
+## Adreno 735 / POCO F6
+
+`renderer-drivers.json` maps exact GPU `735` on Android API 29–37 to the standard Android **Turnip v26.2.0-R8**
+AdrenoTools package, pinned by SHA-256. `linux.json` maps `steam.driverByGpu["735"]` to the separate Linux/glibc
+**Mesa Turnip 26.2.2** package. Both binaries contain FD735; the Linux source includes chip ID `0x43030b00`.
+This is source/binary compatibility evidence, not POCO F6 gameplay or DMA-BUF validation.
+
+`socs.json` maps SM8635 to `snapdragon-8s-gen-3`. BeamNG versions, including 0.31, prefer
+`beamng-linux-box64-adreno735-performance` for this SoC. This profile selects Linux Mesa 26.2.2 and Android renderer
+Auto; it avoids the older generic profile's A8xx driver. Existing users must refresh registry data and import the new
+POCO profile (or choose the two drivers in shortcut settings). Existing manual choices are not rewritten.
+
+For newly created default Linux environments, GPU-mapped drivers must be installed; an unrelated installed A8xx
+package does not satisfy the requirement. Android Auto verifies the download checksum and the native renderer still
+checks actual DMA-BUF import support. These catalog files must be published to the components registry.
+
 ## BeamNG.drive: the Linux profile (Box64, Performance)
 
 `containers/beamng-linux-box64-performance.wcfg` (index entry `"platform": "linux"`) is a Linux container on Box64 0.4.4 with the
