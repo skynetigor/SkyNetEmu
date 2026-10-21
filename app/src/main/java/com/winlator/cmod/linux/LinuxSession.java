@@ -29,11 +29,13 @@ public final class LinuxSession {
         public final String[] argv;
         public final String[] hostEnv;
         public final File workingDir;
+        public final String executionMode;
 
-        Launch(String[] argv, String[] hostEnv, File workingDir) {
+        Launch(String[] argv, String[] hostEnv, File workingDir, String executionMode) {
             this.argv = argv;
             this.hostEnv = hostEnv;
             this.workingDir = workingDir;
+            this.executionMode = executionMode;
         }
     }
 
@@ -456,10 +458,10 @@ public final class LinuxSession {
         // Android's linker does not search an executable's own directory, and proot needs libtalloc from there.
         host.put("LD_LIBRARY_PATH", hostDir.getPath());
 
-        return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
+        return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt, "proot");
     }
 
-    /** Container extra: "0" keeps the session under proot, anything else starts it without (see {@link #noProotLaunch}); a file Winlator/linux-proot on the shared storage keeps every container under proot. */
+    /** Legacy container extra: only "1" disables proot; absent values use proot. */
     public static final String EXTRA_NO_PROOT = "linuxNoProot";
 
     /**
@@ -477,8 +479,13 @@ public final class LinuxSession {
         return programGuestPath != null && elfMachine(hostFile(context, container, programGuestPath)) == 3;
     }
 
+    /** Proot is enabled by default. Existing explicit direct-execution choices remain valid. */
+    public static boolean prootEnabled(String noProotValue) {
+        return !"1".equals(noProotValue);
+    }
+
     private static boolean noProot(Container container) {
-        if ("0".equals(container.getExtra(EXTRA_NO_PROOT))) return false;
+        if (prootEnabled(container.getExtra(EXTRA_NO_PROOT))) return false;
         return !new File(Environment.getExternalStorageDirectory(), "Winlator/linux-proot").exists();
     }
 
@@ -550,7 +557,7 @@ public final class LinuxSession {
         argv.add(program);
         for (int i = 1; i < guestCommand.length; i++) argv.add(guestCommand[i]);
         Log.i(TAG, "Session without proot: " + program);
-        return new Launch(argv.toArray(new String[0]), new String[0], home);
+        return new Launch(argv.toArray(new String[0]), new String[0], home, "direct");
     }
 
     /**

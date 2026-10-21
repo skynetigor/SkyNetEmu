@@ -44,6 +44,18 @@ public final class NativeCatalogChecks {
                     "newer bundled container index supplies the native preset over an older cached index", report);
 
         GameProfile profile = GameProfileCatalog.game(context, "beamng-drive", false);
+        for (GameProfile.Version candidate : profile.versions) {
+            check("0".equals(profile.effective(candidate, GameProfile.Platform.LINUX).extras.get("linuxNoProot")),
+                    "BeamNG " + candidate.id + " Linux game profile enables proot", report);
+            check(!profile.effective(candidate, GameProfile.Platform.WINDOWS).extras.containsKey("linuxNoProot"),
+                    "BeamNG " + candidate.id + " Windows profile has no Linux proot setting", report);
+        }
+        for (String id : new String[]{"beamng-linux-box64-performance", "beamng-040-linux-box64-r3", "beamng-linux-box64-adreno735-performance"}) {
+            String text = RegistryCache.bundledCopy(context, "containers/" + id + ".wcfg");
+            JSONObject data = ContainerProfile.parse(text).container;
+            check("0".equals(data.getJSONObject("extraData").optString("linuxNoProot")),
+                    id + " container preset explicitly enables proot", report);
+        }
         GameProfile.Version version = profile == null ? null : profile.version("0.40");
         check(version != null && version.containers.contains(NATIVE_CONFIG), "effective BeamNG 0.40 profile includes the native preset", report);
         check(LINUX_CONFIG.equals(version.preferredContainer), "BeamNG 0.40 keeps its Linux preferred configuration", report);

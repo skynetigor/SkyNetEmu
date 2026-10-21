@@ -406,8 +406,8 @@ private fun LinuxContainerEditorBody(
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var tuSysmem by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM) == "1") }
-    var noProot by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT) != "0") }
-    var bionic by remember { mutableStateOf(editing?.getExtra(LinuxBionicSession.EXTRA) == "1") }
+    var prootEnabled by remember { mutableStateOf(LinuxSession.prootEnabled(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
+    var bionic by remember { mutableStateOf(editing?.getExtra(LinuxBionicSession.EXTRA) == "1" && !prootEnabled) }
     var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
     var glVendor by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_VENDOR)?.ifEmpty { null } ?: "nvidia") }
     var glDriver by remember {
@@ -511,7 +511,7 @@ private fun LinuxContainerEditorBody(
         container.putExtra(LinuxFex.EXTRA_PRESET_VERSION, "2")
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
         container.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, if (tuSysmem) "1" else "")
-        container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (noProot) "1" else "0")
+        container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (prootEnabled) "0" else "1")
         container.putExtra(LinuxBionicSession.EXTRA, if (bionic) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor)
@@ -644,8 +644,8 @@ private fun LinuxContainerEditorBody(
                         runtimes.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
                     ) { chosenRuntimeId = it }
                 }
-                SettingToggle("Run without proot (loads faster)", noProot) { noProot = it }
-                SettingToggle("Run on Android's C library, without glibc (experimental, Box64)", bionic) { bionic = it }
+                SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = false }
+                SettingToggle("Run on Android's C library, without glibc (experimental, Box64)", bionic) { bionic = it; if (it) prootEnabled = false }
             }
         },
         EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {

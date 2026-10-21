@@ -38,6 +38,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     public int getPid() { synchronized (lock) { return pid; } }
     private Thread reaper;
     private long startedAt;
+    private volatile String executionMode = "not_built";
 
     /** The last lines the program (and proot) printed, kept for the message shown when it fails. */
     private final java.util.ArrayDeque<String> tail = new java.util.ArrayDeque<>();
@@ -86,6 +87,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         LinuxSession.Launch launch;
         try {
             launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
+            executionMode = launch.executionMode;
         }
         catch (RuntimeException e) {
             com.winlator.cmod.telemetry.ErrorReporter.report("linux_session_build", e, "skynet.linux.setup", setupDescription());
@@ -176,6 +178,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     /** What the session runs on, for a report: the emulator, the runtime, and whether it is proot-less / on Android's C library. */
     public String setupDescription() {
         return "emulator=" + container.getExtra("linuxEmulator") + " runtime=" + (runtime != null ? runtime.id : "") + " noProot=" + container.getExtra("linuxNoProot")
+                + " executionMode=" + executionMode
                 + " bionic=" + container.getExtra("linuxBionic")
                 + " emulatorBuild=" + container.getExtra("linuxEmulatorId")
                 + " box64Preset=" + container.getExtra("linuxEmulatorPreset")

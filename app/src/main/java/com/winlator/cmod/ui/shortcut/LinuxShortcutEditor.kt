@@ -55,6 +55,7 @@ import com.winlator.cmod.ui.settings.RendererDriverPicker
 import com.winlator.cmod.ui.settings.LinuxDriverPicker
 import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
 import com.winlator.cmod.ui.settings.rememberRendererDriverPicker
+import com.winlator.cmod.ui.settings.SettingToggle
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.container.FexDownloadPrompt
 import com.winlator.cmod.ui.container.ResolutionSetting
@@ -88,7 +89,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val parsed = remember(options, envVars) { LinuxLaunchOptions.parse(options, envVars) }
     val runtimes = remember { LinuxRuntime.listInstalled(context) }
     var runtimeId by remember { mutableStateOf(shortcut.getExtra(LinuxShortcutDefaults.RUNTIME)) }
-    var noProot by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_NO_PROOT)) }
+    var prootEnabled by remember { mutableStateOf(LinuxSession.prootEnabled(shortcut.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
     var fps by remember { mutableStateOf(shortcut.getExtra("graphicsFpsPreset", "0")) }
     var hud by remember { mutableStateOf(shortcut.getExtra("hudMode", "0")) }
     val cpuSelected = remember {
@@ -113,7 +114,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var noSteam by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_NO_STEAM)) }
     var gameRoot by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_ROOT)) }
     // The x86 emulator: empty follows the container. The names are the container's, so the session code is shared.
-    var bionic by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA)) }
+    var bionic by remember { mutableStateOf(if (prootEnabled) "0" else shortcut.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA)) }
     var emulatorChoice by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR)) }
     var emulatorId by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_ID)) }
     var emulatorPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_PRESET)) }
@@ -209,7 +210,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxLaunchOptions.EXTRA, text.ifEmpty { null })
         shortcut.putExtra(LinuxLaunchOptions.EXTRA_ENV_VARS, envVars.trim().ifEmpty { null })
         shortcut.putExtra(LinuxShortcutDefaults.RUNTIME, runtimeId)
-        shortcut.putExtra(LinuxSession.EXTRA_NO_PROOT, noProot)
+        shortcut.putExtra(LinuxSession.EXTRA_NO_PROOT, if (prootEnabled) "0" else "1")
         shortcut.putExtra("cpuList", cpuSelected.indices.filter { cpuSelected[it] }.joinToString(","))
         shortcut.putExtra("graphicsFpsPreset", fps)
         shortcut.putExtra("hudMode", hud)
@@ -552,7 +553,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         // A Steam game's emulator is applied by the launcher that starts the game, so it can differ from the client's session.
         EditorCategory(
-            "emulation", "x86 emulator",
+            "emulation", "Runtime and emulation",
             emulator,
             emulatorProblem
         ) {
@@ -562,7 +563,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     if (runtimeId.isNotEmpty() && runtimeId !in this) put(runtimeId, "$runtimeId (not installed)")
                 }) { runtimeId = it }
                 SettingsDivider()
-                SettingMappedChoice("Run without proot (glibc)", noProot, linkedMapOf("1" to "On", "0" to "Off")) { noProot = it }
+                SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = "0" }
                 SettingsDivider()
                 SettingMappedChoice(
                     "x86 emulator",
@@ -586,7 +587,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                         "0" to "Linux runtime (glibc)",
                         "1" to "Android's C library (experimental, Box64)"
                     )
-                ) { bionic = it }
+                ) { bionic = it; if (it == "1") prootEnabled = false }
                 if (effectiveChoice == LinuxEmulator.BOX64 || effectiveChoice == LinuxEmulator.FEX) {
                     val fex = effectiveChoice == LinuxEmulator.FEX
                     val builds = if (fex) fexBuilds else boxBuilds

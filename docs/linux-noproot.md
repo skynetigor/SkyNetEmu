@@ -1,4 +1,4 @@
-# Linux session without proot (the default)
+# Linux execution with and without proot
 
 The Linux container runs its programs (Box64, FEX, Steam) in a glibc runtime. By default that is done under proot, which stops the program at every system call that
 names a path and translates it from outside: about 100 us for a `stat` or an `open` (the call itself: about 1 us). A game that opens thousands of files while loading pays for all of them.
@@ -19,7 +19,9 @@ names a path and translates it from outside: about 100 us for a `stat` or an `op
 - a socket path (`sockaddr_un`) that gets longer than 107 bytes once translated is reached through `/proc/self/fd/<folder>/<name>`;
 - `/sys` answers EACCES where a PC answers ENOENT (`/sys/class/power_supply/BAT0`): hooks turn one into the other.
 
-It is the default. The switch "Run without proot" (Container settings > Runtime) sets the extra `linuxNoProot` ("1" on, "0" under proot); the file `Winlator/linux-proot` on the shared storage keeps every container under proot.
+Proot is enabled by default; direct execution requires an explicit opt-out. The switch "Enable proot" (container settings > Runtime or shortcut settings > Runtime and emulation) is on when proot is enabled and off for direct execution. The stored legacy extra remains `linuxNoProot` (`"0"` or an absent value enables proot, `"1"` disables it); the file `Winlator/linux-proot` on the shared storage keeps every container under proot.
+New shortcuts inherit the saved container choice unless an imported profile explicitly sets `linuxNoProot`. Existing shortcuts retain their explicit choice. All BeamNG Linux container presets and the game profile enable proot. Telemetry reports the requested `noProot` value and the actual `executionMode` (`proot`, `direct`, or `bionic`); FEX, Steam and loader fallback can require proot even when direct execution was requested.
+
 When the patched loader cannot be made for a runtime, the session falls back to proot by itself.
 
 A session that runs FEX (the container's emulator is FEX, or the program is a 32-bit x86 one) stays under proot: see [linux-fex.md](linux-fex.md).

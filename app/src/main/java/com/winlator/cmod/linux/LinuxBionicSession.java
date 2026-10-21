@@ -34,7 +34,9 @@ public final class LinuxBionicSession {
     private LinuxBionicSession() {}
 
     public static boolean enabled(Container container) {
-        return "1".equals(container.getExtra(EXTRA));
+        // An explicit proot choice takes precedence over an old experimental bionic setting.
+        return "1".equals(container.getExtra(EXTRA))
+                && !LinuxSession.prootEnabled(container.getExtra(LinuxSession.EXTRA_NO_PROOT));
     }
 
     /**
@@ -236,7 +238,7 @@ public final class LinuxBionicSession {
         for (String word : argv) dump.append("ARG ").append(word).append('\n');
         for (String entry : env.toStringArray()) dump.append("ENV ").append(entry).append('\n');
         FileUtils.writeString(new File(Environment.getExternalStorageDirectory(), "Winlator/logs/linux-bionic-launch.txt"), dump.toString());
-        return new LinuxSession.Launch(argv.toArray(new String[0]), env.toStringArray(), programDir);
+        return new LinuxSession.Launch(argv.toArray(new String[0]), env.toStringArray(), programDir, "bionic");
     }
 
     /**

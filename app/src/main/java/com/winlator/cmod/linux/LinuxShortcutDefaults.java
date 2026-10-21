@@ -53,7 +53,7 @@ public final class LinuxShortcutDefaults {
         values.put("cpuList", container.getCPUList(true));
         values.put("graphicsFpsPreset", container.getExtra("graphicsFpsPreset", "0"));
         values.put("hudMode", container.getExtra("hudMode", container.isShowFPS() ? "1" : "0"));
-        values.put(LinuxSession.EXTRA_NO_PROOT, on(container, LinuxSession.EXTRA_NO_PROOT));
+        values.put(LinuxSession.EXTRA_NO_PROOT, off(container, LinuxSession.EXTRA_NO_PROOT));
 
         values.put(SCREEN_SIZE, container.getScreenSize());
         values.put("rendererDriverId", container.getRendererDriverId());
@@ -115,6 +115,11 @@ public final class LinuxShortcutDefaults {
         Container template = new Container(-1, manager);
         template.loadData(data);
         Map<String, String> values = of(context, template);
+        // Profiles that omit execution mode must inherit the shared container's saved choice.
+        // Defaults supplied by of() must not overwrite an explicit container choice.
+        org.json.JSONObject profileExtras = data.optJSONObject("extraData");
+        if (profileExtras == null || profileExtras.optString(LinuxSession.EXTRA_NO_PROOT).isEmpty())
+            values.remove(LinuxSession.EXTRA_NO_PROOT);
         // Older native-output profiles omit the separate Android driver. Give newly imported shortcuts Auto;
         // explicit profile choices and existing shortcuts are never migrated over a user's choice.
         if (!data.has("rendererDriverId")) {
