@@ -101,7 +101,7 @@ public final class ShortcutWriter {
                 String profile = shortcutExtras.get("gameProfile");
                 if (execArgs == null || execArgs.isEmpty()) shortcutExtras.put("execArgs", "-gfx vk -nosteam");
                 if (profile == null || profile.isEmpty()) shortcutExtras.put("gameProfile", "beamng-drive");
-                EnvVars env = new EnvVars("WINEESYNC=0 WINEFSYNC=0 WINEDLLOVERRIDES=browseui=");
+                EnvVars env = new EnvVars("WINEESYNC=0 WINEFSYNC=0 WINEDLLOVERRIDES=browseui=;windows.ui=d");
                 env.putAll(shortcutExtras.get("envVars"));
                 shortcutExtras.put("envVars", env.toString());
             }

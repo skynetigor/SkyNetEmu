@@ -417,6 +417,10 @@ public class ContainerManager {
             }
         }
 
+        if (!com.winlator.cmod.linux.LinuxTestPrograms.enabled(context)) {
+            shortcuts.removeIf(shortcut -> shortcut.container.isLinux()
+                && com.winlator.cmod.linux.LinuxTestPrograms.isDiagnosticProgram(context, shortcut.path));
+        }
         shortcuts.sort(Comparator.comparing(a -> a.name));
         return shortcuts;
     }

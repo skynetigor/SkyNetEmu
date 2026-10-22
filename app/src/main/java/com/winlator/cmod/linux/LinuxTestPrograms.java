@@ -2,6 +2,7 @@ package com.winlator.cmod.linux;
 
 import android.content.Context;
 
+import com.winlator.cmod.BuildConfig;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerManager;
 import com.winlator.cmod.core.FileUtils;
@@ -30,7 +31,18 @@ public final class LinuxTestPrograms {
 
     /** True in a debug build only; a release build has neither the testers nor the demo shortcuts. */
     public static boolean enabled(Context context) {
-        return (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        return BuildConfig.LINUX_TEST_PROGRAMS
+            && (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    public static boolean isDiagnosticProgram(Context context, String path) {
+        if ("/usr/bin/glxgears".equals(path) || "/usr/bin/vkcube".equals(path)) return true;
+        File directory = new File(context.getFilesDir(), TOOLS_DIR);
+        for (String program : new String[] {GAMEPAD_TEST, GAMEPAD_TEST_X64, MOUSE_TEST, MOUSE_TEST_X64,
+                "touchtest", "touchtest_x64", "touchtest_x86", "xitouchtest", "xitouchtest_x64", "xitouchtest_x86"}) {
+            if (new File(directory, program).getPath().equals(path)) return true;
+        }
+        return false;
     }
 
     /** Puts the testers where the session can reach them and gives the container a shortcut for each. */

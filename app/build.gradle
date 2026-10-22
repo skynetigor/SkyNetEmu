@@ -138,8 +138,8 @@ android {
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
 
-        versionCode 27
-        versionName "2.0.1"
+        versionCode providers.gradleProperty('buildVersionCode').getOrElse('27').toInteger()
+        versionName providers.gradleProperty('buildVersionName').getOrElse('2.0.1')
 
         // External native build from Winlator
         externalNativeBuild {
@@ -174,14 +174,24 @@ android {
         debug {
             versionNameSuffix "-pre.3"
             buildConfigField 'String', 'COMPONENTS_BRANCH', "\"${debugComponentsBranch.get()}\""
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'true'
             minifyEnabled false
             // A separate app next to the release build: its own package, so no data or signature is shared.
+            manifestPlaceholders = [appLabel: "SkyNetEmuDebug"]
+        }
+        prerelease {
+            initWith debug
+            matchingFallbacks = ['release']
+            signingConfig signingConfigs.debug
+            versionNameSuffix providers.gradleProperty('prereleaseSuffix').getOrElse('-pre.3')
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
             manifestPlaceholders = [appLabel: "SkyNetEmu"]
         }
         release {
             // "2.0.0-stable+c8f9078": the version the app shows (Settings, About) and the apk's file name carry the name and the commit.
             versionNameSuffix "-stable+${buildCommit.get()}"
             buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
             minifyEnabled false
             signingConfig signingConfigs.debug
             crunchPngs false
@@ -254,5 +264,9 @@ androidComponents {
     def debugAppId = providers.gradleProperty("debugAppId").getOrElse("com.winlator.cmod.dev2")
     onVariants(selector().withBuildType("debug")) { variant ->
         variant.applicationId.set(debugAppId)
+    }
+    def prereleaseAppId = providers.gradleProperty("prereleaseAppId").getOrElse("com.winlator.cmod.dev2")
+    onVariants(selector().withBuildType("prerelease")) { variant ->
+        variant.applicationId.set(prereleaseAppId)
     }
 }
