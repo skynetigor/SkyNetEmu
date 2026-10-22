@@ -3,6 +3,7 @@ package com.winlator.cmod.ui.library
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
+import android.os.Bundle
 import android.os.Looper
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.MutableState
@@ -17,7 +18,7 @@ import com.winlator.cmod.ui.theme.WinZTheme
 import java.util.concurrent.atomic.AtomicInteger
 
 @Immutable
-data class LibraryItem(
+data class LibraryItem @JvmOverloads constructor(
     val id: String,
     val shortcutPath: String,
     val name: String,
@@ -31,7 +32,9 @@ data class LibraryItem(
     /** A game of the Steam client (or the client itself): the card shows a Steam badge. */
     val steam: Boolean = false,
     /** Installed version detected using the game profile, empty when unknown. */
-    val version: String = ""
+    val version: String = "",
+    val steamClient: Boolean = false,
+    val manual: Boolean = false
 )
 
 @Stable
@@ -48,7 +51,8 @@ class LibraryComposeController internal constructor(
     private val items: MutableState<List<LibraryItem>>,
     private val grid: MutableState<Boolean>,
     private val query: MutableState<String>,
-    private val selectedShortcutPath: MutableState<String?>
+    private val selectedShortcutPath: MutableState<String?>,
+    private val sessionState: Bundle
 ) {
     private val statePreferences = context.getSharedPreferences("library_compose_state", Context.MODE_PRIVATE)
     private val metadataGeneration = AtomicInteger(0)
@@ -67,10 +71,15 @@ class LibraryComposeController internal constructor(
     }
 
     fun setGridView(value: Boolean) { grid.value = value }
-    fun setSearchQuery(value: String?) { query.value = value?.trim().orEmpty() }
+    fun dispose() { metadataGeneration.incrementAndGet() }
+    fun setSearchQuery(value: String?) {
+        query.value = value.orEmpty()
+        sessionState.putString("query", query.value)
+    }
 
     fun setSelectedShortcutPath(value: String?) {
         selectedShortcutPath.value = value
+        sessionState.putString("selected_shortcut_path", value)
         statePreferences.edit().apply {
             if (value.isNullOrEmpty()) remove("selected_shortcut_path")
             else putString("selected_shortcut_path", value)
@@ -95,10 +104,12 @@ object LibraryComposeHost {
     const val ACTION_FAVORITE = "favorite"
 
     @JvmStatic
+    @JvmOverloads
     fun create(
         context: Context,
         initialGridView: Boolean,
-        callbacks: LibraryCallbacks
+        callbacks: LibraryCallbacks,
+        sessionState: Bundle = Bundle()
     ): LibraryComposeBinding {
         val activity = context as? MainActivity
         applyAppFullscreen(activity)
@@ -106,9 +117,9 @@ object LibraryComposeHost {
 
         val items = mutableStateOf<List<LibraryItem>>(emptyList())
         val grid = mutableStateOf(initialGridView)
-        val query = mutableStateOf("")
+        val query = mutableStateOf(sessionState.getString("query").orEmpty())
         val selectedShortcutPath = mutableStateOf(
-            context.getSharedPreferences("library_compose_state", Context.MODE_PRIVATE)
+            sessionState.getString("selected_shortcut_path") ?: context.getSharedPreferences("library_compose_state", Context.MODE_PRIVATE)
                 .getString("selected_shortcut_path", null)
         )
         val controller = LibraryComposeController(
@@ -116,18 +127,21 @@ object LibraryComposeHost {
             items,
             grid,
             query,
-            selectedShortcutPath
+            selectedShortcutPath,
+            sessionState
         )
         val view = ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
                 WinZTheme {
-                    LibraryRootWithoutEmptyDescription(
+                    LibraryRoot(
                         items.value,
                         grid.value,
                         query.value,
                         selectedShortcutPath,
-                        callbacks
+                        callbacks,
+                        sessionState,
+                        controller::setSearchQuery
                     )
                 }
             }
@@ -136,4 +150,20 @@ object LibraryComposeHost {
     }
 }
 
-internal enum class LibraryFilter { All, Favorites, Recent }
+internal enum class LibraryFilter { All, Favorites, Steam, Custom }
+
+internal fun restoreLibraryFilter(name: String?): LibraryFilter =
+    LibraryFilter.values().firstOrNull { it.name == name } ?: LibraryFilter.All
+
+internal fun filterLibraryItems(items: List<LibraryItem>, filter: LibraryFilter, query: String): List<LibraryItem> {
+    val matching = items.filter { item ->
+        val included = when (filter) {
+            LibraryFilter.All -> true
+            LibraryFilter.Favorites -> item.favorite
+            LibraryFilter.Steam -> item.steam
+            LibraryFilter.Custom -> item.manual && !item.steamClient
+        }
+        included && (query.isBlank() || item.name.contains(query.trim(), ignoreCase = true))
+    }
+    return matching.filter { it.steamClient } + matching.filterNot { it.steamClient }
+}

@@ -299,7 +299,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
 
     /** Adds the shortcut, or asks for another name when this one is taken: two games can share an executable's name. */
     fun addProgram(name: String, path: String, choice: ProfileChoice? = null) {
-        val extras = profileExtras(path, choice)
+        val extras = profileExtras(path, choice).orEmpty() + mapOf(
+            com.winlator.cmod.container.Shortcut.EXTRA_LIBRARY_ORIGIN to com.winlator.cmod.container.Shortcut.ORIGIN_MANUAL
+        )
         if (ContainerManager.linuxShortcutExists(container, name)) {
             nameClash = NameClash(name, path, extras)
         } else {

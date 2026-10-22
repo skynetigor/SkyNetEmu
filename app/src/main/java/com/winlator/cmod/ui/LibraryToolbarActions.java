@@ -22,11 +22,9 @@ import java.util.WeakHashMap;
 public final class LibraryToolbarActions {
     private static final int MENU_VIEW_MODE = 1;
     private static final int MENU_SEARCH = 2;
-    private static final int MENU_FILE_MANAGER = 3;
     private static final int MENU_MORE = 4;
     private static final int[] DESIRED_ORDER = {
             MENU_SEARCH,
-            MENU_FILE_MANAGER,
             MENU_VIEW_MODE,
             MENU_MORE
     };
@@ -60,10 +58,9 @@ public final class LibraryToolbarActions {
 
         Menu menu = toolbar.getMenu();
         MenuItem search = menu.findItem(MENU_SEARCH);
-        MenuItem add = menu.findItem(MENU_FILE_MANAGER);
         MenuItem view = menu.findItem(MENU_VIEW_MODE);
         MenuItem more = menu.findItem(MENU_MORE);
-        if (search == null || add == null || view == null || more == null) return;
+        if (search == null || view == null || more == null) return;
 
         if (!(more.getActionView() instanceof OrientationOverflowView)) {
             more.setActionView(new OrientationOverflowView(activity));

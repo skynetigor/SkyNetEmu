@@ -135,6 +135,7 @@ public class ShortcutsFragment extends Fragment {
     private ContainerManager manager;
     private SharedPreferences preferences;
     private LibraryComposeController libraryController;
+    private Bundle libraryState = new Bundle();
     
     private boolean isGridView = false;
     private final ArrayList<Shortcut> allShortcuts = new ArrayList<>();
@@ -150,6 +151,9 @@ public class ShortcutsFragment extends Fragment {
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null && savedInstanceState.getBundle("library_session") != null) {
+            libraryState = savedInstanceState.getBundle("library_session");
+        }
         setHasOptionsMenu(true);
 
         iconPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -170,6 +174,19 @@ public class ShortcutsFragment extends Fragment {
     }
 
     @Override
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putBundle("library_session", new Bundle(libraryState));
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (libraryController != null) libraryController.dispose();
+        libraryController = null;
+        super.onDestroyView();
+    }
+
+    @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
     }
@@ -187,6 +204,7 @@ public class ShortcutsFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        ((MainActivity) requireActivity()).refreshMainNavigation();
         // Re-publish on every app return: the background metadata pass rechecks game-profile detectors,
         // including Steam manifests and version files changed while the app was away.
         if (manager != null && libraryController != null) loadShortcutsList();
@@ -238,7 +256,8 @@ public class ShortcutsFragment extends Fragment {
                         Shortcut shortcut = findShortcut(shortcutPath);
                         if (shortcut != null) requestArtwork(shortcut, kind);
                     }
-                }
+                },
+                libraryState
         );
         libraryController = binding.getController();
         return binding.getView();
@@ -272,10 +291,12 @@ public class ShortcutsFragment extends Fragment {
             }
         });
         searchItem.setActionView(searchView);
-
-        MenuItem addItem = menu.add(0, MENU_FILE_MANAGER, 2, "Add shortcut");
-        addItem.setIcon(R.drawable.ui_ic_add);
-        addItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
+        String restoredQuery = libraryState.getString("query", "");
+        if (!restoredQuery.isEmpty()) {
+            searchItem.expandActionView();
+            searchView.setQuery(restoredQuery, false);
+            searchView.clearFocus();
+        }
 
         MainActivity activity = (MainActivity) requireActivity();
         SubMenu moreMenu = menu.addSubMenu(0, MENU_MORE, 3, "More");
@@ -510,7 +531,9 @@ public class ShortcutsFragment extends Fragment {
                     "1".equals(shortcut.getExtra("favorite", "0")),
                     parseLastRunAt(shortcut),
                     shortcut.isContainerOwned(),
-                    ""
+                    "",
+                    shortcut.container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteam(shortcut.path),
+                    Shortcut.ORIGIN_MANUAL.equals(shortcut.getExtra(Shortcut.EXTRA_LIBRARY_ORIGIN))
             ));
         }
         libraryController.setItems(items);
@@ -572,6 +595,10 @@ public class ShortcutsFragment extends Fragment {
     }
 
     private void openGameDetails(Shortcut shortcut) {
+        if (shortcut.hasFixedSettings()) {
+            runFromShortcut(shortcut);
+            return;
+        }
         getParentFragmentManager().beginTransaction()
                 .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
                 .addToBackStack(null)

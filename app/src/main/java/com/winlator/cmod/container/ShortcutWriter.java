@@ -94,6 +94,7 @@ public final class ShortcutWriter {
                     architecture == WindowsExecutable.Architecture.ARM64
                             ? WindowsLaunchPlan.serializeArguments(args) : String.join(" ", args));
             if (extras != null) shortcutExtras.putAll(extras);
+            shortcutExtras.put(Shortcut.EXTRA_LIBRARY_ORIGIN, Shortcut.ORIGIN_MANUAL);
             if (architecture == WindowsExecutable.Architecture.ARM64
                     && exe.getName().equalsIgnoreCase("BeamNG.drive.arm64.exe")) {
                 String execArgs = shortcutExtras.get("execArgs");

@@ -368,6 +368,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         if (menuItem.getItemId() == android.R.id.home) {
             Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
             if (current instanceof GameDetailFragment
+                    || ((current instanceof SettingsFragment || current instanceof ContainersFragment
+                        || current instanceof InputControlsFragment)
+                        && getSupportFragmentManager().getBackStackEntryCount() > 0)
                     || current instanceof ContainerOverviewFragment
                     || current instanceof ContainerDetailFragment
                     || current instanceof ContainerSectionFragment) {
@@ -390,9 +393,18 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     @Override
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        if (item.getItemId() == R.id.main_menu_shortcuts) {
+            for (int index = 0; index < fragmentManager.getBackStackEntryCount(); index++) {
+                if ("library_destination".equals(fragmentManager.getBackStackEntryAt(index).getName())) {
+                    fragmentManager.popBackStack("library_destination", FragmentManager.POP_BACK_STACK_INCLUSIVE);
+                    selectBottomDestination(item.getItemId());
+                    return true;
+                }
+            }
+        }
         setDetailMode(false);
         selectBottomDestination(item.getItemId());
-        FragmentManager fragmentManager = getSupportFragmentManager();
         if (fragmentManager.getBackStackEntryCount() > 0) {
             fragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
         }
@@ -441,7 +453,17 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     public void setBottomNavigationVisible(boolean visible) {
         if (bottomNavigation == null) return;
-        bottomNavigation.setVisibility((visible && !isLandscapeOrientation()) ? View.VISIBLE : View.GONE);
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        bottomNavigation.setVisibility((visible && !isLandscapeOrientation()
+                && !(current instanceof ShortcutsFragment)) ? View.VISIBLE : View.GONE);
+    }
+
+    public void refreshMainNavigation() {
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        boolean detail = current instanceof GameDetailFragment || current instanceof ContainerOverviewFragment
+                || current instanceof ContainerDetailFragment || current instanceof ContainerSectionFragment;
+        setBottomNavigationVisible(!detail);
+        setMainToolbarVisible(true);
     }
 
     public void setMainToolbarVisible(boolean visible) {
@@ -450,6 +472,21 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     }
 
     public void navigateToMainDestination(int menuItemId) {
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        if (current instanceof ShortcutsFragment) {
+            Fragment destination = null;
+            if (menuItemId == R.id.main_menu_settings) destination = new SettingsFragment();
+            else if (menuItemId == R.id.main_menu_containers) destination = new ContainersFragment();
+            else if (menuItemId == R.id.main_menu_input_controls) destination = InputControlsFragment.newInstance(selectedProfileId);
+            if (destination != null) {
+                getSupportFragmentManager().beginTransaction()
+                        .replace(R.id.FLFragmentContainer, destination)
+                        .addToBackStack("library_destination")
+                        .commit();
+                selectBottomDestination(menuItemId);
+                return;
+            }
+        }
         if (navigationView == null) return;
         MenuItem destination = navigationView.getMenu().findItem(menuItemId);
         if (destination == null) return;

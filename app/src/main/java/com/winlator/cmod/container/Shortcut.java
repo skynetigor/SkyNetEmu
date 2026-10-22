@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.UUID;
 
 public class Shortcut {
+    public static final String EXTRA_LIBRARY_ORIGIN = "libraryOrigin";
+    public static final String ORIGIN_MANUAL = "manual";
     public final Container container;
     public final String name;
     public final String path;
@@ -272,9 +274,9 @@ public class Shortcut {
                 && (com.winlator.cmod.linux.LinuxSession.isSteam(path) || com.winlator.cmod.linux.LinuxSession.isSteamGame(path));
     }
 
-    /** Every shortcut, including the Steam client, can configure its own launch settings. */
+    /** The Steam client uses the container's settings; games keep their own launch settings. */
     public boolean hasFixedSettings() {
-        return false;
+        return container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteam(path);
     }
 
     public boolean isSteamGame() {

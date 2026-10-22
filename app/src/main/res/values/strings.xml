@@ -5,6 +5,18 @@
     ]>
 <resources>
     <string name="app_name">SkyNetEmu</string>
+    <string name="library_filter_all">All</string>
+    <string name="library_filter_favorites">Favorites</string>
+    <string name="library_filter_steam">Steam</string>
+    <string name="library_filter_custom">Custom</string>
+    <string name="library_add_game">Add game</string>
+    <string name="library_open_steam">Open Steam</string>
+    <string name="library_search">Search games</string>
+    <string name="library_change_view">Change view</string>
+    <string name="library_more">More options</string>
+    <string name="library_no_games">No games yet</string>
+    <string name="library_empty_filter">No games in this section</string>
+    <string name="library_no_search_results">No games match your search</string>
     <string name="run">Run</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>

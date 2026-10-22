@@ -74,6 +74,15 @@ public final class OrientationOverflowView extends AppCompatImageButton {
         popup.setElevation(dp(10));
         popup.setClippingEnabled(true);
 
+        content.addView(createDestinationRow(getContext().getString(R.string.containers), v -> {
+            popup.dismiss();
+            activity.navigateToMainDestination(R.id.main_menu_containers);
+        }));
+        content.addView(createDestinationRow(getContext().getString(R.string.input_controls), v -> {
+            popup.dismiss();
+            activity.navigateToMainDestination(R.id.main_menu_input_controls);
+        }));
+
         content.addView(createRow(
                 "Lock screen orientation",
                 activity.isOrientationLocked(),
@@ -103,6 +112,19 @@ public final class OrientationOverflowView extends AppCompatImageButton {
         ));
 
         popup.showAsDropDown(this, -(dp(310) - getWidth()), 0);
+    }
+
+    private View createDestinationRow(String label, OnClickListener click) {
+        TextView text = new TextView(getContext());
+        text.setText(label);
+        text.setTextColor(onSurface);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        text.setPadding(dp(18), 0, dp(12), 0);
+        text.setGravity(Gravity.CENTER_VERTICAL);
+        text.setMinimumHeight(dp(56));
+        text.setFocusable(true);
+        text.setOnClickListener(click);
+        return text;
     }
 
     private View createRow(String label, boolean checked, boolean radio, OnClickListener click) {

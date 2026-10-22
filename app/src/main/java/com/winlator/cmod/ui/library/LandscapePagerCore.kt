@@ -6,6 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,7 +34,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -47,13 +48,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.winlator.cmod.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.drawerlayout.widget.DrawerLayout
-import com.winlator.cmod.MainActivity
-import com.winlator.cmod.R
-import com.winlator.cmod.ui.KeepLandscapeChromeHidden
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
@@ -76,20 +75,6 @@ internal fun LandscapePagerCore(
     val pager = rememberPagerState(initialPage = initialPage, pageCount = { items.size })
     val item = items[pager.currentPage.coerceIn(items.indices)]
     val environmentLabel = libraryEnvironmentLabel(item)
-    val activity = LocalContext.current as? MainActivity
-
-    KeepLandscapeChromeHidden(activity)
-
-    DisposableEffect(activity) {
-        val drawer = activity?.findViewById<DrawerLayout>(R.id.DrawerLayout)
-        drawer?.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
-        onDispose {
-            if (activity?.resources?.configuration?.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
-                drawer?.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED)
-            }
-        }
-    }
-
     LaunchedEffect(items.map { it.id }, selectedShortcutPath.value) {
         val selectedPage = items.indexOfFirst { it.shortcutPath == selectedShortcutPath.value }
         val targetPage = if (selectedPage >= 0) selectedPage else pager.currentPage.coerceIn(items.indices)
@@ -122,7 +107,7 @@ internal fun LandscapePagerCore(
                         .weight(1.16f)
                         .fillMaxHeight()
                 ) {
-                    val pageWidth = 214.dp
+                    val pageWidth = minOf(214.dp, maxWidth)
                     val edgePadding = 8.dp
                     val trailingPadding = (maxWidth - pageWidth - edgePadding).coerceAtLeast(edgePadding)
 
@@ -147,11 +132,13 @@ internal fun LandscapePagerCore(
                             .coerceIn(0f, 1f)
                         val cardScale = 1f - (0.30f * pageOffset)
                         val selected = pageOffset < 0.5f
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            val cardHeight = minOf(322.dp, maxHeight, maxWidth * (322f / 206f))
+                            val cardWidth = cardHeight * (206f / 322f)
                             Surface(
                                 onClick = { callbacks.onOpen(candidate.shortcutPath) },
                                 modifier = Modifier
-                                    .size(206.dp, 322.dp)
+                                    .size(cardWidth, cardHeight)
                                     .scale(cardScale),
                                 shape = RoundedCornerShape(16.dp),
                                 color = Color.Black.copy(.30f),
@@ -165,28 +152,31 @@ internal fun LandscapePagerCore(
                         }
                     }
                 }
-                Spacer(Modifier.width(26.dp))
-                Column(Modifier.weight(.9f)) {
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(.9f).verticalScroll(rememberScrollState())) {
                     Text(item.name, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(environmentLabel, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodyMedium)
                     if (item.steam) { Spacer(Modifier.size(7.dp)); SteamBadge() }
                     if (item.version.isNotBlank()) { Spacer(Modifier.size(7.dp)); GameVersionBadge(item.version) }
                     Spacer(Modifier.size(13.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Surface(
                             onClick = { callbacks.onOpen(item.shortcutPath) },
                             shape = RoundedCornerShape(11.dp),
                             color = Color.White.copy(.20f),
                             contentColor = Color.White,
                             border = BorderStroke(1.dp, Color.White.copy(.22f))
-                        ) { Text("View details", Modifier.padding(horizontal = 21.dp, vertical = 11.dp)) }
-                        Surface(
-                            onClick = { callbacks.onRun(item.shortcutPath) },
-                            modifier = Modifier.size(44.dp),
-                            shape = CircleShape,
-                            color = Color.Black.copy(.62f),
-                            contentColor = Color.White
-                        ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Play") } }
+                        ) { Text(if (item.steamClient) stringResource(R.string.library_open_steam) else "View details",
+                            Modifier.padding(horizontal = 21.dp, vertical = 11.dp)) }
+                        if (!item.steamClient) {
+                            Surface(
+                                onClick = { callbacks.onRun(item.shortcutPath) },
+                                modifier = Modifier.size(44.dp),
+                                shape = CircleShape,
+                                color = Color.Black.copy(.62f),
+                                contentColor = Color.White
+                            ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Play") } }
+                        }
                         footerActions(item)
                     }
                 }

@@ -477,6 +477,7 @@ class AddGameFragment : Fragment() {
             val extras = LinkedHashMap<String, String?>()
             extras.putAll(linuxSettings)
             if (settings != null) extras.putAll(settings.extras)
+            extras[com.winlator.cmod.container.Shortcut.EXTRA_LIBRARY_ORIGIN] = com.winlator.cmod.container.Shortcut.ORIGIN_MANUAL
             // The native BeamNG preset has an explicit cache choice; retain it over the game's
             // generic Windows default. The shortcut remains editable after it has been created.
             if (nativeArm64 && game?.game?.id == "beamng-drive") {
