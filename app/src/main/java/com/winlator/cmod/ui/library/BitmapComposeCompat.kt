@@ -340,8 +340,12 @@ internal fun CompactArtworkCard(item: LibraryItem, cb: LibraryCallbacks) {
                 )
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(item.name, Modifier.weight(1f, fill = false), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (item.steam) { Spacer(Modifier.width(8.dp)); SteamBadge() }
+                    }
                     Text(item.containerName, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    GameVersionBadge(item.version)
                 }
                 PlayCompat(item, cb, false)
                 MenuButtonCompat(item, cb, false)
@@ -370,9 +374,33 @@ internal fun CoverArtworkCard(item: LibraryItem, cb: LibraryCallbacks) {
                 Text(item.name, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(item.containerName, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodySmall)
             }
+            Column(Modifier.align(Alignment.TopStart).padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                if (item.steam) SteamBadge()
+                GameVersionBadge(item.version)
+            }
             Box(Modifier.align(Alignment.TopEnd)) { MenuButtonCompat(item, cb, true) }
             Box(Modifier.align(Alignment.BottomEnd).padding(9.dp)) { PlayCompat(item, cb, true) }
         }
+    }
+}
+
+/** Marks a game that Steam owns: Steam's dark blue with its light blue lettering. */
+@Composable
+internal fun SteamBadge(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(6.dp),
+        color = Color(0xFF1B2838),
+        border = BorderStroke(1.dp, Color(0xFF66C0F4).copy(.55f))
+    ) {
+        Text(
+            "STEAM",
+            Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            color = Color(0xFFC7D5E0),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
     }
 }
 

@@ -23,11 +23,25 @@ import java.util.EnumMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class XServer {
+    /** Linux native finger samples; no pointer state is changed. */
+    public void injectTouch(int type, int pointerId, double x, double y, long eventTime) {
+        com.winlator.cmod.xserver.extensions.XInput2Extension xi = getExtension(
+                com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+        if (xi != null) xi.touch.sample(type, pointerId, x, y, eventTime);
+    }
+    public void cancelTouches() {
+        com.winlator.cmod.xserver.extensions.XInput2Extension xi = getExtension(
+                com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+        if (xi != null) xi.touch.cancel();
+    }
+
     public enum Lockable {WINDOW_MANAGER, PIXMAP_MANAGER, DRAWABLE_MANAGER, GRAPHIC_CONTEXT_MANAGER, INPUT_DEVICE, CURSOR_MANAGER, SHMSEGMENT_MANAGER}
     public static final short VERSION = 11;
     public static final String VENDOR_NAME = "Elbrus Technologies, LLC";
     public static final Charset LATIN1_CHARSET = Charset.forName("latin1");
     public final SparseArray<Extension> extensions = new SparseArray<>();
+    /** A Linux container's desktop (a window manager and a panel run): the server stops acting as if no window manager ran. */
+    public volatile boolean desktopSession;
     /** The core fonts clients have opened, by the id they gave them. */
     public final SparseArray<XFont> fonts = new SparseArray<>();
     public final ScreenInfo screenInfo;
@@ -48,6 +62,7 @@ public class XServer {
     private WinHandler winHandler;
     private final EnumMap<Lockable, ReentrantLock> locks = new EnumMap<>(Lockable.class);
     private boolean relativeMouseMovement = false;
+    private boolean nativeMouseInput;
     private boolean simulateTouchScreen = false;
     private boolean disableMouse = false;
     private boolean isGrabbed = false;
@@ -98,12 +113,18 @@ public class XServer {
     }
 
     public boolean isRelativeMouseMovement() {
-        return relativeMouseMovement;
+        return relativeMouseMovement && !nativeMouseInput;
+    }
+
+    /** Linux uses X core/XInput events, never the Wine helper's relative-mouse channel. */
+    public void setNativeMouseInput(boolean enabled) {
+        nativeMouseInput = enabled;
+        cursorLocker.setEnabled(!isRelativeMouseMovement());
     }
 
     public void setRelativeMouseMovement(boolean relativeMouseMovement) {
-        cursorLocker.setEnabled(!relativeMouseMovement);
         this.relativeMouseMovement = relativeMouseMovement;
+        cursorLocker.setEnabled(!isRelativeMouseMovement());
     }
 
     public boolean isSimulateTouchScreen() { return simulateTouchScreen; }

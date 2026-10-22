@@ -69,10 +69,22 @@ add_library(fscache SHARED
 )
 
 target_compile_options(fscache PRIVATE -Wall -Wextra -fvisibility=hidden)
+# Keep compiler-rt's emulated TLS private as well. Its weak, default-visible
+# __emutls_get_address otherwise binds to Box64's runtime during preload. An
+# early cache call then shares TLS allocator state with later Vulkan layers;
+# loading LSFG can abort in Box64's TLS realloc with a truncated pointer tag.
+target_link_options(fscache PRIVATE "-Wl,--exclude-libs,ALL")
 
 target_link_libraries(fscache
         dl
 )
+
+# Native ARM64 Wine only: share read-only PE sections whose raw offsets cannot
+# be mapped directly. Game files and translated Windows launchers stay intact.
+add_library(wine_pe_cache SHARED winlator/pe_image_cache.c)
+target_compile_options(wine_pe_cache PRIVATE -Wall -Wextra -fvisibility=hidden)
+target_link_options(wine_pe_cache PRIVATE "-Wl,--exclude-libs,ALL")
+target_link_libraries(wine_pe_cache log dl)
 
 # Keep the Pypetto DisplayX/EGL target above untouched.  The optional Vulkan
 # renderer is a separate JNI library so selecting it cannot change the native

@@ -27,7 +27,11 @@ data class LibraryItem(
     val iconPath: String?,
     val fallbackIcon: Bitmap?,
     val favorite: Boolean,
-    val lastRunAt: Long
+    val lastRunAt: Long,
+    /** A game of the Steam client (or the client itself): the card shows a Steam badge. */
+    val steam: Boolean = false,
+    /** Installed version detected using the game profile, empty when unknown. */
+    val version: String = ""
 )
 
 @Stable
@@ -55,7 +59,7 @@ class LibraryComposeController internal constructor(
         items.value = snapshot
         val generation = metadataGeneration.incrementAndGet()
         Thread {
-            val resolved = resolveLibraryEnvironmentLabels(context, snapshot)
+            val resolved = resolveLibraryMetadata(context, snapshot)
             mainHandler.post {
                 if (metadataGeneration.get() == generation) items.value = resolved
             }

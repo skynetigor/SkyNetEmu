@@ -127,7 +127,8 @@ public abstract class WindowRequests {
         if (parent == null) throw new BadWindow(parentId);
 
         WindowManager windowManager = client.xServer.windowManager;
-        if (client.xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) == null) {
+        // A desktop has a window manager that does the reparenting itself: it wants the request done as it is.
+        if (client.xServer.desktopSession || client.xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) == null) {
             windowManager.reparentWindow(window, parent, x, y);
             return;
         }
@@ -154,7 +155,7 @@ public abstract class WindowRequests {
         Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
         if (com.winlator.cmod.xserver.XClientRequestHandler.trace) android.util.Log.d("XTrace", "MapWindow " + windowId);
-        client.xServer.windowManager.mapWindow(window);
+        client.xServer.windowManager.mapWindow(window, client);
     }
 
     public static void mapSubWindows(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
@@ -191,6 +192,9 @@ public abstract class WindowRequests {
         int atom = inputStream.readInt();
         int type = inputStream.readInt();
         byte format = inputStream.readByte();
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            android.util.Log.d("XTrace", "ChangeProperty window=" + windowId + " " + com.winlator.cmod.xserver.Atom.getName(atom));
+        }
         inputStream.skip(3);
         int length  = inputStream.readInt();
         int totalSize = length * (format >> 3);
@@ -227,6 +231,10 @@ public abstract class WindowRequests {
         int longOffset = inputStream.readInt();
         int longLength = inputStream.readInt();
         Property property = window.getProperty(atom);
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            android.util.Log.d("XTrace", "GetProperty window=" + windowId + " " + com.winlator.cmod.xserver.Atom.getName(atom)
+                    + (property == null ? " (none)" : " (" + property.data.array().length + " bytes)"));
+        }
 
         int bytesAfter = 0;
         try (XStreamLock lock = outputStream.lock()) {
@@ -252,9 +260,12 @@ public abstract class WindowRequests {
             }
             else {
                 byte[] data = property.data.array();
-                int offset = longOffset * 4;
-                int length = Math.min(data.length - offset, longLength * 4);
-                if (length < 0) throw new BadValue(longOffset);
+                // The offset and the length are counts of 32-bit words as unsigned numbers: a toolkit asks for "all of it" with a
+                // length near 2^31, which overflows when multiplied by 4 in an int.
+                long offsetBytes = (longOffset & 0xffffffffL) * 4;
+                if (offsetBytes > data.length) throw new BadValue(longOffset);
+                int offset = (int) offsetBytes;
+                int length = (int) Math.min(data.length - offsetBytes, (longLength & 0xffffffffL) * 4);
                 bytesAfter = data.length - (offset + length);
 
                 outputStream.writeByte(RESPONSE_CODE_SUCCESS);
@@ -419,28 +430,40 @@ public abstract class WindowRequests {
         if (window == null) throw new BadWindow(windowId);
         Bitmask valueMask = new Bitmask(inputStream.readShort());
         inputStream.skip(2);
-        if (!valueMask.isEmpty()) client.xServer.windowManager.configureWindow(window, valueMask, inputStream);
+        if (!valueMask.isEmpty()) client.xServer.windowManager.configureWindow(window, valueMask, inputStream, client);
+    }
+
+    public static void clearArea(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        int windowId = inputStream.readInt();
+        Window window = client.xServer.windowManager.getWindow(windowId);
+        if (window == null) throw new BadWindow(windowId);
+        short x = inputStream.readShort();
+        short y = inputStream.readShort();
+        short width = inputStream.readShort();
+        short height = inputStream.readShort();
+        window.clearArea(x, y, width & 0xffff, height & 0xffff);
     }
 
     public static void getGeometry(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int drawableId = inputStream.readInt();
         Drawable drawable =  client.xServer.drawableManager.getDrawable(drawableId);
-        if (drawable == null) throw new BadDrawable(drawableId);
         Window window = client.xServer.windowManager.getWindow(drawableId);
+        // An InputOnly window (a window manager's frame edges and corners) has no pixels but has a geometry and a depth of 0.
+        if (drawable == null && window == null) throw new BadDrawable(drawableId);
         short x = window != null ? window.getX() : 0;
         short y = window != null ? window.getY() : 0;
         short borderWidth = window != null ? window.getBorderWidth() : 0;
 
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
-            outputStream.writeByte(drawable.visual.depth);
+            outputStream.writeByte(drawable != null ? drawable.visual.depth : 0);
             outputStream.writeShort(client.getSequenceNumber());
             outputStream.writeInt(0);
             outputStream.writeInt(client.xServer.windowManager.rootWindow.id);
             outputStream.writeShort(x);
             outputStream.writeShort(y);
-            outputStream.writeShort(drawable.width);
-            outputStream.writeShort(drawable.height);
+            outputStream.writeShort(drawable != null ? drawable.width : window.getWidth());
+            outputStream.writeShort(drawable != null ? drawable.height : window.getHeight());
             outputStream.writeShort(borderWidth);
             outputStream.writePad(10);
         }

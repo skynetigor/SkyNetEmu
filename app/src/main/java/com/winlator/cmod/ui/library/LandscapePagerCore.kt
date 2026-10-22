@@ -157,7 +157,10 @@ internal fun LandscapePagerCore(
                                 color = Color.Black.copy(.30f),
                                 border = BorderStroke(if (selected) 2.dp else 1.dp, Color.White.copy(if (selected) .88f else .20f))
                             ) {
-                                PagerImage(userArtworkPath(candidate) ?: candidate.coverPath ?: candidate.bannerPath ?: candidate.iconPath, candidate.fallbackIcon, Modifier.fillMaxSize())
+                                Box {
+                                    PagerImage(userArtworkPath(candidate) ?: candidate.coverPath ?: candidate.bannerPath ?: candidate.iconPath, candidate.fallbackIcon, Modifier.fillMaxSize())
+                                    GameVersionBadge(candidate.version, Modifier.align(Alignment.TopStart).padding(10.dp))
+                                }
                             }
                         }
                     }
@@ -166,6 +169,8 @@ internal fun LandscapePagerCore(
                 Column(Modifier.weight(.9f)) {
                     Text(item.name, color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(environmentLabel, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodyMedium)
+                    if (item.steam) { Spacer(Modifier.size(7.dp)); SteamBadge() }
+                    if (item.version.isNotBlank()) { Spacer(Modifier.size(7.dp)); GameVersionBadge(item.version) }
                     Spacer(Modifier.size(13.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(

@@ -19,7 +19,7 @@ public final class Telemetry {
     public static final String PREF_ENABLED = "telemetry_enabled";
     public static final String PREF_ASKED = "telemetry_asked";
     static final String PREF_INSTALL_ID = "telemetry_install_id";
-    static final String PREF_DEBUG_ENDPOINT = "telemetry_endpoint_override";
+    static final String PREF_DEBUG_ES_HOST = "telemetry_es_host_override";
 
     /** One event waiting to be sent. Created on any thread, completed and serialized on the uploader's thread. */
     static final class Event {
@@ -50,6 +50,11 @@ public final class Telemetry {
 
     /** Called once from the Application: reads the user's choice; sends nothing and starts nothing when it is off. */
     public static void init(Context context) {
+        try { initialize(context); }
+        catch (Exception ignored) { enabled = false; }
+    }
+
+    private static void initialize(Context context) {
         app = context.getApplicationContext();
         ErrorReporter.install(app);
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(app);
@@ -66,11 +71,18 @@ public final class Telemetry {
 
     /** Whether the user has been asked (and so is not asked again). */
     public static boolean asked(Context context) {
-        return PreferenceManager.getDefaultSharedPreferences(context).getBoolean(PREF_ASKED, false);
+        try { return PreferenceManager.getDefaultSharedPreferences(context).getBoolean(PREF_ASKED, false); }
+        catch (Exception ignored) { return false; }
     }
 
     /** The user's answer. Turning it off forgets the install id and everything not yet sent. */
     public static void setEnabled(Context context, boolean on) {
+        if (!on) { enabled = false; installId = ""; }
+        try { applyEnabled(context, on); }
+        catch (Exception ignored) { if (on) enabled = false; }
+    }
+
+    private static void applyEnabled(Context context, boolean on) {
         app = context.getApplicationContext();
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(app);
         SharedPreferences.Editor edit = prefs.edit().putBoolean(PREF_ASKED, true).putBoolean(PREF_ENABLED, on);
@@ -97,12 +109,14 @@ public final class Telemetry {
 
     public static void event(String dataset, String action, String outcome, Object... fields) {
         if (!enabled) return;
-        Uploader.offer(new Event(dataset, action, outcome, fields));
+        try { Uploader.offer(new Event(dataset, action, outcome, fields)); }
+        catch (Exception ignored) {}
     }
 
     /** For the moment before the process ends: one bounded attempt (at most {@code timeoutMs}) to send what is waiting. */
     public static void flushNow(long timeoutMs) {
-        Uploader.flushNow(timeoutMs);
+        try { Uploader.flushNow(timeoutMs); }
+        catch (Exception ignored) {}
     }
 
     static String installId() {
@@ -113,8 +127,9 @@ public final class Telemetry {
         return app;
     }
 
-    static String debugEndpoint() {
-        return app == null ? "" : PreferenceManager.getDefaultSharedPreferences(app).getString(PREF_DEBUG_ENDPOINT, "");
+    static String debugEsHost() {
+        try { return app == null ? "" : PreferenceManager.getDefaultSharedPreferences(app).getString(PREF_DEBUG_ES_HOST, ""); }
+        catch (Exception ignored) { return ""; }
     }
 
     private static void started() {

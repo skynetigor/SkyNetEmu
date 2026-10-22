@@ -30,6 +30,9 @@ final class PerfSampler {
     private Handler handler;
     private boolean gpuDetected;
     private long lastCpuTotal = -1, lastCpuIdle = -1;
+    private final DevicePerformanceSnapshot deviceSnapshot = new DevicePerformanceSnapshot();
+    private int latestCpu = -1, latestGpu = -1, latestCpuTemp = -1, latestBatteryTemp = -1;
+    private int latestThermal = -1, latestCharging = -1, latestPowerSave = -1;
 
     // Totals. Written by the sampler's thread, read after stop().
     volatile int cpuTempMaxC = -1;
@@ -70,6 +73,15 @@ final class PerfSampler {
         return gpuCount == 0 ? -1 : (float) gpuSum / gpuCount;
     }
 
+    /** One current sample for Linux diagnostics; no sampler thread is started for this use. */
+    String snapshot() {
+        latestCpu = latestGpu = latestCpuTemp = latestBatteryTemp = latestThermal = latestCharging = latestPowerSave = -1;
+        try { sample(); } catch (RuntimeException ignored) {}
+        return deviceSnapshot.capture() + " cpu_pct=" + latestCpu + " gpu_pct=" + latestGpu
+                + " cpu_c=" + latestCpuTemp + " battery_c=" + latestBatteryTemp
+                + " thermal=" + latestThermal + " charging=" + latestCharging + " power_save=" + latestPowerSave;
+    }
+
     private void tick() {
         try {
             sample();
@@ -81,9 +93,11 @@ final class PerfSampler {
 
     private void sample() {
         int temp = CPUStatus.getCpuTempC();
+        latestCpuTemp = temp;
         if (temp > cpuTempMaxC) cpuTempMaxC = temp;
 
         int usage = cpuUsage();
+        latestCpu = usage;
         if (usage >= 0) {
             cpuUsageSum += usage;
             cpuUsageCount++;
@@ -93,8 +107,10 @@ final class PerfSampler {
             gpu.detect();
             gpuDetected = true;
         }
+        latestGpu = -1;
         if (!gpu.unavailable()) {
             int load = gpu.read();
+            latestGpu = load;
             if (load >= 0) {
                 gpuSum += load;
                 gpuCount++;
@@ -108,6 +124,10 @@ final class PerfSampler {
         if (battery != null) {
             int raw = battery.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0);
             int tempC = raw > 0 ? Math.round(raw / 10f) : -1;
+            latestBatteryTemp = tempC;
+            int status = battery.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            latestCharging = status < 0 ? -1 : (status == BatteryManager.BATTERY_STATUS_CHARGING
+                    || status == BatteryManager.BATTERY_STATUS_FULL ? 1 : 0);
             if (tempC > batteryTempMaxC) batteryTempMaxC = tempC;
             int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
             if (level >= 0) {
@@ -116,9 +136,13 @@ final class PerfSampler {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (power != null) thermalMax = Math.max(thermalMax, power.getCurrentThermalStatus());
+        PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        if (power != null) {
+            latestPowerSave = power.isPowerSaveMode() ? 1 : 0;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                latestThermal = power.getCurrentThermalStatus();
+                thermalMax = Math.max(thermalMax, latestThermal);
+            }
         }
     }
 

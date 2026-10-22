@@ -176,6 +176,11 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
+                <Button
+                    android:id="@+id/BTPerformanceTuning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Performance tuning" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -531,6 +536,18 @@
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
+                <Switch
+                    android:id="@+id/SWTouchpadMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:layout_marginTop="18dp"
+                    android:background="@drawable/sidebar_card"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Touchpad mode"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp" />
+
                 <LinearLayout
                     android:id="@+id/LLSidebarInputControls"
                     android:layout_width="match_parent"

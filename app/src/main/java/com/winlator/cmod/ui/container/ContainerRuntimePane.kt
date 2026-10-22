@@ -23,6 +23,7 @@ import com.winlator.cmod.R
 import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.StringUtils
+import com.winlator.cmod.core.WineInfo
 import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.ui.settings.DriverOption
 import com.winlator.cmod.ui.settings.SettingChoice
@@ -49,6 +50,7 @@ internal fun ContainerRuntimePane(
 ) {
     val context = LocalContext.current
     val container = remember(containerId) { ContainerManager(context).getContainerById(containerId) } ?: return
+    val nativeArm64 = container.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY) == WineInfo.NATIVE_ARM64_CONTAINER_VALUE
     val arm64 = remember(container.getWineVersion()) { container.getWineVersion().contains("arm64ec", true) }
     val screenEntries = remember { context.resources.getStringArray(R.array.screen_size_entries).toList() }
     val graphicsEntries = remember { context.resources.getStringArray(R.array.graphics_driver_entries).toList() }
@@ -218,10 +220,14 @@ internal fun ContainerRuntimePane(
                 SettingsDivider(); SettingText("GPU Name", gpuName) { gpuName = it; saveGraphics("gpuName", it) }
                 SettingsDivider(); SettingText("Blacklisted Extensions", blacklistedExtensions, 2) { blacklistedExtensions = it; saveGraphics("blacklistedExtensions", it.replace(" ", "")) }
             }
-            ContainerLsfgCard(container)
+            if (!nativeArm64) ContainerLsfgCard(container)
         }
 
-        ContainerOverviewComposeHost.SECTION_COMPATIBILITY -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ContainerOverviewComposeHost.SECTION_COMPATIBILITY -> if (nativeArm64) SettingsCard {
+            Text("Windows ARM64 native", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(14.dp))
+            Text("${container.wineVersion}\nVulkan and Wine built-in graphics libraries.",
+                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+        } else Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
                 val shownWrapper = wrapperEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(wrapper, true) } ?: wrapper
                 SettingChoice("DX Wrapper", shownWrapper, wrapperEntries) { wrapper = StringUtils.parseIdentifier(it); container.setDXWrapper(wrapper); container.saveData() }

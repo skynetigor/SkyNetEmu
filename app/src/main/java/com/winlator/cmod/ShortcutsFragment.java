@@ -187,6 +187,8 @@ public class ShortcutsFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        // Re-publish on every app return: the background metadata pass rechecks game-profile detectors,
+        // including Steam manifests and version files changed while the app was away.
         if (manager != null && libraryController != null) loadShortcutsList();
     }
 
@@ -506,7 +508,9 @@ public class ShortcutsFragment extends Fragment {
                     iconPath,
                     shortcut.icon,
                     "1".equals(shortcut.getExtra("favorite", "0")),
-                    parseLastRunAt(shortcut)
+                    parseLastRunAt(shortcut),
+                    shortcut.isContainerOwned(),
+                    ""
             ));
         }
         libraryController.setItems(items);
@@ -729,6 +733,17 @@ public class ShortcutsFragment extends Fragment {
             });
         }
         else if (LibraryComposeHost.ACTION_CLONE.equals(action)) {
+            if (shortcut.container.isLinux()) {
+                String name = com.winlator.cmod.container.ShortcutWriter.freeName(shortcut.container, shortcut.name);
+                File copy = ContainerManager.linuxShortcutFile(shortcut.container, name);
+                if (FileUtils.copy(shortcut.file, copy)) {
+                    Shortcut cloned = new Shortcut(shortcut.container, copy);
+                    cloned.putExtra("uuid", null);
+                    cloned.saveData();
+                    loadShortcutsList();
+                }
+                return;
+            }
             ContainerManager containerManager = new ContainerManager(context);
             ArrayList<Container> containers = containerManager.getWineContainers();
             AlertDialog.Builder builder = new AlertDialog.Builder(context);
@@ -762,7 +777,9 @@ public class ShortcutsFragment extends Fragment {
 
         if (uriString != null) {
             Uri folderUri = Uri.parse(uriString);
-            DocumentFile pickedDir = DocumentFile.fromTreeUri(requireContext(), folderUri);
+            DocumentFile pickedDir = "file".equalsIgnoreCase(folderUri.getScheme())
+                    ? DocumentFile.fromFile(new File(folderUri.getPath()))
+                    : DocumentFile.fromTreeUri(requireContext(), folderUri);
             if (pickedDir == null || !pickedDir.canWrite()) return;
             shortcutsDir = new File(FileUtils.getFilePathFromUri(requireContext(), folderUri));
         } else {

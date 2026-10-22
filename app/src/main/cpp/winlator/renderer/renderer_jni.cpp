@@ -692,3 +692,11 @@ Java_com_winlator_cmod_widget_XServerView_nativeCompositeRedirect(JNIEnv *env, j
         }
     }
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_XServerView_nativeSetForceCursor(JNIEnv *env, jobject thiz, jboolean force) {
+    renderer.forceCursor = force;
+    displayX.forceCursor = force;
+    if (!xserver.isDisplayX()) renderer.requestRenderer();
+    else displayX.queueEvent([] { displayX.showCursor(); displayX.requestCursorUpdate(); });
+}

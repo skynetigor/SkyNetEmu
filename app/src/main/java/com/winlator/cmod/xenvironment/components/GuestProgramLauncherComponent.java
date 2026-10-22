@@ -23,6 +23,7 @@ import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.ProcessHelper;
+import com.winlator.cmod.core.ProgramOutput;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.fexcore.FEXCoreManager;
@@ -48,7 +49,10 @@ import java.util.ArrayList;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
-    private static int pid = -1;
+    private String[] nativeArm64Arguments;
+    public void setNativeArm64Arguments(String[] arguments) { nativeArm64Arguments = arguments.clone(); }
+    private static volatile int pid = -1;
+    public int getPid() { return pid; }
     private String[] bindingPaths;
     private EnvVars envVars;
     private WineInfo wineInfo;
@@ -60,6 +64,18 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private final ContentProfile wineProfile;
     private Container container;
     private final Shortcut shortcut;
+    private final ProgramOutput output = new ProgramOutput();
+    private final java.util.concurrent.atomic.AtomicBoolean terminationDelivered = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean stopping;
+    private long startedAt;
+
+    public ProgramOutput getOutput() { return output; }
+    public long secondsRunning() { return (System.nanoTime() - startedAt) / 1_000_000_000L; }
+
+    private void onProcessExit(int status) {
+        if (!stopping && terminationDelivered.compareAndSet(false, true) && terminationCallback != null)
+            terminationCallback.call(status);
+    }
 
     public void setWineInfo(WineInfo wineInfo) {
         this.wineInfo = wineInfo;
@@ -201,13 +217,29 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void start() {
-        synchronized (lock) {
-            if (wineInfo.isArm64EC())
-                extractEmulatorsDlls();
-            else
-                extractBox64Files();
-            checkDependencies();
-            pid = execGuestProgram();
+        stopping = false;
+        terminationDelivered.set(false);
+        output.clear();
+        startedAt = System.nanoTime();
+        try {
+            int launchedPid;
+            synchronized (lock) {
+                if (nativeArm64Arguments == null) {
+                    if (wineInfo.isArm64EC()) extractEmulatorsDlls();
+                    else extractBox64Files();
+                }
+                checkDependencies();
+                launchedPid = execGuestProgram();
+                pid = launchedPid;
+            }
+            if (launchedPid == -1 && !terminationDelivered.get()) {
+                output.failedToStart("The launcher process could not be created. Check the runtime and emulator installation.");
+                onProcessExit(-1);
+            }
+        } catch (RuntimeException error) {
+            output.failedToStart(error.getClass().getSimpleName() + ": " + error.getMessage());
+            Log.e("GuestProgramLauncher", "Unable to start Wine/Proton", error);
+            onProcessExit(-1);
         }
     }
 
@@ -241,6 +273,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void stop() {
+        stopping = true;
         synchronized (lock) {
             if (pid != -1) {
                 Process.killProcess(pid);
@@ -331,12 +364,14 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         EnvVars execEnvVars = new EnvVars();
 
-        addBox64EnvVars(execEnvVars, enableBox64Logs);
-        execEnvVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        if (nativeArm64Arguments == null) {
+            addBox64EnvVars(execEnvVars, enableBox64Logs);
+            execEnvVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        }
 
         String renderer = GPUInformation.getRenderer(null, null);
 
-        if (renderer.contains("Mali")) 
+        if (nativeArm64Arguments == null && renderer.contains("Mali"))
             execEnvVars.put("BOX64_MMAP32", "0");
 
         if (execEnvVars.get("BOX64_MMAP32").equals("1") && !wineInfo.isArm64EC()) {
@@ -519,6 +554,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             execEnvVars.putAll(this.envVars);
         }
 
+        // Run after user environment merging so unrelated preloads are preserved
+        // and SKY_PE_IMAGE_CACHE=0 remains an effective per-shortcut escape hatch.
+        com.winlator.cmod.core.WinePeImageCache.prepare(context, execEnvVars, nativeArm64Arguments != null);
+
         boolean useDisplayX = shortcut != null
                 ? shortcut.getUseDisplayX()
                 : container != null && container.getUseDisplayX();
@@ -553,7 +592,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             }
         }
 
-        LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
+        // The bundled LSFG injection DLL is x64; native Vulkan needs no PE graphics wrapper.
+        if (nativeArm64Arguments == null) LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
 
         String emulator = container.getEmulator();
         if (shortcut != null)
@@ -561,7 +601,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         String command = "";
         String overriddenCommand = execEnvVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
-        if (!overriddenCommand.isEmpty()) {
+        if (nativeArm64Arguments != null) {
+            // Native games use the Android ARM64 Wine loader and matching helper. No translator is provisioned.
+            execEnvVars.remove("HODLL");
+            execEnvVars.remove("WINE_NO_DUPLICATE_EXPLORER");
+            execEnvVars.remove("GUEST_PROGRAM_LAUNCHER_COMMAND");
+        } else if (!overriddenCommand.isEmpty()) {
             String[] parts = overriddenCommand.split(";");
             for (String part : parts)
                 command += part + " ";
@@ -583,14 +628,20 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             FileUtils.chmod(box64File, 0755);
         }
 
-        return ProcessHelper.exec(command, execEnvVars.toStringArray(), rootDir, (status) -> {
+        String[] argv;
+        if (nativeArm64Arguments != null) {
+            argv = nativeArm64Arguments.clone();
+            argv[0] = winePath + "/wine";
+            Log.i("WindowsLaunch", "Native ARM64: " + java.util.Arrays.toString(argv));
+        } else argv = ProcessHelper.splitCommand(command);
+        return ProcessHelper.exec(argv, execEnvVars.toStringArray(), rootDir, (status) -> {
             synchronized (lock) {
                 pid = -1;
             }
 
-            if (terminationCallback != null)
-                terminationCallback.call(status);
-        });
+            Log.i("GuestProgramLauncher", "Wine/Proton launcher exited with status " + status);
+            onProcessExit(status);
+        }, output::append);
     }
 
     private void addBox64EnvVars(EnvVars envVars, boolean enableLogs) {

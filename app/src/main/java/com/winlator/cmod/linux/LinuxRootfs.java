@@ -86,9 +86,12 @@ public final class LinuxRootfs {
 
     /** Name of a Linux container that is set to use this root filesystem, or null. */
     public static String containerUsing(Context context, String id) {
-        for (Container container : new ContainerManager(context).getContainers()) {
+        ContainerManager manager = new ContainerManager(context);
+        for (Container container : manager.getContainers()) {
             if (container.isLinux() && id.equals(container.getExtra(LinuxEmulator.EXTRA_ROOTFS))) return container.getName();
         }
+        for (com.winlator.cmod.container.Shortcut shortcut : manager.loadShortcuts())
+            if (shortcut.container.isLinux() && id.equals(shortcut.getExtra(LinuxEmulator.EXTRA_ROOTFS))) return shortcut.name;
         return null;
     }
 

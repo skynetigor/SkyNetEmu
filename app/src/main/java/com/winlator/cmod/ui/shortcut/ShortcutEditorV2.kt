@@ -86,6 +86,7 @@ import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.core.GameSaveManager
 import com.winlator.cmod.core.OpenGLDriverDefaults
 import com.winlator.cmod.core.StringUtils
+import com.winlator.cmod.core.WineInfo
 import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.inputcontrols.InputControlsManager
 import com.winlator.cmod.midi.MidiManager
@@ -160,6 +161,7 @@ private data class ShortcutCategoryItemV2(val label: String, val icon: ImageVect
 
 private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     val container: Container = shortcut.container
+    val nativeArm64 = container.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY) == WineInfo.NATIVE_ARM64_CONTAINER_VALUE
     val arm64 = container.getWineVersion().contains("arm64ec", true)
 
     var name by mutableStateOf(shortcut.name)
@@ -218,8 +220,9 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var wineRenderer by mutableStateOf(readConfig(wrapperConfig, "renderer", ',').ifBlank { "vulkan" })
     var videoMemory by mutableStateOf(readConfig(wrapperConfig, "videoMemorySize", ',').ifBlank { "2048" })
 
-    private val emulatorRaw = StringUtils.parseIdentifier(shortcut.getExtra("emulator", container.getEmulator()))
-    var emulator by mutableStateOf(if (!arm64) "Box64" else if (emulatorRaw.equals("FEXCore", true)) "FEXCore" else "WOWBox64")
+    // Native ARM64 containers intentionally have no x86 emulator (the inherited value can be null).
+    private val emulatorRaw = if (nativeArm64) "" else StringUtils.parseIdentifier(shortcut.getExtra("emulator", container.getEmulator()).orEmpty())
+    var emulator by mutableStateOf(if (nativeArm64) "" else if (!arm64) "Box64" else if (emulatorRaw.equals("FEXCore", true)) "FEXCore" else "WOWBox64")
     var fexVersion by mutableStateOf(shortcut.getExtra("fexcoreVersion", container.getFEXCoreVersion().orEmpty()))
     var boxVersion by mutableStateOf(shortcut.getExtra("box64Version", container.getBox64Version().orEmpty()))
     var fexPreset by mutableStateOf(shortcut.getExtra("fexcorePreset", container.getFEXCorePreset()))
@@ -424,7 +427,11 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         state.syncOpenGlEnvironment()
     }
     val manager = remember { ContainerManager(context) }
-    val containers = remember { manager.wineContainers.toList() }
+    val containers = remember {
+        manager.wineContainers.filter {
+            (it.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY) == WineInfo.NATIVE_ARM64_CONTAINER_VALUE) == state.nativeArm64
+        }
+    }
 
     val runtimeOptions by produceState<List<WineRuntimeOption>>(emptyList()) {
         value = loadWineRuntimeOptions(context)
@@ -432,7 +439,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
     fun environmentLabel(container: Container): String {
         val runtime = runtimeOptions.firstOrNull { it.id == container.wineVersion }?.label
             ?: container.wineVersion
-        return "${container.name} · $runtime"
+        return "${container.name} · $runtime" + if (state.nativeArm64) " · ARM64 native" else ""
     }
 
     val screenEntries = remember { context.resources.getStringArray(R.array.screen_size_entries).toList() }
@@ -523,6 +530,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         ShortcutCategoryItemV2("Compatibility", Icons.Outlined.Tune),
         ShortcutCategoryItemV2("Input", Icons.Outlined.Gamepad),
         ShortcutCategoryItemV2("Environment", Icons.Outlined.Terminal),
+        ShortcutCategoryItemV2("Performance tuning", Icons.Outlined.Tune),
         ShortcutCategoryItemV2("Advanced", Icons.Outlined.Terminal)
     )
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
@@ -845,6 +853,10 @@ private fun ShortcutCategoryV2(
     context: Context
 ) {
     when (category) {
+        "Performance tuning" -> {
+            val tuning = remember(s.shortcut) { com.winlator.cmod.ui.settings.PerformanceTuningEditorState(s.shortcut) }
+            com.winlator.cmod.ui.settings.PerformanceTuningGameCard(tuning) { tuning.saveTo(s.shortcut); s.shortcut.saveData() }
+        }
         "General" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard { SettingText("Name", s.name) { s.name = it } }
             SettingsCard {
@@ -918,8 +930,10 @@ private fun ShortcutCategoryV2(
                     s.winlatorHudMode = hudEntries.indexOf(it).coerceAtLeast(0)
                     s.extra("hudMode", s.winlatorHudMode.toString())
                 }
-                SettingsDivider()
-                SettingToggle("DXVK HUD", s.dxvkHud) { s.updateDxvkHud(it) }
+                if (!s.nativeArm64) {
+                    SettingsDivider()
+                    SettingToggle("DXVK HUD", s.dxvkHud) { s.updateDxvkHud(it) }
+                }
             }
             SettingsCard {
                 val cacheEntries = listOf("Use container setting", "On", "Off")
@@ -1079,7 +1093,11 @@ private fun ShortcutCategoryV2(
             }
         }
 
-        "Compatibility" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        "Compatibility" -> if (s.nativeArm64) SettingsCard {
+            Text("Windows ARM64 native", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(14.dp))
+            Text("${s.container.wineVersion}\nVulkan and Wine built-in graphics libraries.",
+                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+        } else Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
                 val shown = wrapperEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.wrapper, true) } ?: s.wrapper
                 SettingChoice("DX Wrapper", shown, wrapperEntries) { s.wrapper = StringUtils.parseIdentifier(it); s.extra("dxwrapper", s.wrapper) }
@@ -1223,10 +1241,10 @@ private fun ShortcutCategoryV2(
                     s.sharpnessDenoise = it; s.extra("sharpnessDenoise", it)
                 }
             }
-            ExecArgumentsEditorV2(s.execArgs) {
+            ExecArgumentsEditorV2(s.execArgs, !s.nativeArm64) {
                 s.execArgs = it; s.extra("execArgs", it.ifBlank { null })
             }
-            SettingsCard {
+            if (!s.nativeArm64) SettingsCard {
                 shortcutComponentRowsV2.forEachIndexed { index, (key, label) ->
                     val entries = listOf("Builtin (Wine)", "Native (Windows)")
                     val selected = entries[(s.components[key] ?: 0).coerceIn(0, 1)]
@@ -1257,7 +1275,7 @@ private fun SharpnessSliderV2(label: String, value: String, onChanged: (String) 
 }
 
 @Composable
-private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
+private fun ExecArgumentsEditorV2(value: String, showDirectXPresets: Boolean, onChanged: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     SettingsCard {
         Row(
@@ -1273,7 +1291,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp)
             )
-            Box {
+            if (showDirectXPresets) Box {
                 TextButton(onClick = { open = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                     execArgumentPresetsV2.forEach { arg ->

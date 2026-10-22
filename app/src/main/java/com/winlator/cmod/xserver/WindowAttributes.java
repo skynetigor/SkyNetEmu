@@ -22,6 +22,11 @@ public class WindowAttributes {
     public enum WindowClass {COPY_FROM_PARENT, INPUT_OUTPUT, INPUT_ONLY}
     public enum BitGravity {FORGET, NORTH_WEST, NORTH, NORTH_EAST, WEST, CENTER, EAST, SOUTH_WEST, SOUTH, SOUTH_EAST, STATIC}
     public enum WinGravity {UNMAP, NORTH_WEST, NORTH, NORTH_EAST, WEST, CENTER, EAST, SOUTH_WEST, SOUTH, SOUTH_EAST, STATIC}
+    /** What ClearArea paints: a pixmap tiled over the window, or a colour; none when both are unset. */
+    private Drawable backgroundTile;
+    private boolean backgroundParentRelative = false;
+    private boolean hasBackgroundPixel = false;
+    private int backgroundPixel = 0;
     private int backingPixel = 0;
     private int backingPlanes = 1;
     private BackingStore backingStore = BackingStore.NOT_USEFUL;
@@ -39,6 +44,22 @@ public class WindowAttributes {
 
     public WindowAttributes(Window window) {
         this.window = window;
+    }
+
+    public Drawable getBackgroundTile() {
+        return backgroundTile;
+    }
+
+    public boolean isBackgroundParentRelative() {
+        return backgroundParentRelative;
+    }
+
+    public boolean hasBackgroundPixel() {
+        return hasBackgroundPixel;
+    }
+
+    public int getBackgroundPixel() {
+        return backgroundPixel;
     }
 
     public int getBackingPixel() {
@@ -114,8 +135,20 @@ public class WindowAttributes {
         for (int index : valueMask) {
             switch (index) {
                 case FLAG_BACKGROUND_PIXEL:
-                    window.getContent().fillColor(inputStream.readInt());
+                    backgroundPixel = inputStream.readInt();
+                    hasBackgroundPixel = true;
+                    backgroundTile = null;
+                    backgroundParentRelative = false;
+                    window.getContent().fillColor(backgroundPixel);
                     break;
+                case FLAG_BACKGROUND_PIXMAP: {
+                    int pixmapId = inputStream.readInt();
+                    backgroundParentRelative = pixmapId == 1;
+                    Pixmap pixmap = pixmapId > 1 ? client.xServer.pixmapManager.getPixmap(pixmapId) : null;
+                    backgroundTile = pixmap != null ? pixmap.drawable : null;
+                    hasBackgroundPixel = false;
+                    break;
+                }
                 case FLAG_BACKING_PIXEL:
                     backingPixel = inputStream.readInt();
                     break;
@@ -146,7 +179,6 @@ public class WindowAttributes {
                 case FLAG_CURSOR:
                     cursor = client.xServer.cursorManager.getCursor(inputStream.readInt());
                     break;
-                case FLAG_BACKGROUND_PIXMAP:
                 case FLAG_BORDER_PIXMAP:
                 case FLAG_BORDER_PIXEL:
                 case FLAG_COLORMAP:

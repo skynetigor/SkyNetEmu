@@ -351,6 +351,7 @@ public class InputControlsView extends View {
     }
 
     public synchronized void setProfile(ControlsProfile profile) {
+        cancelNativeInput();
         if (profile != null) {
             this.profile = profile;
             deselectAllElements();
@@ -363,6 +364,7 @@ public class InputControlsView extends View {
     }
 
     public void setShowTouchscreenControls(boolean showTouchscreenControls) {
+        if (!showTouchscreenControls && touchpadView != null && touchpadView.isNativeTouch()) cancelNativeInput();
         this.showTouchscreenControls = showTouchscreenControls;
     }
 
@@ -423,7 +425,14 @@ public class InputControlsView extends View {
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (touchpadView != null && touchpadView.isNativeTouch()) cancelNativeInput();
+    }
+
+    @Override
     protected void onDetachedFromWindow() {
+        cancelNativeInput();
         if (mouseMoveTimer != null) {
             mouseMoveTimer.cancel();
             mouseMoveTimer = null;
@@ -579,9 +588,47 @@ public class InputControlsView extends View {
     }
 
 
+    private final java.util.Map<Integer, java.util.List<ControlElement>> nativeControls = new java.util.HashMap<>();
+    public void cancelNativeInput() {
+        for (java.util.Map.Entry<Integer, java.util.List<ControlElement>> entry : nativeControls.entrySet())
+            for (ControlElement element : entry.getValue()) element.handleTouchUp(entry.getKey());
+        nativeControls.clear();
+        if (touchpadView != null) touchpadView.cancelNativeTouches();
+    }
+    private boolean routeNativeInput(MotionEvent event) {
+        int action = event.getActionMasked(), index = event.getActionIndex(), id = event.getPointerId(index);
+        if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_DOWN) cancelNativeInput();
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            java.util.List<ControlElement> captured = new java.util.ArrayList<>();
+            if (profile != null && showTouchscreenControls) for (ControlElement element : profile.getElements())
+                if (element.handleTouchDown(id, event.getX(index), event.getY(index))) captured.add(element);
+            if (!captured.isEmpty()) {
+                nativeControls.put(id, captured);
+                if (preferences.getBoolean("touchscreen_haptics_enabled", true)) performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+            }
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            for (int i = 0; i < event.getPointerCount(); i++) {
+                java.util.List<ControlElement> captured = nativeControls.get(event.getPointerId(i));
+                if (captured != null) for (ControlElement element : captured)
+                    element.handleTouchMove(event.getPointerId(i), event.getX(i), event.getY(i));
+            }
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
+            java.util.List<ControlElement> captured = nativeControls.get(id);
+            if (captured != null) for (ControlElement element : captured) element.handleTouchUp(id);
+        }
+        touchpadView.onNativeTouchEvent(event, nativeControls.keySet());
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) nativeControls.remove(id);
+        return true;
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
 
+        if (!editMode && touchpadView != null && touchpadView.isNativeTouch()
+                && event.getToolType(event.getActionIndex()) != MotionEvent.TOOL_TYPE_STYLUS) {
+            updateTouchscreenTimeout(event);
+            return routeNativeInput(event);
+        }
         boolean hapticsEnabled = preferences.getBoolean("touchscreen_haptics_enabled", true);
 
         // Do not let the auto-hide runnable hide controls while a finger is still down.

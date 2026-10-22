@@ -88,6 +88,7 @@ public final class LinuxRuntimeInstaller {
     public static synchronized String install(Context context, LinuxRuntimeCatalog.Entry entry, Progress progress) {
         // A driver is a zip that the driver manager unpacks, not a tarball.
         if (LinuxPackages.KIND_DRIVER.equals(entry.kind)) return installDriver(context, entry, progress);
+        if (LinuxPackages.KIND_DESKTOP.equals(entry.kind)) return installDesktop(context, entry, progress);
         cancelRequested = false;
         installing = true;
         File runtimes = LinuxPackages.baseDir(context, entry.kind);
@@ -133,12 +134,94 @@ public final class LinuxRuntimeInstaller {
             return CANCELLED;
         }
         catch (Exception e) {
-            Log.e(TAG, "Install failed", e);
+            LinuxFail.e(TAG, "Install failed", e);
             return "Install failed: " + e.getMessage();
         }
         finally {
             installing = false;
             if (staging.exists()) FileUtils.delete(staging);
+        }
+    }
+
+    /**
+     * The desktop is a tarball of files that the runtimes lack. It is downloaded and checked like a runtime, unpacked on the
+     * side, and its files are added to every installed runtime's root where nothing of that name is yet: nothing the runtime
+     * has is replaced. The files added are listed in the runtime's {@code .desktop-<id>.files}, so they can be taken out again.
+     */
+    private static String installDesktop(Context context, LinuxRuntimeCatalog.Entry entry, Progress progress) {
+        cancelRequested = false;
+        installing = true;
+        File runtimes = LinuxPackages.baseDir(context, LinuxPackages.KIND_RUNTIME);
+        File staging = new File(runtimes, ".desktop-" + entry.id + ".new");
+        File part = partFile(context, entry);
+        try {
+            if (LinuxRuntime.listInstalled(context).isEmpty()) return "Install a Linux runtime first";
+            downloadDir(context).mkdirs();
+            long needed = entry.size * 6 - part.length();
+            if (entry.size > 0 && context.getFilesDir().getUsableSpace() < needed) {
+                return "Not enough free space: about " + (needed >> 20) + " MB needed";
+            }
+            boolean local = entry.url.startsWith("file:");
+            if (local) {
+                // A debug build's bundle from shared storage (see LinuxDesktop): no download, no checksum.
+                if (!FileUtils.copy(new File(java.net.URI.create(entry.url)), part)) return "Cannot read the bundle";
+            }
+            else {
+                if (!download(entry, part, progress)) return "Download failed";
+                progress.onProgress(Phase.VERIFY, 0);
+                if (!entry.sha256.equalsIgnoreCase(sha256(part, progress))) {
+                    part.delete();
+                    return "Checksum mismatch";
+                }
+            }
+            FileUtils.delete(staging);
+            if (!staging.mkdirs()) return "Cannot create " + staging;
+            extract(part, staging, progress);
+            for (LinuxRuntime.Installed runtime : LinuxRuntime.listInstalled(context)) {
+                File root = LinuxRuntime.rootDir(context, runtime.id);
+                java.util.List<String> added = new java.util.ArrayList<>();
+                addMissingFiles(staging, staging, root, added);
+                FileUtils.writeString(new File(root, ".desktop-" + entry.id + ".files"), String.join("\n", added) + "\n");
+            }
+            part.delete();
+            return null;
+        }
+        catch (CancelledException e) {
+            return CANCELLED;
+        }
+        catch (Exception e) {
+            LinuxFail.e(TAG, "Desktop install failed", e);
+            return "Install failed: " + e.getMessage();
+        }
+        finally {
+            installing = false;
+            if (staging.exists()) FileUtils.delete(staging);
+        }
+    }
+
+    /** Copies what is in {@code dir} (a part of {@code staging}) to the same place under {@code root}, where there is no file yet. */
+    private static void addMissingFiles(File staging, File dir, File root, java.util.List<String> added) throws IOException {
+        File[] children = dir.listFiles();
+        if (children == null) return;
+        String base = staging.getPath() + File.separator;
+        for (File child : children) {
+            String relative = child.getPath().substring(base.length());
+            java.nio.file.Path from = child.toPath();
+            java.nio.file.Path to = new File(root, relative).toPath();
+            boolean isLink = java.nio.file.Files.isSymbolicLink(from);
+            if (!isLink && child.isDirectory()) {
+                if (!java.nio.file.Files.exists(to, java.nio.file.LinkOption.NOFOLLOW_LINKS)) java.nio.file.Files.createDirectories(to);
+                addMissingFiles(staging, child, root, added);
+                continue;
+            }
+            if (java.nio.file.Files.exists(to, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue;
+            java.nio.file.Files.createDirectories(to.getParent());
+            if (isLink) java.nio.file.Files.createSymbolicLink(to, java.nio.file.Files.readSymbolicLink(from));
+            else {
+                java.nio.file.Files.copy(from, to, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+                FileUtils.chmod(to.toFile(), child.canExecute() ? 0755 : 0644);
+            }
+            added.add(relative);
         }
     }
 
@@ -164,7 +247,7 @@ public final class LinuxRuntimeInstaller {
             return CANCELLED;
         }
         catch (Exception e) {
-            Log.e(TAG, "Driver install failed", e);
+            LinuxFail.e(TAG, "Driver install failed", e);
             return "Install failed: " + e.getMessage();
         }
         finally {
@@ -192,7 +275,7 @@ public final class LinuxRuntimeInstaller {
             }
             boolean append = code == 206 && existing > 0;
             if (code != 200 && code != 206) {
-                Log.e(TAG, "Download answered HTTP " + code);
+                LinuxFail.e(TAG, "Download answered HTTP " + code);
                 return false;
             }
             if (!append) existing = 0;
@@ -216,7 +299,7 @@ public final class LinuxRuntimeInstaller {
                 }
             }
             if (entry.size > 0 && done < entry.size) {
-                Log.e(TAG, "Download ended early at " + done + " of " + entry.size);
+                LinuxFail.e(TAG, "Download ended early at " + done + " of " + entry.size);
                 return false;
             }
             return true;
@@ -225,7 +308,7 @@ public final class LinuxRuntimeInstaller {
             throw e;
         }
         catch (IOException e) {
-            Log.e(TAG, "Download interrupted", e);
+            LinuxFail.e(TAG, "Download interrupted", e);
             return false;
         }
         finally {

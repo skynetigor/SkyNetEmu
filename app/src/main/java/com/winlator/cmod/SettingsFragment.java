@@ -104,8 +104,6 @@ public class SettingsFragment extends Fragment {
     boolean isDarkMode;
 
     private static final String ARG_LEGACY_SETTINGS = "legacy_settings";
-    private static final int REQUEST_CODE_WINLATOR_PATH = 1002;
-    private static final int REQUEST_CODE_SHORTCUT_EXPORT_PATH = 1003;
     private static final int REQUEST_CODE_INSTALL_SOUNDFONT = 1001;
     private static final int REQUEST_CODE_IMPORT_BOX64_PRESET = 1004;
     private static final int REQUEST_CODE_IMPORT_FEXCORE_PRESET = 1005;
@@ -115,6 +113,8 @@ public class SettingsFragment extends Fragment {
         super.onCreate(savedInstanceState);
         setHasOptionsMenu(false);
         preloaderDialog = new PreloaderDialog(getActivity());
+        registerFolderSelection("winlator_path_uri", R.id.TVWinlatorPath);
+        registerFolderSelection("shortcuts_export_path_uri", R.id.TVShortcutExportPath);
     }
 
     @Override
@@ -206,10 +206,7 @@ public class SettingsFragment extends Fragment {
             tvWinlatorPath.setText(displayPath != null ? displayPath : savedUriString);
         }
 
-        btnChooseWinlatorPath.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE); // Launch File Picker for directory selection
-            startActivityForResult(intent, REQUEST_CODE_WINLATOR_PATH);
-        });
+        btnChooseWinlatorPath.setOnClickListener(v -> chooseFolder("winlator_path_uri", DEFAULT_WINLATOR_PATH));
 
         Button btChooseShortcutExportPath = view.findViewById(R.id.BTChooseShortcutExportPath);
         TextView tvShortcutExportPath = view.findViewById(R.id.TVShortcutExportPath);
@@ -225,10 +222,7 @@ public class SettingsFragment extends Fragment {
             tvShortcutExportPath.setText(DEFAULT_SHORTCUT_EXPORT_PATH);
         }
 
-        btChooseShortcutExportPath.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-            startActivityForResult(intent, REQUEST_CODE_SHORTCUT_EXPORT_PATH);
-        });
+        btChooseShortcutExportPath.setOnClickListener(v -> chooseFolder("shortcuts_export_path_uri", DEFAULT_SHORTCUT_EXPORT_PATH));
 
         final Spinner sBox64Preset = view.findViewById(R.id.SBox64Preset);
         loadBox64PresetSpinners(view, sBox64Preset);
@@ -513,6 +507,32 @@ public class SettingsFragment extends Fragment {
         return "Registry branch " + com.winlator.cmod.contents.RegistryCache.branch() + " · " + source + when;
     }
 
+    private void registerFolderSelection(String preferenceKey, int legacyLabelId) {
+        getParentFragmentManager().setFragmentResultListener("settings-folder:" + preferenceKey, this,
+                (requestKey, result) -> {
+                    String path = result.getString(FileManagerFragment.RESULT_FOLDER_PATH);
+                    if (path == null) return;
+                    PreferenceManager.getDefaultSharedPreferences(requireContext()).edit()
+                            .putString(preferenceKey, Uri.fromFile(new File(path)).toString()).apply();
+                    if (isLegacyMode() && getView() != null) {
+                        TextView label = getView().findViewById(legacyLabelId);
+                        if (label != null) label.setText(path);
+                    }
+                    refreshCompose();
+                });
+    }
+
+    private void chooseFolder(String preferenceKey, String fallback) {
+        File folder = new File(resolveStoredPath(preferenceKey, fallback));
+        while (!folder.isDirectory() && folder.getParentFile() != null) folder = folder.getParentFile();
+        getParentFragmentManager().beginTransaction()
+                .setReorderingAllowed(true)
+                .replace(R.id.FLFragmentContainer,
+                        FileManagerFragment.forFolderSelection(folder, "settings-folder:" + preferenceKey))
+                .addToBackStack(null)
+                .commit();
+    }
+
     private String resolveStoredPath(String key, String fallback) {
         String stored = preferences.getString(key, null);
         if (stored == null) return fallback;
@@ -624,14 +644,12 @@ public class SettingsFragment extends Fragment {
 
             @Override
             public void onChooseWinlatorPath() {
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                startActivityForResult(intent, REQUEST_CODE_WINLATOR_PATH);
+                chooseFolder("winlator_path_uri", DEFAULT_WINLATOR_PATH);
             }
 
             @Override
             public void onChooseShortcutPath() {
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                startActivityForResult(intent, REQUEST_CODE_SHORTCUT_EXPORT_PATH);
+                chooseFolder("shortcuts_export_path_uri", DEFAULT_SHORTCUT_EXPORT_PATH);
             }
 
             @Override
@@ -1096,57 +1114,6 @@ public class SettingsFragment extends Fragment {
                 SharedPreferences.Editor editor = preferences.edit();
 
                 switch (requestCode) {
-
-                    case REQUEST_CODE_WINLATOR_PATH:
-                        // Save the selected URI as a string in SharedPreferences
-                        editor.putString("winlator_path_uri", uri.toString());
-                        editor.apply();
-
-                        // Take persistable URI permission
-                        try {
-                            // Take persistable URI permission with explicit flags
-                            requireContext().getContentResolver().takePersistableUriPermission(
-                                    uri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            );
-                        } catch (SecurityException e) {
-                            AppUtils.showToast(getContext(), "Unable to take persistable permissions: " + e.getMessage());
-                        }
-
-                        // Convert the URI to an absolute path and display it
-                        String fullPath = FileUtils.getFilePathFromUri(getContext(), uri);
-
-                        if (isLegacyMode() && getView() != null) {
-                            TextView tvWinlatorPath = getView().findViewById(R.id.TVWinlatorPath);
-                            tvWinlatorPath.setText(fullPath != null ? fullPath : uri.toString());
-                        }
-                        refreshCompose();
-                        break;
-
-                    case REQUEST_CODE_SHORTCUT_EXPORT_PATH:
-                        editor.putString("shortcuts_export_path_uri", uri.toString());
-                        editor.apply();
-
-                        // Take persistable URI permission
-                        try {
-                            // Take persistable URI permission with explicit flags
-                            requireContext().getContentResolver().takePersistableUriPermission(
-                                    uri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                            );
-                        } catch (SecurityException e) {
-                            AppUtils.showToast(getContext(), "Unable to take persistable permissions: " + e.getMessage());
-                        }
-
-                        // Convert the URI to an absolute path and display it
-                        String path = FileUtils.getFilePathFromUri(getContext(), uri);
-
-                        if (isLegacyMode() && getView() != null) {
-                            TextView tvShortcutExportPath = getView().findViewById(R.id.TVShortcutExportPath);
-                            tvShortcutExportPath.setText(path != null ? path : uri.toString());
-                        }
-                        refreshCompose();
-                        break;
 
                     // Case for installing a SoundFont
                     case REQUEST_CODE_INSTALL_SOUNDFONT:

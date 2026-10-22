@@ -38,6 +38,20 @@ public final class LinuxRuntimeInstallTask {
         return runningId;
     }
 
+    /** Where the running install is (DOWNLOAD while none runs). A screen that shows progress without owning the listener reads these. */
+    public static synchronized LinuxRuntimeInstaller.Phase phase() {
+        return phase == null ? LinuxRuntimeInstaller.Phase.DOWNLOAD : phase;
+    }
+
+    public static synchronized int percent() {
+        return percent;
+    }
+
+    /** The error the last finished install ended with (null: it succeeded, or none has finished). */
+    public static synchronized String lastError() {
+        return finishedError;
+    }
+
     /** Starts an install; does nothing if one is already running. */
     public static synchronized boolean start(Context context, LinuxRuntimeCatalog.Entry entry) {
         return startAll(context, java.util.Collections.singletonList(entry));

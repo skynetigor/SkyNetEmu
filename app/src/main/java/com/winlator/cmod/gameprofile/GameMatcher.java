@@ -22,8 +22,15 @@ public final class GameMatcher {
         public final String how;
         public final File folder;
         public final GameProfile.Platform platform;
+        /** The game's program found in the folder, when the game was recognised from a folder ({@link #matchFolder}); otherwise null. */
+        public final File executable;
 
         Result(GameProfile game, GameProfile.Version version, String how, File folder, GameProfile.Platform platform) {
+            this(game, version, how, folder, platform, null);
+        }
+
+        Result(GameProfile game, GameProfile.Version version, String how, File folder, GameProfile.Platform platform, File executable) {
+            this.executable = executable;
             this.platform = platform;
             this.game = game;
             this.version = version;
@@ -53,6 +60,42 @@ public final class GameMatcher {
             return new Result(game, version == null ? null : version.version, version == null ? "" : version.how, folder, platform);
         }
         return null;
+    }
+
+    /**
+     * Recognises a game from its folder: the game whose executable (one of its {@code executables} for the platform) is inside it.
+     * @return null when no game of the registry has a program in this folder
+     */
+    public static Result matchFolder(Context context, File folder, GameProfile.Platform platform, boolean allowNetwork) {
+        if (folder == null || !folder.isDirectory()) return null;
+        for (GameProfileCatalog.IndexEntry entry : GameProfileCatalog.index(context, allowNetwork)) {
+            GameProfile game = GameProfileCatalog.game(context, entry.id, allowNetwork);
+            if (game == null) continue;
+            for (String exe : game.executables(platform)) {
+                File program = resolveIgnoringCase(folder, exe);
+                if (program == null || !program.isFile()) continue;
+                GameVersionMatcher.Match version = GameVersionMatcher.detect(game, folder, -1);
+                return new Result(game, version == null ? null : version.version, version == null ? "" : version.how, folder, platform, program);
+            }
+        }
+        return null;
+    }
+
+    /** The file at a relative path ("Bin64/Game.exe") whose names may differ in case from what is on disk, or null. */
+    static File resolveIgnoringCase(File folder, String relative) {
+        File current = folder;
+        for (String part : relative.replace('\\', '/').split("/")) {
+            if (part.isEmpty()) continue;
+            File[] children = current.listFiles();
+            if (children == null) return null;
+            File found = null;
+            for (File child : children) {
+                if (child.getName().equalsIgnoreCase(part)) { found = child; break; }
+            }
+            if (found == null) return null;
+            current = found;
+        }
+        return current;
     }
 
     /** The folder of the game when the path ends with one of the executables, otherwise null. */

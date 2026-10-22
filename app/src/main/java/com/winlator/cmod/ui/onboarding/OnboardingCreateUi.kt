@@ -71,10 +71,9 @@ private val startOptions = listOf(
     ) { MaterialTheme.colorScheme.primary },
     StartOption(
         ContainerStart.Linux, Icons.Outlined.Terminal,
-        "Linux system",
-        "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver and x86 games through Box64 or FEX.",
-        "Games that have a Linux build, such as BeamNG.drive.",
-        enabled = false, badge = "Coming soon"
+        "Linux",
+        "One shared Linux container for Steam and all Linux games. Each shortcut has its own settings.",
+        "Games that have a Linux build, such as BeamNG.drive."
     ) { MaterialTheme.colorScheme.tertiary },
     StartOption(
         ContainerStart.Game, Icons.Outlined.SportsEsports,

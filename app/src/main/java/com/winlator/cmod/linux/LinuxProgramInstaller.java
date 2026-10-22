@@ -1,5 +1,6 @@
 package com.winlator.cmod.linux;
 
+import android.content.Context;
 import android.os.Environment;
 
 import com.winlator.cmod.container.Container;
@@ -29,14 +30,39 @@ public final class LinuxProgramInstaller {
     private LinuxProgramInstaller() {}
 
     /**
-     * False only for an x86-64 program that Box64 reads where it lies (Box64 reads a program instead of mapping it) on the
-     * internal storage that every container binds. FEX maps the program and its libraries as executable, shared storage
-     * refuses that, scripts start programs of their own, and other volumes are not bound: all of those are copied in.
+     * Programs already in this container's Linux home can run there with any emulator. Box64 can also read an x86-64
+     * program from shared storage. FEX needs executable mappings, so programs on shared storage still need importing.
      */
     public static boolean needsCopy(Container container, File file) {
+        if (LinuxProgramPaths.inHome(container.getLinuxHomeDir(), file) != null) return false;
         if (LinuxSession.elfMachine(file) != 62) return true;
         if (!LinuxEmulator.BOX64.equals(LinuxEmulator.choice(container))) return true;
         return !file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/");
+    }
+
+    /** Files picked inside the Linux home must be saved as /root/... rather than their Android-private host path. */
+    public static String guestPath(Container container, File file) {
+        String guest = LinuxProgramPaths.inHome(container.getLinuxHomeDir(), file);
+        return guest != null ? guest : file.getAbsolutePath();
+    }
+
+    /** Why {@link #needsCopy} says yes, in a sentence for the person adding the program (the reason depends on what the program is). */
+    public static String copyReason(Container container, File file) {
+        if (!file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
+            return "This file is on a storage that the container does not see, so it is copied in.";
+        }
+        switch (LinuxSession.elfMachine(file)) {
+            case 3:
+                return "A 32-bit program is run by FEX, even in a Box64 container (Box64 cannot run it), and FEX needs the program and its "
+                        + "libraries as executable files, which shared storage does not allow.";
+            case 62:
+                return "This container runs x86-64 programs through FEX, which needs the program and its libraries as executable files, "
+                        + "which shared storage does not allow. (Box64 reads a program where it lies, so a Box64 container does not copy it.)";
+            case 183:
+                return "An ARM64 program is started as it is, and shared storage does not allow starting programs from it.";
+            default:
+                return "A script starts programs of its own from its folder, and shared storage does not allow that.";
+        }
     }
 
     /** The folder above the program's folder, when the game may keep its data there; null when it cannot be told. */
@@ -122,7 +148,7 @@ public final class LinuxProgramInstaller {
     }
 
     /** Writes the shortcut of a program (a path as the container sees it) and returns the .desktop file. */
-    public static File addShortcut(Container container, String name, String guestPath, Map<String, String> extras) {
-        return ContainerManager.addLinuxShortcut(container, ShortcutWriter.freeName(container, name), guestPath, extras);
+    public static File addShortcut(Context context, Container container, String name, String guestPath, Map<String, String> extras) {
+        return ContainerManager.addLinuxShortcut(context, container, ShortcutWriter.freeName(container, name), guestPath, extras);
     }
 }

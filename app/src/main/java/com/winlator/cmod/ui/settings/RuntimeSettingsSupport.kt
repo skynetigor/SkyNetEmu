@@ -32,6 +32,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -224,7 +225,7 @@ internal suspend fun loadSettingsCatalog(
     }
 
     val adreno = AdrenotoolsManager(context)
-    val rendererDrivers = linkedMapOf("system" to "System")
+    val rendererDrivers = linkedMapOf("auto" to "Auto (match GPU)", "system" to "System")
     val driverOptions = linkedMapOf<String, DriverOption>()
 
     context.resources.getStringArray(R.array.wrapper_graphics_driver_version_entries).forEach { version ->
@@ -654,6 +655,8 @@ internal fun SettingDriverChoice(
     onSelected: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
+    LaunchedEffect(selected) { expanded = false; search = "" }
     val selectedOption = options.firstOrNull { it.id.equals(selected, ignoreCase = true) }
     Box(Modifier.fillMaxWidth()) {
         Surface(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth(), color = Color.Transparent) {
@@ -679,9 +682,19 @@ internal fun SettingDriverChoice(
             onDismissRequest = { expanded = false },
             modifier = Modifier.widthIn(min = 260.dp, max = 460.dp).heightIn(max = 500.dp)
         ) {
-            options.forEach { option ->
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                label = { Text("Search drivers") },
+                singleLine = true,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth()
+            )
+            val filtered = options.filter { it.label.contains(search, ignoreCase = true) || it.id.contains(search, ignoreCase = true) }
+            if (filtered.isEmpty()) Text("No matching drivers", modifier = Modifier.padding(16.dp))
+            filtered.forEach { option ->
                 val busy = "driver:${option.remoteUrl ?: option.id}" in installing
                 DropdownMenuItem(
+                    enabled = installing.isEmpty() && (option.installed || option.remoteUrl != null),
                     text = {
                         Column {
                             Text(option.label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (option.installed) 1f else .52f))
@@ -781,4 +794,30 @@ internal fun CpuSelectorRow(
             }
         }
     }
+}
+
+/** Android renderer packages from Components, including bundled and already installed drivers. */
+internal suspend fun loadAdrenoDriverOptions(
+    context: Context, selectedDriver: String = "", includeRemote: Boolean = true
+): List<DriverOption> = withContext(Dispatchers.IO) {
+    val adreno = AdrenotoolsManager(context)
+    val options = linkedMapOf("auto" to DriverOption("auto", "Auto (match GPU)", true), "system" to DriverOption("system", "System", true))
+    val sources = mutableSetOf<String>()
+    runCatching { adreno.enumerateRendererDrivers() }.getOrNull().orEmpty().forEach { id ->
+        val label = listOf(adreno.getDriverName(id), adreno.getDriverVersion(id))
+            .filter { it.isNotBlank() }.joinToString(" ").ifBlank { id }
+        options[id.lowercase()] = DriverOption(id, label, true)
+        adreno.getDriverSourceUrl(id).takeIf { it.isNotBlank() }?.let(sources::add)
+    }
+    if (includeRemote) RemoteDriverCatalog.load(context).forEach { remote ->
+        val installed = remote.url in sources || options.values.any {
+            it.id.equals(remote.name, ignoreCase = true) || it.label.equals(remote.name, ignoreCase = true)
+        }
+        if (!installed) options["remote:${remote.url}"] = DriverOption(remote.name, remote.name, false, remote.url)
+    }
+    if (selectedDriver.isNotBlank() && options.values.none { it.id.equals(selectedDriver, ignoreCase = true) }) {
+        options["selected:${selectedDriver.lowercase()}"] =
+            DriverOption(selectedDriver, "$selectedDriver (not installed)", false)
+    }
+    options.values.toList()
 }

@@ -41,9 +41,11 @@ public final class ConfigChooser {
         String preferred = version.preferredContainer != null && configs.containsKey(version.preferredContainer)
                 ? version.preferredContainer : null;
         if (preferred != null && configs.get(preferred).suits(socFamily)) return new Choice(preferred, true);
+        // The version's preferred config belongs to the other platform: here the first listed config that suits wins, one made for any family too.
+        boolean preferredElsewhere = version.preferredContainer != null && all.containsKey(version.preferredContainer) && preferred == null;
         for (String id : version.containers) {
             ContainerConfigCatalog.Config config = configs.get(id);
-            if (config != null && !config.socs.isEmpty() && config.suits(socFamily)) return new Choice(id, true);
+            if (config != null && (preferredElsewhere || !config.socs.isEmpty()) && config.suits(socFamily)) return new Choice(id, true);
         }
         if (preferred != null) return new Choice(preferred, false);
         for (String id : version.containers) if (configs.containsKey(id)) return new Choice(id, false);

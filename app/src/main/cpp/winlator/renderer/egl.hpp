@@ -105,6 +105,7 @@ class EGLRenderer {
         bool toggleFullscreen = false;
         bool magnifierEnabled = true;
         float magnifierZoom = 1.0f;
+        bool forceCursor = false;
         bool cursorVisible = true;
         WindowManager *windowManager;
         CursorManager *cursorManager;

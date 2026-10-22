@@ -24,6 +24,7 @@ public class XkbExtension implements Extension {
 
     private static final int USE_EXTENSION = 0;
     private static final int GET_STATE = 4;
+    private static final int GET_CONTROLS = 6;
     private static final int GET_MAP = 8;
     private static final int GET_NAMES = 17;
     private static final int PER_CLIENT_FLAGS = 21;
@@ -88,6 +89,33 @@ public class XkbExtension implements Extension {
                     outputStream.writeShort(client.getSequenceNumber());
                     outputStream.writeInt(0);
                     outputStream.writePad(24); // no modifiers, group 0
+                }
+                break;
+            case GET_CONTROLS:
+                // The controls of the keyboard as an untouched one has them: auto repeat on (660 ms, then every 40 ms), every
+                // key repeating, no accessibility features. xfsettingsd reads them before it changes the repeat rate.
+                try (XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)3);                 // device id (core keyboard)
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(15);                       // 60 bytes follow the 32
+                    outputStream.writeByte((byte)1);                 // mouse keys default button
+                    outputStream.writeByte((byte)1);                 // groups
+                    outputStream.writeByte((byte)0);                 // groups wrap
+                    outputStream.writeByte((byte)0);                 // internal mods
+                    outputStream.writeByte((byte)0);                 // ignore lock mods
+                    outputStream.writeByte((byte)0);                 // internal real mods
+                    outputStream.writeByte((byte)0);                 // ignore lock real mods
+                    outputStream.writePad(1);
+                    outputStream.writeShort((short)0);               // internal virtual mods
+                    outputStream.writeShort((short)0);               // ignore lock virtual mods
+                    outputStream.writeShort((short)660);             // repeat delay
+                    outputStream.writeShort((short)40);              // repeat interval
+                    outputStream.writePad(24);                       // slow keys ... accessibility timeout and masks
+                    outputStream.writeInt(0);                        // accessibility timeout controls mask
+                    outputStream.writeInt(0);                        // ... values
+                    outputStream.writeInt(1);                        // enabled controls: repeat keys
+                    for (int i = 0; i < 32; i++) outputStream.writeByte((byte)0xff); // per-key repeat
                 }
                 break;
             case PER_CLIENT_FLAGS:

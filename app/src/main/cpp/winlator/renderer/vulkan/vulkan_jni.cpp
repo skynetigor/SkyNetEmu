@@ -7,12 +7,13 @@
 #include <cstring>
 #include <algorithm>
 #include <string>
+#include <exception>
 #include "../../../adrenotools/include/adrenotools/driver.h"
 #include "VulkanRendererContext.h"
 
 static void* openAdrenotoolsDriver(const char* driverPath, const char* libraryName,
                                    const char* nativeLibDir) {
-    if (!driverPath || !libraryName || !nativeLibDir) return nullptr;
+    if (!driverPath || !libraryName || !libraryName[0] || !nativeLibDir) return nullptr;
     if (access(driverPath, F_OK) != 0) {
         __android_log_print(ANDROID_LOG_ERROR,"Winlator_Renderer",
             "openAdrenotoolsDriver: driverPath not accessible: %s", driverPath);
@@ -58,7 +59,7 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
     JNIEnv* env, jobject ,
     jobject surface, jint w, jint h,
     jstring jDriverPath, jstring jLibraryName, jstring jNativeLibDir,
-    jboolean validationEnabled)
+    jboolean validationEnabled, jboolean requireDmaBufImport, jboolean requireSelectedDriver, jboolean pipelineEnabled)
 {
     ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
     if (!win) return 0;
@@ -88,15 +89,41 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeInit(
         env->ReleaseStringUTFChars(jNativeLibDir, nld);
     }
 
+    const bool strict = requireDmaBufImport == JNI_TRUE;
+    const bool strictDriver = strict || requireSelectedDriver == JNI_TRUE;
+    if (strictDriver && jDriverPath &&
+            (!adrenotoolsHandle || !dlsym(adrenotoolsHandle, "vkGetInstanceProcAddr"))) {
+        ANativeWindow_release(win);
+        if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "The selected renderer driver could not be loaded. No system-driver fallback was used.");
+        return 0;
+    }
+    VulkanRendererContext* renderer = nullptr;
     try {
-        return reinterpret_cast<jlong>(
-            new VulkanRendererContext(win, w, h, adrenotoolsHandle,
-                                      validationEnabled == JNI_TRUE));
+        renderer = new VulkanRendererContext(win, w, h, adrenotoolsHandle,
+                                             validationEnabled == JNI_TRUE, pipelineEnabled == JNI_TRUE);
+    } catch (const std::exception& error) {
+        ANativeWindow_release(win);
+        if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
+        if (strictDriver) env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), error.what());
+        return 0;
     } catch (...) {
         ANativeWindow_release(win);
         if (adrenotoolsHandle) dlclose(adrenotoolsHandle);
+        if (strictDriver) env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), "Vulkan renderer initialization failed.");
         return 0;
     }
+    if (strict && !renderer->supportsDmaBufImport()) {
+        __android_log_print(ANDROID_LOG_ERROR, "Winlator_Renderer", "Native output unavailable: %s",
+                           renderer->rendererDiagnostics().c_str());
+        delete renderer;
+        ANativeWindow_release(win);
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),
+                      "The selected renderer driver does not support DMA-BUF import required for native Vulkan output.");
+        return 0;
+    }
+    return reinterpret_cast<jlong>(renderer);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -136,13 +163,26 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
         r->updateWindowContentAHB(id, reinterpret_cast<AHardwareBuffer*>(ahbPtr), w, h, x, y);
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentDmaBuf(
     JNIEnv*, jobject, jlong handle, jlong id, jint key, jint fd,
     jint w, jint h, jint stride, jint offset)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->updateWindowContentDmaBuf(id, key, fd, w, h, stride, offset);
+    return r && r->updateWindowContentDmaBuf(id, key, fd, w, h, stride, offset) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererDiagnostics(
+    JNIEnv* env, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    try {
+        return env->NewStringUTF(r ? r->rendererDiagnostics().c_str() : "renderer=unavailable");
+    } catch (...) {
+        // Diagnostics must never unwind through JNI into a rendering callback.
+        return nullptr;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -402,4 +442,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeReattachSurface(
     if (!win) return JNI_FALSE;
     bool ok = r->reattachSurface(win);
     return (jboolean)ok;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPipelineTarget(JNIEnv*,jobject,jlong h,jlong id) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(h);if(r)r->setPipelineTarget(id);
+}
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativePipelineDiagnostics(JNIEnv* env,jobject,jlong h) {
+    auto* r=reinterpret_cast<VulkanRendererContext*>(h);
+    return env->NewStringUTF(r?r->pipelineDiagnostics().c_str():"pipe_available=0");
 }

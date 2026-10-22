@@ -38,7 +38,7 @@ public final class GameProfile {
      */
     public static final Set<String> ALLOWED_EXTRAS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "graphicsFilterMode", "graphicsSharpness", "graphicsPostFXMode", "graphicsColorMode",
-            "fullscreenStretched", "simTouchScreen", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal", "fileCache", "hudMode")));
+            "fullscreenStretched", "simTouchScreen", "linuxTouchMode", "linuxNoProot", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal", "fileCache", "hudMode")));
 
     /** What a game runs on: Wine (a Windows exe) or a Linux container (a native program). */
     public enum Platform { WINDOWS, LINUX }

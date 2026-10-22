@@ -22,6 +22,18 @@ public abstract class XServerRendererView extends SurfaceView {
     /** The X screen changed size (a program picked another resolution): its size is the new one in xServer.screenInfo. */
     public void onScreenResized() {}
 
+    /**
+     * Draw the game's window (a window smaller than the X screen) scaled up to the view, keeping its proportions, instead of the
+     * whole screen: the upscalers then work on the game's own resolution. Only the Vulkan renderer does it.
+     */
+    public void setGameWindowZoom(boolean on) {}
+
+    /** The game window being scaled up, as x, y, width, height on the X screen; null when the whole screen is shown. */
+    public int[] getGameZoomRect() { return null; }
+
+    /** Called (from a render thread) when the window being scaled up, or its place, changed: touches map onto it. */
+    public void setOnGameZoomChanged(Runnable listener) {}
+
     public abstract void onPause();
     public abstract void onResume();
     public abstract void onDestroy();
@@ -30,6 +42,8 @@ public abstract class XServerRendererView extends SurfaceView {
     public abstract boolean isFullscreen();
 
     public abstract void setCursorVisible(boolean visible);
+    /** Draw the app pointer instead of a game cursor that may be blank or hidden. */
+    public abstract void setForceCursor(boolean force);
     public abstract void setScreenOffsetYRelativeToCursor(boolean relative);
     public abstract void setMagnifierZoom(float zoom);
     public abstract float getMagnifierZoom();

@@ -96,7 +96,12 @@ public abstract class Box64PresetManager {
                 envVars.put("BOX64_AVX", "0");
                 envVars.put("BOX64_UNITYPLAYER", "0");
                 envVars.put("BOX64_MMAP32", "1");
-
+                envVars.put("BOX64_DYNAREC_SAFEFLAGS", "0");
+                envVars.put("BOX64_DYNAREC_WAIT", "0");
+                envVars.put("BOX64_DYNAREC_ALIGNED_ATOMICS", "1");
+                envVars.put("BOX64_DYNAREC_DIRTY", "1");
+                envVars.put("BOX64_DYNAREC_PAUSE", "0");
+                envVars.put("BOX64_DYNACACHE", "1");
             }
         }
         else if (id.startsWith(Box64Preset.CUSTOM)) {

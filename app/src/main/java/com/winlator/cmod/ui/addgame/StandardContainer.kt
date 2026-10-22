@@ -7,6 +7,7 @@ import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.container.EnvironmentProvider
 import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.DefaultVersion
+import com.winlator.cmod.core.EnvVars
 import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.core.OpenGLDriverDefaults
 import com.winlator.cmod.core.WineInfo
@@ -20,19 +21,34 @@ import org.json.JSONObject
 internal object StandardContainer {
     const val CONFIG_X64 = "builtin-windows-x64"
     const val CONFIG_ARM64EC = "builtin-windows-arm64ec"
+    const val CONFIG_ARM64_NATIVE = "builtin-windows-arm64-native"
 
-    /** The installed Wine/Proton for the kind (an arm64ec build runs on FEX, the other on Box64), or null when there is none. */
-    fun runtimeFor(context: Context, arm64ec: Boolean): String? = runBlocking {
+    enum class Mode(val configId: String) {
+        X64(CONFIG_X64), ARM64EC(CONFIG_ARM64EC), ARM64_NATIVE(CONFIG_ARM64_NATIVE)
+    }
+
+    /** Native guests need an AArch64 Unix loader and ARM64 Windows builtins, independently of the runtime's label. */
+    fun runtimeFor(context: Context, mode: Mode): String? = runBlocking {
+        val contents = ContentsManager(context).apply { syncContents() }
         loadWineRuntimeOptions(context)
-            .filter { it.installed && it.label.contains("arm64ec", ignoreCase = true) == arm64ec }
+            .filter { option ->
+                if (!option.installed) false
+                else if (mode == Mode.ARM64_NATIVE) WineInfo.fromIdentifier(context, contents, option.id).supportsNativeArm64()
+                else WineInfo.fromIdentifier(context, contents, option.id).let {
+                    it.arch != "arm64" && it.isArm64EC == (mode == Mode.ARM64EC)
+                }
+            }
+            // Proton 9 is the native Vulkan runtime verified on the phone. Never silently upgrade this prefix to 11.
+            .sortedBy { if (mode == Mode.ARM64_NATIVE && it.id == WineInfo.MAIN_WINE_VERSION.identifier()) 0 else 1 }
             .firstOrNull()?.id
     }
 
     /** The container made for the kind earlier, or a new one. Call off the main thread. */
-    fun ensure(context: Context, manager: ContainerManager, contents: ContentsManager, arm64ec: Boolean): Container? {
-        val runtime = runtimeFor(context, arm64ec) ?: return null
-        val configId = if (arm64ec) CONFIG_ARM64EC else CONFIG_X64
-        EnvironmentProvider.find(manager, configId, runtime)?.let { return it }
+    fun ensure(context: Context, manager: ContainerManager, contents: ContentsManager, mode: Mode, reuseExisting: Boolean = true): Container? {
+        val runtime = runtimeFor(context, mode) ?: return null
+        val nativeArm64 = mode == Mode.ARM64_NATIVE
+        val configId = mode.configId
+        if (reuseExisting) EnvironmentProvider.find(manager, configId, runtime)?.let { return it }
         val wineInfo = WineInfo.fromIdentifier(context, contents, runtime)
         if (wineInfo.path.isNullOrBlank()) return null
         val defaultDriver = if (GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, context)) {
@@ -40,28 +56,40 @@ internal object StandardContainer {
         } else {
             DefaultVersion.WRAPPER
         }
+        val environment = EnvVars(cleanContainerEnvironment(Container.DEFAULT_ENV_VARS)).apply {
+            if (nativeArm64) {
+                put("WINEESYNC", "0")
+                put("WINEFSYNC", "0")
+            }
+        }
         val data = JSONObject().apply {
-            put("name", if (arm64ec) "Windows (ARM64EC, FEX)" else "Windows (x86_64, Box64)")
+            put("name", when (mode) {
+                Mode.ARM64_NATIVE -> "Windows (ARM64 native)"
+                Mode.ARM64EC -> "Windows (ARM64EC, FEX)"
+                Mode.X64 -> "Windows (x86_64, Box64)"
+            })
             put("screenSize", Container.DEFAULT_SCREEN_SIZE)
-            put("envVars", cleanContainerEnvironment(Container.DEFAULT_ENV_VARS))
+            put("envVars", environment.toString())
             put("graphicsDriver", Container.DEFAULT_GRAPHICS_DRIVER)
             put("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG.replace(";version=;", ";version=$defaultDriver;"))
             put("rendererNative", false)
             put("rendererPresentMode", "fifo")
-            put("dxwrapper", Container.DEFAULT_DXWRAPPER)
-            put("dxwrapperConfig", Container.DEFAULT_DXWRAPPERCONFIG)
+            put("dxwrapper", if (nativeArm64) "wined3d" else Container.DEFAULT_DXWRAPPER)
+            put("dxwrapperConfig", if (nativeArm64) "" else Container.DEFAULT_DXWRAPPERCONFIG)
             put("audioDriver", Container.DEFAULT_AUDIO_DRIVER)
             put("emulator", if (wineInfo.isArm64EC) "FEXCore" else "Box64")
-            put("wincomponents", Container.DEFAULT_WINCOMPONENTS)
+            put("wincomponents", if (nativeArm64) "direct3d=0,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2010=0" else Container.DEFAULT_WINCOMPONENTS)
             put("drives", Container.DEFAULT_DRIVES)
             put("box64Version", if (wineInfo.isArm64EC) DefaultVersion.WOWBOX64 else DefaultVersion.BOX64)
             put("box64Preset", Box64Preset.COMPATIBILITY)
             put("fexcoreVersion", DefaultVersion.FEXCORE)
             put("fexcorePreset", FEXCorePreset.INTERMEDIATE)
             put("wineVersion", runtime)
-            put("extraData", JSONObject()
+            val extras = JSONObject()
                 .put(EnvironmentProvider.EXTRA_CONFIG_ID, configId)
-                .put(EnvironmentProvider.EXTRA_AUTO_CREATED, "1"))
+                .put(EnvironmentProvider.EXTRA_AUTO_CREATED, "1")
+            if (nativeArm64) extras.put(WineInfo.NATIVE_ARM64_CONTAINER_KEY, WineInfo.NATIVE_ARM64_CONTAINER_VALUE)
+            put("extraData", extras)
         }
         OpenGLDriverDefaults.initialize(context, data)
         return manager.createContainerFromData(data, contents)

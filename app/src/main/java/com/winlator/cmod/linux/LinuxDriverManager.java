@@ -102,9 +102,12 @@ public final class LinuxDriverManager {
 
     /** Name of a Linux container that uses this driver, or null. */
     public static String containerUsing(Context context, String id) {
-        for (Container container : new ContainerManager(context).getContainers()) {
+        ContainerManager manager = new ContainerManager(context);
+        for (Container container : manager.getContainers()) {
             if (container.isLinux() && id.equals(container.getExtra(EXTRA_DRIVER))) return container.getName();
         }
+        for (com.winlator.cmod.container.Shortcut shortcut : manager.loadShortcuts())
+            if (shortcut.container.isLinux() && id.equals(shortcut.getExtra(EXTRA_DRIVER))) return shortcut.name;
         return null;
     }
 
@@ -136,7 +139,7 @@ public final class LinuxDriverManager {
             }
         }
         catch (IOException e) {
-            Log.e(TAG, "Cannot read the driver zip", e);
+            LinuxFail.e(TAG, "Cannot read the driver zip", e);
             return new Result(null, "Cannot read the zip: " + e.getMessage());
         }
 
@@ -171,7 +174,7 @@ public final class LinuxDriverManager {
             FileUtils.writeString(new File(dir, META), meta.toString());
         }
         catch (Exception e) {
-            Log.e(TAG, "Cannot store the driver", e);
+            LinuxFail.e(TAG, "Cannot store the driver", e);
             FileUtils.delete(dir);
             return new Result(null, "Cannot store the driver: " + e.getMessage());
         }

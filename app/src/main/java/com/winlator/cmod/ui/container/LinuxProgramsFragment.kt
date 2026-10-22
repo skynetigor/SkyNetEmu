@@ -69,6 +69,7 @@ import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxProgramInstaller
 import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.theme.WinZTheme
@@ -302,7 +303,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         if (ContainerManager.linuxShortcutExists(container, name)) {
             nameClash = NameClash(name, path, extras)
         } else {
-            ContainerManager.addLinuxShortcut(container, name, path, extras)
+            ContainerManager.addLinuxShortcut(context, container, name, path, extras)
             tick++
         }
     }
@@ -336,11 +337,10 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             ).show()
             return@rememberLauncherForActivityResult
         }
-        if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) == LinuxEmulator.BOX64) {
-            // Box64 reads an x86-64 program instead of mapping it, so it can stay on shared storage. FEX maps the program
-            // and its libraries into memory as executable, which shared storage refuses: they are copied like ARM64 ones.
+        if (!LinuxProgramInstaller.needsCopy(container, file)) {
+            // Programs already inside this Linux home run in place, including FEX programs and scripts.
             if (detectChoice(file.path).gameId.isNotEmpty()) pendingDirect = file
-            else addProgram(file.nameWithoutExtension, file.path)
+            else addProgram(file.nameWithoutExtension, LinuxProgramInstaller.guestPath(container, file))
             return@rememberLauncherForActivityResult
         }
         // Shared storage cannot execute programs, so the program's folder is copied into the container first.
@@ -507,7 +507,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     }
 
     pendingDirect?.let { file ->
-        // A program on storage that is a game of the registry (Box64 runs it where it is): add it with the game's profile, or without.
+        // A game that can run in place: add it with the registry's profile, or without.
         var choice by remember(file) { mutableStateOf(detectChoice(file.path)) }
         AlertDialog(
             onDismissRequest = { pendingDirect = null },
@@ -521,7 +521,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             confirmButton = {
                 TextButton(onClick = {
                     pendingDirect = null
-                    addProgram(file.nameWithoutExtension, file.path, choice)
+                    addProgram(file.nameWithoutExtension, LinuxProgramInstaller.guestPath(container, file), choice)
                 }) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { pendingDirect = null }) { Text("Cancel") } }
@@ -606,7 +606,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Programs cannot run from shared storage, so the folder \"${folder.name}\" " +
+                    LinuxProgramInstaller.copyReason(container, file) + "\n\nThe folder \"${folder.name}\" " +
                         "(${formatSize(pendingCopySize)}) will be copied into this container." +
                         if (gameFolder != null) "\n\nIf the game keeps its data next to this folder, copy the whole game folder \"${gameFolder.name}\" " +
                             "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead, or only the program and read the rest from storage." else ""
@@ -692,7 +692,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             },
             confirmButton = {
                 TextButton(enabled = newName.isNotBlank() && !taken, onClick = {
-                    ContainerManager.addLinuxShortcut(container, newName.trim(), clash.path, clash.extras)
+                    ContainerManager.addLinuxShortcut(context, container, newName.trim(), clash.path, clash.extras)
                     nameClash = null
                     tick++
                 }) { Text("Add") }

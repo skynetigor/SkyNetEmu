@@ -96,8 +96,19 @@ public abstract class ProcessHelper {
         return exec(splitCommand(command), envp, workingDir, terminationCallback);
     }
 
+    /** Captures only this process's merged stdout/stderr, even with debug logging disabled. */
+    public static int exec(String command, String[] envp, File workingDir,
+                           Callback<Integer> terminationCallback, Callback<String> processOutput) {
+        return exec(splitCommand(command), envp, workingDir, terminationCallback, processOutput);
+    }
+
     /** Runs an already split command, for callers whose arguments contain spaces or quotes. */
     public static int exec(String[] splitCommand, String[] envp, File workingDir, Callback<Integer> terminationCallback) {
+        return exec(splitCommand, envp, workingDir, terminationCallback, null);
+    }
+
+    public static int exec(String[] splitCommand, String[] envp, File workingDir,
+                           Callback<Integer> terminationCallback, Callback<String> processOutput) {
         String command = Arrays.toString(splitCommand);
         Log.d("ProcessHelper", "env: " + Arrays.toString(envp) + "\ncmd: " + command);
 
@@ -110,7 +121,9 @@ public abstract class ProcessHelper {
             ProcessBuilder pb = new ProcessBuilder(splitCommand);
             pb.directory(workingDir);
             pb.environment().putAll(EnvironmentManager.getEnvVars());
-            if (debugCallbacks.isEmpty()) {
+            boolean captureOutput = processOutput != null || !debugCallbacks.isEmpty();
+            if (processOutput != null) pb.redirectErrorStream(true);
+            if (!captureOutput) {
                 File null_file = new File("/dev/null");
                 pb.redirectError(null_file);
                 pb.redirectOutput(null_file);
@@ -125,25 +138,29 @@ public abstract class ProcessHelper {
             pidField.setAccessible(false);
             Log.d("ProcessHelper", "Process started with pid: " + pid);
 
-            if (!debugCallbacks.isEmpty()) {
-                createDebugThread(process.getInputStream());
-                createDebugThread(process.getErrorStream());
+            Thread outputReader = null;
+            if (captureOutput) {
+                outputReader = createDebugThread(process.getInputStream(), processOutput);
+                if (processOutput == null) createDebugThread(process.getErrorStream(), null);
             }
 
-            if (terminationCallback != null) createWaitForThread(process, terminationCallback);
+            if (terminationCallback != null) createWaitForThread(process, terminationCallback,
+                    processOutput != null ? outputReader : null);
 
         }
         catch (Exception e) {
             Log.e("ProcessHelper", "Error executing command: " + command, e);
+            if (processOutput != null) processOutput.call("Unable to start program: " + e.getMessage());
         }
         return pid;
     }
 
-    private static void createDebugThread(final InputStream inputStream) {
-        Executors.newSingleThreadExecutor().execute(() -> {
+    private static Thread createDebugThread(final InputStream inputStream, Callback<String> processOutput) {
+        Thread readerThread = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    if (processOutput != null) processOutput.call(line);
                     if (PRINT_DEBUG) System.out.println(line);
                     synchronized (debugCallbacks) {
                         if (!debugCallbacks.isEmpty()) {
@@ -155,15 +172,22 @@ public abstract class ProcessHelper {
             catch (IOException e) {
                 Log.e("ProcessHelper", "Error in debug thread", e);
             }
-        });
+        }, "process-output");
+        readerThread.setDaemon(true);
+        readerThread.start();
+        return readerThread;
     }
 
-    private static void createWaitForThread(java.lang.Process process, final Callback<Integer> terminationCallback) {
+    private static void createWaitForThread(java.lang.Process process, final Callback<Integer> terminationCallback,
+                                            Thread outputReader) {
         Executors.newSingleThreadExecutor().execute(new Runnable() {
             @Override
             public void run() {
                 try {
                     int status = process.waitFor();
+                    // Fast failures can exit before the reader sees their last diagnostic. Descendants may
+                    // inherit the pipe, so never wait indefinitely for EOF from a Wine background process.
+                    if (outputReader != null) outputReader.join(500);
                     terminationCallback.call(status);
                 }
                 catch (InterruptedException e) {

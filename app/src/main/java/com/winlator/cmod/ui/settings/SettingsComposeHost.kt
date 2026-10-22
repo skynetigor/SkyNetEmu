@@ -190,6 +190,9 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
     // The groups, as in the container editor: listed beside the page of the chosen one when the room allows it, otherwise
     // stacked as sections that open and close. The settings are written as they are changed, so there is no footer.
     val categories = listOf(
+        EditorCategory("performance_tuning", "Performance tuning", "Global defaults for games", false) {
+            PerformanceTuningGlobalCard()
+        },
         EditorCategory("appearance", "Appearance", "Theme and colours", false) {
             WinlatorThemePreferenceCard()
         },

@@ -99,7 +99,8 @@ fun serializeEnvironmentVariables(rows: List<EditableEnvVariable>): String = row
 fun EnvironmentVariablesEditor(
     value: String,
     onChanged: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showManagedWarning: Boolean = true
 ) {
     val rows = remember(value) {
         mutableStateListOf<EditableEnvVariable>().apply { addAll(parseEnvironmentVariables(value)) }
@@ -115,7 +116,7 @@ fun EnvironmentVariablesEditor(
         }
 
         if (bulkMode) {
-            BulkEnvironmentEditor(value = value, onApply = onChanged)
+            BulkEnvironmentEditor(value = value, onApply = onChanged, showManagedWarning = showManagedWarning)
         } else if (rows.isEmpty()) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -175,13 +176,15 @@ fun EnvironmentVariablesEditor(
 }
 
 @Composable
-private fun BulkEnvironmentEditor(value: String, onApply: (String) -> Unit) {
+private fun BulkEnvironmentEditor(value: String, onApply: (String) -> Unit, showManagedWarning: Boolean) {
     // Shown one per line for readability; the stored form stays space-separated.
     val pretty = remember(value) { parseEnvironmentVariables(value).joinToString("\n") { "${it.name}=${it.value}" } }
     var draft by remember(value) { mutableStateOf(pretty) }
     val parsed = remember(draft) { parseEnvironmentVariables(draft) }
     val invalid = remember(draft) { invalidEnvironmentTokens(draft) }
-    val managed = remember(parsed) { parsed.map { it.name }.filter { it in SHORTCUT_MANAGED_KEYS } }
+    val managed = remember(parsed, showManagedWarning) {
+        if (showManagedWarning) parsed.map { it.name }.filter { it in SHORTCUT_MANAGED_KEYS } else emptyList()
+    }
     val normalized = remember(parsed) { serializeEnvironmentVariables(parsed) }
     // Reformatting alone is revertable but not worth applying.
     val edited = draft != pretty

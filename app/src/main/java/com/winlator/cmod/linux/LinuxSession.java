@@ -1,6 +1,7 @@
 package com.winlator.cmod.linux;
 
 import android.content.Context;
+import android.os.Environment;
 import android.os.Process;
 import android.util.Log;
 
@@ -28,11 +29,13 @@ public final class LinuxSession {
         public final String[] argv;
         public final String[] hostEnv;
         public final File workingDir;
+        public final String executionMode;
 
-        Launch(String[] argv, String[] hostEnv, File workingDir) {
+        Launch(String[] argv, String[] hostEnv, File workingDir, String executionMode) {
             this.argv = argv;
             this.hostEnv = hostEnv;
             this.workingDir = workingDir;
+            this.executionMode = executionMode;
         }
     }
 
@@ -112,9 +115,21 @@ public final class LinuxSession {
      */
     public static String[] programCommand(Context context, Container container, com.winlator.cmod.container.Shortcut shortcut) {
         String path = shortcut.path;
-        if (isSteam(path)) return steamCommand("", false, true);
+        if (isSteam(path)) {
+            LinuxLaunchOptions options = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
+                    shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS));
+            List<String> command = new ArrayList<>();
+            command.add("/usr/bin/env");
+            for (Map.Entry<String, String> e : options.env.entrySet()) command.add(e.getKey() + "=" + e.getValue());
+            command.addAll(options.wrapper);
+            command.addAll(java.util.Arrays.asList(steamCommand("", false, true)));
+            command.addAll(options.args);
+            return command.toArray(new String[0]);
+        }
         GameProfiles.Effective profile = GameProfiles.resolve(context, container, shortcut);
-        LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA));
+        LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
+                shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS));
+        LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
         if (isSteamGame(path)) {
             String appId = steamAppId(path);
             if (!appId.matches("\\d+")) return refusal("Not a Steam game: " + path);
@@ -124,13 +139,12 @@ public final class LinuxSession {
                     return refusal("The game's program " + profile.executableGuest + " is not there. Turn off \"Launch without Steam\" "
                             + "in the shortcut's settings to start the game through Steam.");
                 }
-                return directCommand(context, container, profile.executableGuest,
-                        LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own));
+                return directCommand(context, container, profile.executableGuest, options);
             }
             // A Steam game starts the client without its window unless the shortcut asks for the whole client.
+            writeSteamLaunchOptions(container, appId, options);
             return steamCommand(appId, !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL)), false);
         }
-        LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
         return directCommand(context, container, path, options);
     }
 
@@ -147,6 +161,7 @@ public final class LinuxSession {
     /** A program of the guest, run with these launch options through the container's emulator when it is an x86-64 one. */
     private static String[] directCommand(Context context, Container container, String path, LinuxLaunchOptions options) {
         String emulatorPath = "";
+        boolean runsOnFex = false;
         int machine = elfMachine(hostFile(context, container, path));
         if (machine == 62) {
             String choice = LinuxEmulator.choice(container);
@@ -161,9 +176,28 @@ public final class LinuxSession {
                 return refusal(LinuxFex.NEEDS_ROOTFS);
             }
             emulatorPath = LinuxEmulator.binary(emulator).getPath();
+            runsOnFex = emulator.emulator.equals(LinuxEmulator.FEX);
         }
         else if (machine == 3) {
-            return refusal("This is a 32-bit x86 program. Only x86-64 programs are supported for now.");
+            // Box64 cannot run a 32-bit program; FEX can, with a root filesystem that has the 32-bit libraries.
+            LinuxEmulator.Installed fex = LinuxEmulator.resolve(context, container);
+            if (fex == null || !fex.emulator.equals(LinuxEmulator.FEX)) {
+                java.util.List<LinuxEmulator.Installed> builds = LinuxEmulator.list(context, LinuxEmulator.FEX);
+                fex = builds.isEmpty() ? null : builds.get(0);
+            }
+            if (fex == null) {
+                return refusal("This is a 32-bit x86 program. Install FEX and an x86-64 root filesystem (Components, Linux Emulator) to run it.");
+            }
+            if (LinuxRootfs.resolve(context, container) == null && LinuxRootfs.list(context).isEmpty()) return refusal(LinuxFex.NEEDS_ROOTFS);
+            emulatorPath = LinuxEmulator.binary(fex).getPath();
+            runsOnFex = true;
+        }
+        File program = hostFile(context, container, path);
+        if (runsOnFex && program != null
+                && program.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
+            // FEX maps a program and its libraries as executable, which shared storage (mounted noexec) refuses.
+            return refusal((machine == 3 ? "This 32-bit program is run by FEX (Box64 cannot run it), and " : "") + "FEX cannot run a program from shared storage. Copy the program into the container (add it with \"Program only\" "
+                    + "or \"Whole game\"), or choose Box64 for this shortcut.");
         }
         // $1 the program, $2 the emulator (empty for a native program), $3 and $4 how many variables and wrapper words
         // follow, then those, then the program's arguments. The variables go through env so they reach the emulator and,
@@ -173,6 +207,11 @@ public final class LinuxSession {
                 "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" || exit 1; "
                         + "prog=\"$1\"; emu=\"$2\"; nenv=\"$3\"; nwrap=\"$4\"; shift 4; "
                         + "envs=(\"${@:1:$nenv}\"); shift \"$nenv\"; wrap=(\"${@:1:$nwrap}\"); shift \"$nwrap\"; "
+                        // A 32-bit program on FEX with the OpenGL thunk: its thunk selection and Mesa's version and vendor (as the launcher
+                        // does for a game Steam starts).
+                        + "if [ -n \"$emu\" ] && [ -n \"$SKY_FEX_THUNKCONFIG32\" ] && [ -f \"$SKY_FEX_GL32_SCRIPT\" ] && "
+                        + "[ \"$(od -An -tx1 -j4 -N1 \"$prog\" 2>/dev/null | tr -d ' \\n')\" = 01 ]; then "
+                        + "export FEX_THUNKCONFIG=\"$SKY_FEX_THUNKCONFIG32\"; . \"$SKY_FEX_GL32_SCRIPT\"; sky_gl32_mesa_env; fi; "
                         + "case \"$prog\" in *.sh) exec env \"${envs[@]}\" \"${wrap[@]}\" bash \"$prog\" \"$@\";; "
                         + "*) if [ -n \"$emu\" ]; then exec env \"${envs[@]}\" \"${wrap[@]}\" \"$emu\" \"$prog\" \"$@\"; "
                         + "else exec env \"${envs[@]}\" \"${wrap[@]}\" \"$prog\" \"$@\"; fi;; esac",
@@ -256,7 +295,7 @@ public final class LinuxSession {
                         + "\"$steam_root/config/loginusers.vdf\"; then extra=\"$extra -silent -no-browser\"; fi; "
                         + "echo \"== steam launch: game=$game minimal=$minimal flags=$extra\"; "
                         + "for try in 1 2 3 4; do \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
-                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game}; code=$?; "
+                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game} \"${@:4}\"; code=$?; "
                         + "[ \"$code\" = 42 ] || break; done; exit $code",
                 STEAM_MARKER, appId, minimal ? "1" : "0", bigPicture ? "1" : "0"};
     }
@@ -277,13 +316,14 @@ public final class LinuxSession {
                 if (tab <= 0) continue;
                 File host = new File(line.substring(0, tab));
                 if (host.exists()) bind(argv, host.getPath(), line.substring(tab + 1));
-                else Log.w(TAG, "The game's data is missing: " + host);
+                else LinuxFail.w(TAG, "The game's data is missing: " + host);
             }
         }
     }
 
     public static Launch build(Context context, ImageFs imageFs, Container container,
                                LinuxRuntime.Installed runtime, String[] guestCommand) {
+        if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) LinuxSteamGames.registerSharedLibrary(container);
         File rt = LinuxRuntime.rootDir(context, runtime.id);
         File hostDir = new File(rt, HOST_DIR);
         File proot = new File(hostDir, "proot");
@@ -308,7 +348,7 @@ public final class LinuxSession {
             android.system.Os.symlink("X0", xLink.getPath());
         }
         catch (android.system.ErrnoException e) {
-            Log.w(TAG, "Cannot link the X display", e);
+            LinuxFail.w(TAG, "Cannot link the X display", e);
         }
         writeAccounts(rt, uid);
         writePreload(context, rt);
@@ -341,7 +381,7 @@ public final class LinuxSession {
             new File(inputDir, "event0").createNewFile();
         }
         catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot create the gamepad file", e);
+            LinuxFail.w(TAG, "Cannot create the gamepad file", e);
         }
         bind(argv, inputDir.getPath(), "/dev/input");
         bindIfExists(argv, new File(rt, EMPTY_DIR), "/sys/fs/selinux");
@@ -396,9 +436,21 @@ public final class LinuxSession {
         argv.add("/usr/bin/env");
         argv.add("-i");
         String programGuestPath = programGuestPath(guestCommand);
-        argv.addAll(guestEnv(context, rt, imageFsRoot, container,
-                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath));
+        List<String> guestEnv = guestEnv(context, rt, imageFsRoot, container,
+                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath,
+                !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER));
+        argv.addAll(guestEnv);
+        writeSteamEmulatorEnv(home, guestCommand, guestEnv);
         for (String part : guestCommand) argv.add(part);
+
+        if (LinuxBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
+            Launch bionic = LinuxBionicSession.build(context, imageFs, container, guestCommand, guestEnv, home);
+            if (bionic != null) return bionic;
+        }
+        if (noProot(container) && !runsOnFex(context, container, programGuestPath) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
+            Launch direct = noProotLaunch(context, rt, home, argv, guestEnv, guestCommand);
+            if (direct != null) return direct;
+        }
 
         EnvVars host = new EnvVars();
         host.put("PROOT_LOADER", loader.getPath());
@@ -406,7 +458,229 @@ public final class LinuxSession {
         // Android's linker does not search an executable's own directory, and proot needs libtalloc from there.
         host.put("LD_LIBRARY_PATH", hostDir.getPath());
 
-        return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
+        return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt, "proot");
+    }
+
+    /** Legacy container extra: only "1" disables proot; absent values use proot. */
+    public static final String EXTRA_NO_PROOT = "linuxNoProot";
+
+    /**
+     * Whether the program is run by FEX: the container's emulator is FEX, or the program is a 32-bit x86 one (Box64 cannot run it, FEX does). FEX makes its
+     * system calls itself, without the libc functions libskypath hooks, so the paths the guest names (/tmp/.X11-unix, the home folder) are not translated: the
+     * game cannot find the X server. Such a session stays under proot until libskypath covers FEX.
+     */
+    /**
+     * The Steam client (what starts with STEAM_MARKER) stays under proot too: its links (~/.steam/steam and the others) point at guest paths
+     * (/root/.local/share/Steam), which proot translates and the kernel cannot follow, and its start script makes /storage/emulated/0 with
+     * mkdir -p, which the phone answers "permission denied" where proot answers "exists".
+     */
+    private static boolean runsOnFex(Context context, Container container, String programGuestPath) {
+        if (LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) return true;
+        return programGuestPath != null && elfMachine(hostFile(context, container, programGuestPath)) == 3;
+    }
+
+    /** Proot is enabled by default. Existing explicit direct-execution choices remain valid. */
+    public static boolean prootEnabled(String noProotValue) {
+        return !"1".equals(noProotValue);
+    }
+
+    private static boolean noProot(Container container) {
+        if (prootEnabled(container.getExtra(EXTRA_NO_PROOT))) return false;
+        return !new File(Environment.getExternalStorageDirectory(), "Winlator/linux-proot").exists();
+    }
+
+    /**
+     * The session without proot. proot stops the guest at every system call that names a path and translates it from outside, which
+     * costs about 100 us for a stat or an open (the call itself: about 1 us). Here the first program is started through the runtime's
+     * own loader and libskypath (tools/linux-shim/skypath.c) does the same translation inside the processes, in their libc, from the
+     * table of what proot's -b options bound over the runtime. Programs started later (exec, spawn) go through the loader the same way.
+     *
+     * @param proot the arguments the session would have given proot: its -b options are the table
+     * @return null when libskypath cannot be had (the session then runs under proot)
+     */
+    private static Launch noProotLaunch(Context context, File rt, File home, List<String> proot, List<String> guestEnv, String[] guestCommand) {
+        File skypath = stageAsset(context, "libskypath.so");
+        if (skypath == null || guestCommand.length == 0) return null;
+        if (!new File(rt, "usr/lib/ld-linux-aarch64.so.1").exists()) return null;
+        String libpath = new File(rt, "usr/lib").getPath();
+        String sysfree = sigsysFreeLibc(context, rt);
+        if (sysfree == null) return null;
+        File ldso = new File(sysfree, "ld-linux-aarch64.so.1");
+        libpath = sysfree + ":" + libpath + ":" + new File(rt, "usr/lib/pulseaudio").getPath(); // libpulse finds libpulsecommon through an absolute RUNPATH
+        // The loader's --library-path replaces $LD_LIBRARY_PATH: the guest's own folders come first, then the runtime's.
+        for (String entry : guestEnv) {
+            if (entry.startsWith("LD_LIBRARY_PATH=") && entry.length() > 16) libpath = entry.substring(16) + ":" + libpath;
+        }
+
+        List<String[]> binds = new ArrayList<>();
+        StringBuilder table = new StringBuilder();
+        for (int i = 0; i + 1 < proot.size(); i++) {
+            if (!"-b".equals(proot.get(i))) continue;
+            String spec = proot.get(i + 1);
+            int colon = spec.indexOf(':');
+            String hostPath = colon < 0 ? spec : spec.substring(0, colon);
+            String guestPath = colon < 0 ? spec : spec.substring(colon + 1);
+            binds.add(new String[]{guestPath, hostPath});
+            if (table.length() > 0) table.append('|');
+            table.append(guestPath).append('=').append(hostPath);
+        }
+
+        String program = hostOf(guestCommand[0], binds, rt);
+        EnvVars host = new EnvVars();
+        for (String entry : guestEnv) {
+            int eq = entry.indexOf('=');
+            if (eq > 0) host.put(entry.substring(0, eq), entry.substring(eq + 1));
+        }
+        host.put("SKY_ROOT", rt.getPath());
+        host.put("SKY_PATHMAP", table.toString());
+        host.put("SKY_LIBPATH", libpath);
+        host.put("SKY_LOADER", ldso.getPath());
+        host.put("SKY_SELF", program);
+        // What /etc/ld.so.preload does under proot: that file is looked for on the phone's own file system here.
+        StringBuilder preload = new StringBuilder(skypath.getPath());
+        File session = new File(rt, PRELOAD.substring(1));
+        if (session.exists()) preload.append(':').append(session.getPath());
+        File shim = stageShim(context);
+        if (shim != null) preload.append(':').append(shim.getPath());
+        host.put("LD_PRELOAD", preload.toString());
+
+        // The app's own environment (Android's) is merged into whatever the process is given: env -i clears it, as proot's did.
+        List<String> argv = new ArrayList<>();
+        argv.add("/system/bin/env");
+        argv.add("-i");
+        argv.addAll(java.util.Arrays.asList(host.toStringArray()));
+        argv.add(ldso.getPath());
+        argv.add("--library-path");
+        argv.add(libpath);
+        argv.add("--argv0");
+        argv.add(guestCommand[0]);
+        argv.add(program);
+        for (int i = 1; i < guestCommand.length; i++) argv.add(guestCommand[i]);
+        Log.i(TAG, "Session without proot: " + program);
+        return new Launch(argv.toArray(new String[0]), new String[0], home, "direct");
+    }
+
+    /**
+     * Android's seccomp filter for apps kills a process that calls a system call it does not allow with SIGSYS; proot absorbs that signal. Without proot,
+     * libskypath answers such calls itself (a SIGSYS handler), but the loader and libc make two of them before any library is loaded (set_robust_list and
+     * rseq, for the main thread): a copy of both has those calls replaced by "return 0" and "return ENOSYS" (robust futex lists only matter when a thread dies
+     * holding a lock; glibc runs without rseq when the kernel has none). The copies are made once per runtime.
+     *
+     * @return the folder holding the patched libc.so.6, or null when it cannot be made
+     */
+    private static String sigsysFreeLibc(Context context, File rt) {
+        try {
+            File dir = new File(context.getFilesDir(), "linux-shim/libc-v2-" + rt.getName());
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            // The loader makes the call too, for the main thread, before libc is even loaded.
+            for (String name : new String[]{"libc.so.6", "ld-linux-aarch64.so.1"}) {
+                File src = new File(rt, "usr/lib/" + name).getCanonicalFile();
+                File out = new File(dir, name);
+                if (out.isFile() && out.length() == src.length() && out.lastModified() >= src.lastModified()) continue;
+                byte[] d = java.nio.file.Files.readAllBytes(src.toPath());
+                java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(d).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                int patched = 0;
+                for (int off = 0; off + 4 * 12 <= d.length; off += 4) {
+                    int result;
+                    if (b.getInt(off) == 0xD2800C68) result = 0xD2800000; // mov x8, #99 (set_robust_list): mov x0, #0
+                    else if (b.getInt(off) == 0xD28024A8) result = 0x928004A0; // mov x8, #293 (rseq): mov x0, #-ENOSYS, which glibc takes as "no rseq here"
+                    else continue;
+                    for (int k = 1; k <= 10; k++) {
+                        if (b.getInt(off + 4 * k) == 0xD4000001) { // svc #0
+                            b.putInt(off + 4 * k, result);
+                            patched++;
+                            break;
+                        }
+                    }
+                }
+                if (patched == 0) return null;
+                File tmp = new File(dir, name + ".tmp");
+                java.nio.file.Files.write(tmp.toPath(), d);
+                tmp.setExecutable(true, false);
+                if (!tmp.renameTo(out)) return null;
+            }
+            return dir.getPath();
+        }
+        catch (java.io.IOException e) {
+            LinuxFail.w(TAG, "Cannot make a libc without set_robust_list: " + e);
+            return null;
+        }
+    }
+
+    /** Where a guest path is on the phone: a bound place, or under the runtime. */
+    private static String hostOf(String guest, List<String[]> binds, File rt) {
+        String best = null;
+        int bestLength = -1;
+        for (String[] bind : binds) {
+            String g = bind[0];
+            if ((guest.equals(g) || guest.startsWith(g.endsWith("/") ? g : g + "/")) && g.length() > bestLength) {
+                best = bind[1] + guest.substring(g.length());
+                bestLength = g.length();
+            }
+        }
+        return best != null ? best : rt.getPath() + guest;
+    }
+
+    private static String shellWord(String word) {
+        return "'" + word.replace("'", "'\\''") + "'";
+    }
+
+    /**
+     * The launch options of a shortcut of a Steam game (the ones in the shortcut's settings, written like Steam's), in
+     * ~/.skynet/steam-emulator/&lt;appId&gt;.launch for the stand-in launcher, which starts the game and applies them: the variables are
+     * exported, the wrapper goes before the game's command and the arguments after it (Steam's own launch options for the game, set in
+     * Steam, are already in that command). A game that needs no emulator is not started by the launcher: they do not reach it.
+     */
+    private static void writeSteamLaunchOptions(Container container, String appId, LinuxLaunchOptions options) {
+        StringBuilder text = new StringBuilder("unset sky_wrap sky_args\n");
+        for (Map.Entry<String, String> entry : options.env.entrySet()) {
+            text.append("export ").append(entry.getKey()).append('=').append(shellWord(entry.getValue())).append('\n');
+        }
+        text.append("sky_wrap=(");
+        for (String word : options.wrapper) text.append(shellWord(word)).append(' ');
+        text.append(")\nsky_args=(");
+        for (String word : options.args) text.append(shellWord(word)).append(' ');
+        text.append(")\n");
+        File dir = new File(container.getLinuxHomeDir(), ".skynet/steam-emulator");
+        dir.mkdirs();
+        FileUtils.writeString(new File(dir, appId + ".launch"), text.toString());
+    }
+
+    /** The variables that make up the x86 emulator of a session: the launcher of a Steam game applies the ones of its own game. */
+    /** The script with the environment of a 32-bit game on the OpenGL thunk (skynet-gl32.sh), for the launcher and the shortcut's wrapper. */
+    private static void putGl32Script(Context context, Map<String, String> env) {
+        File script = stageAsset(context, "skynet-gl32.sh");
+        if (script != null) env.put("SKY_FEX_GL32_SCRIPT", script.getPath());
+    }
+
+    private static boolean isEmulatorVariable(String name) {
+        return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
+                || name.startsWith("SKY_GPU_MEMORY_")
+                || name.equals("SDL_TOUCH_MOUSE_EVENTS") || name.equals("SDL_MOUSE_TOUCH_EVENTS")
+                || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB") || name.equals("TU_DEBUG");
+    }
+
+    /**
+     * A Steam game is started by the Steam client, which may already be running (another session of the container started it) with the
+     * environment of that session. So a shortcut of a Steam game leaves the emulator's variables for its game in
+     * ~/.skynet/steam-emulator/&lt;appId&gt;.env, and the stand-in launcher (skynet-launcher.sh), which starts every game, applies them. This is
+     * what lets each Steam game have its own emulator (see {@link LinuxEmulatorSetup}).
+     */
+    private static void writeSteamEmulatorEnv(File home, String[] guestCommand, List<String> guestEnv) {
+        String appId = null;
+        for (int i = 0; i + 1 < guestCommand.length; i++) {
+            if (STEAM_MARKER.equals(guestCommand[i])) appId = guestCommand[i + 1];
+        }
+        if (appId == null || !appId.matches("\\d+")) return;
+        StringBuilder text = new StringBuilder();
+        for (String entry : guestEnv) {
+            int eq = entry.indexOf('=');
+            if (eq <= 0 || !isEmulatorVariable(entry.substring(0, eq))) continue;
+            text.append("export ").append(entry, 0, eq).append("='").append(entry.substring(eq + 1).replace("'", "'\\''")).append("'\n");
+        }
+        File dir = new File(home, ".skynet/steam-emulator");
+        dir.mkdirs();
+        FileUtils.writeString(new File(dir, appId + ".env"), text.toString());
     }
 
     /** The program a session starts, as the guest sees its path (the argument after "bannerlator-run"); null if none. */
@@ -417,7 +691,7 @@ public final class LinuxSession {
         return null;
     }
 
-    private static List<String> guestEnv(Context context, File rt, File imageFsRoot, Container container, File program, String programGuestPath) {
+    private static List<String> guestEnv(Context context, File rt, File imageFsRoot, Container container, File program, String programGuestPath, boolean directProgram) {
         File programFolder = program != null ? program.getParentFile() : null;
         Map<String, String> env = new LinkedHashMap<>();
         env.put("HOME", "/root");
@@ -457,7 +731,7 @@ public final class LinuxSession {
             env.put("VK_ICD_FILENAMES", icd);
         }
         else {
-            if (!driverId.isEmpty()) Log.w(TAG, "Linux driver " + driverId + " is not installed; using the runtime's");
+            if (!driverId.isEmpty()) LinuxFail.w(TAG, "Linux driver " + driverId + " is not installed; using the runtime's");
             if (new File(rt, "usr/share/vulkan/icd.d/freedreno_icd.json").exists()) {
                 env.put("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/freedreno_icd.json");
             }
@@ -467,12 +741,22 @@ public final class LinuxSession {
         // binds over /dev/input. SDL lists a pad by reading that directory, so the bind is what makes it visible;
         // on its own the shim only answers a path a program already knows.
         env.put("SKY_INPUT_DIR", inputDir(context).getPath());
+        // Turnip's tiled rendering (GMEM) switched off: sysmem renders straight into memory. A game started by Steam gets it from
+        // ~/.skynet/steam-emulator/<appId>.env like the emulator's variables.
+        if ("1".equals(container.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM))) {
+            String tuDebug = env.get("TU_DEBUG");
+            env.put("TU_DEBUG", tuDebug == null || tuDebug.isEmpty() ? "sysmem" : tuDebug + ",sysmem");
+        }
         // No udev runs in the session, so SDL must scan /dev/input itself instead of waiting on a monitor.
         env.put("SDL_JOYSTICK_DISABLE_UDEV", "1");
         env.put("SDL_HIDAPI_JOYSTICK_DISABLE_UDEV", "1");
         // SDL drops joystick events while its window lacks keyboard focus, and without a window manager the
         // core FocusIn never reaches SDL (see docs/linux-input-findings.md). Let pad events through regardless.
         env.put("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+        // Keep native touch and mouse independent, including when the sidebar changes mode in a running app.
+        // Explicit shortcut variables are applied after these defaults.
+        env.put("SDL_TOUCH_MOUSE_EVENTS", "0");
+        env.put("SDL_MOUSE_TOUCH_EVENTS", "0");
 
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");
@@ -483,6 +767,19 @@ public final class LinuxSession {
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
         if (emulator != null && emulator.emulator.equals(LinuxEmulator.BOX64)) {
             installDebugBox64(context, emulator);
+            // Patched Box64 can share read-only ELF segments that its normal loader
+            // would copy into every process. Older components ignore this variable.
+            // Keep backing private to the app; failure leaves Box64's loader intact.
+            File elfCache = new File(context.getCacheDir(), "elf-images-v1");
+            try {
+                if (!java.nio.file.Files.isSymbolicLink(elfCache.toPath())
+                        && (elfCache.isDirectory() || elfCache.mkdirs())) {
+                    android.system.Os.chmod(elfCache.getPath(), 0700);
+                    env.put("SKY_ELF_IMAGE_CACHE_DIR", elfCache.getPath());
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Shared ELF backing unavailable", e);
+            }
             // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.
             env.put("BOX64_LD_LIBRARY_PATH", new File(emulator.dir, "lib/box64-x86_64-linux-gnu").getPath());
             env.put("BOX64_NOBANNER", "1");
@@ -490,6 +787,25 @@ public final class LinuxSession {
             // x86-64 program to Box64 (proot's own -q does not work in this build). libskyshim's exec and spawn functions
             // do it: any program that starts an x86-64 one gets it run through this emulator.
             env.put("SKY_X86_EMULATOR", LinuxEmulator.binary(emulator).getPath());
+            // Box64 runs 64-bit programs only. A 32-bit one (Tomb Raider, 2013) goes to FEX when one is installed with a root
+            // filesystem that has the 32-bit libraries; libskyshim picks the emulator by the program's ELF class.
+            java.util.List<LinuxEmulator.Installed> fexBuilds = LinuxEmulator.list(context, LinuxEmulator.FEX);
+            java.util.List<LinuxRootfs.Installed> rootfsList = LinuxRootfs.list(context);
+            if (!fexBuilds.isEmpty() && !rootfsList.isEmpty()) {
+                FexComponents.ensureThunks32(context, fexBuilds.get(0));
+                env.put("SKY_X86_32_EMULATOR", LinuxEmulator.binary(fexBuilds.get(0)).getPath());
+                // FEX reads its root filesystem and thunks from the configuration LinuxFex writes (FEX_ROOTFS stays for the
+                // programs run by hand). A 32-bit game's OpenGL goes through the thunk to the runtime's Mesa; the launcher gives
+                // it Zink and the thunk selection (SKY_FEX_THUNKCONFIG32).
+                env.put("FEX_ROOTFS", rootfsList.get(0).dir.getPath());
+                env.put("FEX_SILENTLOG", "1");
+                LinuxFex.applyPreset(context, container, env);
+                String thunks32 = LinuxFex.prepareFor32Bit(context, container, fexBuilds.get(0), rootfsList.get(0));
+                if (thunks32 != null) {
+                    env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+                    if (LinuxFex.gl32Enabled(container, fexBuilds.get(0))) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); putGl32Script(context, env); }
+                }
+            }
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
             File launcher = stageAsset(context, "skynet-launcher.sh");
             if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
@@ -543,8 +859,26 @@ public final class LinuxSession {
         else if (emulator != null && emulator.emulator.equals(LinuxEmulator.FEX)) {
             // FEX runs the program in an x86-64 root filesystem of its own, so nothing of Box64's applies. A missing
             // root filesystem is reported when the program is started (programCommand).
+            FexComponents.ensureThunks32(context, emulator);
             String problem = LinuxFex.prepare(context, container, emulator, env);
-            if (problem != null) Log.w(TAG, problem);
+            if (problem != null) LinuxFail.w(TAG, problem);
+            else {
+                // The Steam client starts a game through Valve's FEX tool, which needs what proot cannot give (see the Box64
+                // branch above): the stand-in runs the game's command, and libskyshim hands an x86 program to FEX.
+                String fexBinary = LinuxEmulator.binary(emulator).getPath();
+                // The launcher looks in the root filesystem for the libraries a 32-bit game's runtime would add (see skynet-launcher.sh).
+                LinuxRootfs.Installed rootfs = LinuxRootfs.resolve(context, container);
+                if (rootfs != null) env.put("FEX_ROOTFS", rootfs.dir.getPath());
+                env.put("SKY_X86_EMULATOR", fexBinary);
+                env.put("SKY_X86_32_EMULATOR", fexBinary);
+                File launcher = stageAsset(context, "skynet-launcher.sh");
+                if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
+                String thunks32 = LinuxFex.writeThunkConfig32(container, emulator);
+                if (thunks32 != null) {
+                    env.put("SKY_FEX_THUNKCONFIG32", thunks32);
+                    if (LinuxFex.gl32Enabled(container, emulator)) { env.put("SKY_FEX_GL32", "1"); env.put("SKY_FEX_GL_VENDOR", LinuxFex.glVendor(container)); putGl32Script(context, env); }
+                }
+            }
         }
 
         // Native libraries the emulated program's wrapped libraries need that the runtime does not ship: the
@@ -564,6 +898,10 @@ public final class LinuxSession {
 
         env.putAll(userEnv(container));
         env.putAll(debugEnv(context));
+        // Bionic reconstructs the environment with its own loader ABI in LinuxBionicSession.build.
+        LinuxGpuMemory.prepare(context,container,env,false,directProgram && !LinuxBionicSession.enabled(container),program==null ? 0 : elfMachine(program));
+        if (emulator != null && LinuxEmulator.BOX64.equals(emulator.emulator) && !LinuxBionicSession.enabled(container))
+            FramePipelineDiagnostics.prepare(context, env, com.winlator.cmod.lsfg.LsfgManager.getMultiplier(container)>=2);
 
         List<String> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : env.entrySet()) result.add(entry.getKey() + "=" + entry.getValue());
@@ -666,7 +1004,8 @@ public final class LinuxSession {
         File shim = new File(dir, name);
         try (java.io.InputStream in = context.getAssets().open("linux/" + name)) {
             byte[] data = in.readAllBytes();
-            if (!shim.isFile() || shim.length() != data.length) {
+            // The same size is not the same file (a rebuilt binary can come out as long as the last one): the bytes are compared.
+            if (!shim.isFile() || shim.length() != data.length || !java.util.Arrays.equals(java.nio.file.Files.readAllBytes(shim.toPath()), data)) {
                 dir.mkdirs();
                 File temp = new File(dir, name + ".tmp");
                 try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
@@ -678,7 +1017,7 @@ public final class LinuxSession {
             return shim;
         }
         catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot stage " + name, e);
+            LinuxFail.w(TAG, "Cannot stage " + name, e);
             return null;
         }
     }

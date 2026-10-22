@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.concurrent.Executors;
 
 public class ContainerManager {
+    public static final Object LINUX_LOCK = new Object();
     private final ArrayList<Container> containers = new ArrayList<>();
     private int maxContainerId = 0;
     private final File homeDir;
@@ -38,7 +39,10 @@ public class ContainerManager {
         this.context = context;
         File rootDir = ImageFs.find(context).getRootDir();
         homeDir = new File(rootDir, "home");
-        loadContainers();
+        synchronized (LINUX_LOCK) {
+            loadContainers();
+            com.winlator.cmod.linux.SharedLinuxContainers.consolidate(context, this);
+        }
         isInitialized = true;
     }
 
@@ -147,12 +151,24 @@ public class ContainerManager {
     }
 
     private Container createLinuxContainer(JSONObject data) {
+        synchronized (LINUX_LOCK) {
+            // Another manager may have created the shared container since this instance was loaded.
+            loadContainers();
+            com.winlator.cmod.linux.SharedLinuxContainers.consolidate(context, this);
+            Container existing = com.winlator.cmod.linux.SharedLinuxContainers.find(this);
+            if (existing != null) return existing;
+            return createSharedLinuxContainer(data);
+        }
+    }
+
+    private Container createSharedLinuxContainer(JSONObject data) {
         try {
             int id = findNextContainerId();
             data.put("id", id);
             data.put("type", Container.TYPE_LINUX);
             // The Wine default carries Wine and DXVK variables that mean nothing in a Linux session.
             if (!data.has("envVars")) data.put("envVars", "");
+            if (!data.has("rendererDriverId")) data.put("rendererDriverId", "auto");
 
             File containerDir = new File(homeDir, ImageFs.USER + "-" + id);
             if (!containerDir.mkdirs()) {
@@ -163,6 +179,9 @@ public class ContainerManager {
             Container container = new Container(id, this);
             container.setRootDir(containerDir);
             container.loadData(data);
+            container.setName("Linux");
+            container.putExtra("linuxSharedVersion", "1");
+            container.putExtra(com.winlator.cmod.steam.SteamContainer.EXTRA_MANAGED, com.winlator.cmod.steam.SteamContainer.MANAGED_STEAM);
 
             if (!container.getLinuxHomeDir().mkdirs()) {
                 FileUtils.delete(containerDir);
@@ -182,8 +201,8 @@ public class ContainerManager {
 
     /** Demo programs of the runtime, for checking a new Linux container; debug builds only. */
     private void addLinuxTestPrograms(Container container) {
-        addLinuxShortcut(container, "glxgears", "/usr/bin/glxgears");
-        addLinuxShortcut(container, "vkcube", "/usr/bin/vkcube");
+        addLinuxShortcut(context, container, "glxgears", "/usr/bin/glxgears");
+        addLinuxShortcut(context, container, "vkcube", "/usr/bin/vkcube");
     }
 
     /** The shortcut file a Linux program of this name would get (the name decides the file, so two programs cannot share it). */
@@ -196,25 +215,38 @@ public class ContainerManager {
     }
 
     /** Writes a shortcut for a program at {@code path} (as the guest sees it) into the container's Desktop. */
-    public static File addLinuxShortcut(Container container, String name, String path) {
-        return addLinuxShortcut(container, name, path, null);
+    public static File addLinuxShortcut(Context context, Container container, String name, String path) {
+        return addLinuxShortcut(context, container, name, path, null);
     }
 
-    /** As above, with settings the shortcut starts with (its [Extra Data]); an empty value is left out. */
-    public static File addLinuxShortcut(Container container, String name, String path, java.util.Map<String, String> extras) {
+    /**
+     * As above, with settings the shortcut starts with (its [Extra Data]); an empty value is left out. The container's own
+     * settings are written in under them, so the shortcut keeps running the way the container does today even when the
+     * container is changed later (see {@link com.winlator.cmod.linux.LinuxShortcutDefaults}).
+     */
+    public static File addLinuxShortcut(Context context, Container container, String name, String path, java.util.Map<String, String> extras) {
         File dir = container.getDesktopDir();
         dir.mkdirs();
         File file = linuxShortcutFile(container, name);
         StringBuilder text = new StringBuilder("[Desktop Entry]\nName=" + name + "\nExec=" + path + "\nType=Application\ncontainer_id:" + container.id + "\n");
-        if (extras != null) {
+        java.util.Map<String, String> all = com.winlator.cmod.linux.LinuxShortcutDefaults.of(context, container);
+        if (extras != null) for (java.util.Map.Entry<String, String> entry : extras.entrySet()) {
+            if (entry.getValue() != null && !entry.getValue().isEmpty()) all.put(entry.getKey(), entry.getValue());
+        }
+        {
             StringBuilder lines = new StringBuilder();
-            for (java.util.Map.Entry<String, String> entry : extras.entrySet()) {
+            for (java.util.Map.Entry<String, String> entry : all.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isEmpty() || entry.getValue().contains("\n")) continue;
                 lines.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
             }
             if (lines.length() > 0) text.append("\n[Extra Data]\n").append(lines);
         }
         FileUtils.writeString(file, text.toString());
+        // What the game's registry profile asks for comes over the container's settings.
+        try {
+            com.winlator.cmod.linux.LinuxShortcutDefaults.applyProfile(context, container, new Shortcut(container, file));
+        }
+        catch (RuntimeException ignored) {}
         return file;
     }
 
@@ -224,7 +256,7 @@ public class ContainerManager {
      * The app's Steam container has a shortcut for the Steam client that only the container owns: it is written here while
      * Steam can run and removed with the container (or when its runtime is gone), never by the user.
      */
-    public static void syncSteamShortcut(Container container, boolean enabled) {
+    public static void syncSteamShortcut(Context context, Container container, boolean enabled) {
         File file = linuxShortcutFile(container, STEAM_SHORTCUT);
         if (!enabled) {
             if (file.exists() && file.delete()) Log.d("ContainerManager", "Removed the Steam shortcut");
@@ -232,9 +264,7 @@ public class ContainerManager {
         }
         // Written once: what the app saves into it later (when it was last run) must survive the next sync.
         if (file.isFile()) return;
-        file.getParentFile().mkdirs();
-        FileUtils.writeString(file, "[Desktop Entry]\nName=" + STEAM_SHORTCUT + "\nExec=" + com.winlator.cmod.linux.LinuxSession.STEAM_PROGRAM
-                + "\nType=Application\ncontainer_id:" + container.id + "\n");
+        addLinuxShortcut(context, container, STEAM_SHORTCUT, com.winlator.cmod.linux.LinuxSession.STEAM_PROGRAM);
     }
 
     public void duplicateContainerAsync(Container container, Runnable callback) {
@@ -260,6 +290,7 @@ public class ContainerManager {
     }
 
     private Container createContainer(JSONObject data, ContentsManager contentsManager) {
+        if (Container.TYPE_LINUX.equals(data.optString("type"))) return createLinuxContainer(data);
         try {
             int id = findNextContainerId();
             data.put("id", id);
@@ -351,8 +382,9 @@ public class ContainerManager {
         removeManagedContainer(container);
     }
 
-    /** Removes a container with everything in it, the app's Steam container included (its screen offers "Reset"). */
+    /** Removes a Windows container. Shared Linux data is protected even from legacy reset callers. */
     public void removeManagedContainer(Container container) {
+        if (container.isLinux()) return;
         if (FileUtils.delete(container.getRootDir())) containers.remove(container);
     }
 
@@ -395,6 +427,13 @@ public class ContainerManager {
 
     public Container getContainerById(int id) {
         for (Container container : containers) if (container.id == id) return container;
+        File redirect = new File(new File(homeDir, ImageFs.USER + "-" + id), com.winlator.cmod.linux.SharedLinuxContainers.REDIRECT);
+        if (redirect.isFile()) {
+            try {
+                int sharedId = Integer.parseInt(FileUtils.readString(redirect).trim());
+                for (Container container : containers) if (container.id == sharedId && container.isLinux()) return container;
+            } catch (RuntimeException ignored) {}
+        }
         return null;
     }
 
@@ -444,12 +483,15 @@ public class ContainerManager {
 
         if (result) {
             try {
-                if (wineInfo.isArm64EC())
-                    extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener); // arm64ec only
+                if (wineInfo.usesArm64WindowsFiles())
+                    extractCommonDlls(wineInfo, "aarch64-windows", "system32", containerDir, onExtractFileListener);
                 else
                     extractCommonDlls(wineInfo, "x86_64-windows", "system32", containerDir, onExtractFileListener);
 
-                extractCommonDlls(wineInfo, "i386-windows", "syswow64", containerDir, onExtractFileListener);
+                // A pure ARM64 Wine need not ship a WoW64 runtime. ARM64EC and x64 packages retain
+                // their existing mandatory 32-bit setup for translated Windows programs.
+                if (!"arm64".equals(wineInfo.getArch()) || new File(wineInfo.path, "lib/wine/i386-windows").isDirectory())
+                    extractCommonDlls(wineInfo, "i386-windows", "syswow64", containerDir, onExtractFileListener);
             }
             catch (JSONException e) {
                 Log.e("ContainerManager", "Preparing the Wine DLLs failed: " + e.getMessage());

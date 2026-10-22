@@ -10,6 +10,25 @@
 #include <malloc.h>
 #include <jni.h>
 #include <android/log.h>
+#include <errno.h>
+#include "xconnector_send_packet.h"
+
+/* Linux X11 output is serialized on one cancellable worker per client. */
+JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_xconnector_ClientSocket_sendPacket(JNIEnv *env, jobject obj,
+                                                         jobject data, jint length, jint ancillaryFd) {
+    jclass cls = (*env)->GetObjectClass(env, obj);
+    int fd = (*env)->GetIntField(env, obj, (*env)->GetFieldID(env, cls, "fd", "I"));
+    char *bytes = (*env)->GetDirectBufferAddress(env, data);
+    return xconnector_send_packet(fd, bytes, length, ancillaryFd) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_winlator_cmod_xconnector_ClientSocket_abort(JNIEnv *env, jobject obj) {
+    jclass cls = (*env)->GetObjectClass(env, obj);
+    int fd = (*env)->GetIntField(env, obj, (*env)->GetFieldID(env, cls, "fd", "I"));
+    shutdown(fd, SHUT_RDWR); /* The connector owns close(). */
+}
 
 #define printf(...) __android_log_print(ANDROID_LOG_DEBUG, "System.out", __VA_ARGS__);
 #define MAX_EVENTS 10

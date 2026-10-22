@@ -11,6 +11,8 @@ import com.winlator.cmod.xserver.XClient;
 import com.winlator.cmod.xserver.errors.BadAtom;
 import com.winlator.cmod.xserver.errors.BadWindow;
 import com.winlator.cmod.xserver.errors.XRequestError;
+import com.winlator.cmod.xserver.events.SelectionNotify;
+import com.winlator.cmod.xserver.events.SelectionRequest;
 
 import java.io.IOException;
 
@@ -40,5 +42,28 @@ public abstract class SelectionRequests {
             outputStream.writeInt(owner != null ? owner.id : 0);
             outputStream.writePad(20);
         }
+    }
+
+    /**
+     * ConvertSelection: the owner is asked (SelectionRequest) to put the selection, as the target, into the property of the
+     * requestor, and to say so with a SelectionNotify; with no owner the requestor is told at once that there is nothing (property None).
+     * This is what a paste is.
+     */
+    public static void convertSelection(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
+        int requestorId = inputStream.readInt();
+        int selectionAtom = inputStream.readInt();
+        int target = inputStream.readInt();
+        int property = inputStream.readInt();
+        int timestamp = inputStream.readInt();
+
+        Window requestor = client.xServer.windowManager.getWindow(requestorId);
+        if (requestor == null) throw new BadWindow(requestorId);
+        if (!Atom.isValid(selectionAtom)) throw new BadAtom(selectionAtom);
+
+        com.winlator.cmod.xserver.SelectionManager.Selection selection = client.xServer.selectionManager.getSelection(selectionAtom);
+        if (selection.owner != null && selection.getClient() != null) {
+            selection.getClient().sendEvent(new SelectionRequest(timestamp, selection.owner.id, requestorId, selectionAtom, target, property));
+        }
+        else client.sendEvent(new SelectionNotify(timestamp, requestorId, selectionAtom, target, 0));
     }
 }

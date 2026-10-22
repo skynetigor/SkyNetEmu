@@ -10,6 +10,7 @@ import com.winlator.cmod.container.Shortcut
 import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.WineInfo
 import com.winlator.cmod.linux.LinuxContainerInfo
+import com.winlator.cmod.gameprofile.ShortcutGameVersions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -35,19 +36,27 @@ private fun environmentText(
     "$runtime · $renderer"
 }.getOrDefault(fallback)
 
-internal fun resolveLibraryEnvironmentLabels(context: Context, items: List<LibraryItem>): List<LibraryItem> = runCatching {
+private fun resolveLibraryLabels(context: Context, items: List<LibraryItem>, detectVersions: Boolean): List<LibraryItem> = runCatching {
     val manager = ContainerManager(context)
     val shortcuts = manager.loadShortcuts().filterNotNull().associateBy { it.file.path }
     val contents = ContentsManager(context).apply { syncContents() }
+    val versions = if (detectVersions) ShortcutGameVersions(context) else null
     items.map { item ->
         item.copy(
-            containerName = environmentText(context, contents, item.shortcutPath, item.containerName, shortcuts)
+            containerName = environmentText(context, contents, item.shortcutPath, item.containerName, shortcuts),
+            version = if (versions == null) item.version else runCatching {
+                shortcuts[item.shortcutPath]?.let(versions::label).orEmpty()
+            }.getOrDefault("")
         )
     }
 }.getOrDefault(items)
 
+/** Called on every library resume/open; detectors run off the UI thread and never rewrite shortcut settings. */
+internal fun resolveLibraryMetadata(context: Context, items: List<LibraryItem>): List<LibraryItem> =
+    resolveLibraryLabels(context, items, detectVersions = true)
+
 internal fun resolveLibraryEnvironmentLabel(context: Context, item: LibraryItem): String =
-    resolveLibraryEnvironmentLabels(context, listOf(item)).firstOrNull()?.containerName ?: item.containerName
+    resolveLibraryLabels(context, listOf(item), detectVersions = false).firstOrNull()?.containerName ?: item.containerName
 
 @Composable
 internal fun libraryEnvironmentLabel(item: LibraryItem): String {

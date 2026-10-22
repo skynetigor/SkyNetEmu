@@ -35,22 +35,29 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private Callback<Integer> terminationCallback;
     private final Object lock = new Object();
     private int pid = -1;
+    public int getPid() { synchronized (lock) { return pid; } }
     private Thread reaper;
     private long startedAt;
+    private volatile String executionMode = "not_built";
 
-    /** The last lines the program (and proot) printed, kept for the message shown when it fails. */
-    private final java.util.ArrayDeque<String> tail = new java.util.ArrayDeque<>();
+    private volatile String phase = "created";
+    private volatile int lastPid = -1, exitStatus = Integer.MIN_VALUE;
+    private final com.winlator.cmod.core.ProgramOutput rawOutput = new com.winlator.cmod.core.ProgramOutput();
+    private final com.winlator.cmod.telemetry.LinuxLaunchOutput diagnosticOutput = new com.winlator.cmod.telemetry.LinuxLaunchOutput();
+    private final com.winlator.cmod.telemetry.LinuxProcessTracker processes;
     private final Callback<String> outputCallback = line -> {
-        synchronized (tail) {
-            tail.add(line);
-            while (tail.size() > 80) tail.poll();
-        }
+        rawOutput.append(line);
+        if (com.winlator.cmod.telemetry.Telemetry.isEnabled()) diagnosticOutput.append(line);
     };
 
     public LinuxProgramLauncherComponent(Container container, LinuxRuntime.Installed runtime, String[] guestCommand) {
         this.container = container;
         this.runtime = runtime;
         this.guestCommand = guestCommand;
+        String guest = "";
+        for (int i = 0; i + 1 < guestCommand.length; i++)
+            if ("bannerlator-run".equals(guestCommand[i])) { guest = guestCommand[i + 1]; break; }
+        processes = new com.winlator.cmod.telemetry.LinuxProcessTracker(new File("/proc"), Process.myUid(), guest);
     }
 
     public void setTerminationCallback(Callback<Integer> terminationCallback) {
@@ -81,19 +88,38 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     public void start() {
         Context context = environment.getContext();
         ImageFs imageFs = environment.getImageFs();
-        waitForXServer(new File(imageFs.getRootDir(), "usr/tmp/.X11-unix/X0"));
-        LinuxSession.Launch launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
-        // Registering a callback also makes ProcessHelper pipe the output instead of discarding it.
-        ProcessHelper.addDebugCallback(outputCallback);
         startedAt = System.currentTimeMillis();
+        phase = "waiting_xserver";
+        waitForXServer(new File(imageFs.getRootDir(), "usr/tmp/.X11-unix/X0"));
+        LinuxSession.Launch launch;
+        try {
+            phase = "building";
+            launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
+            executionMode = launch.executionMode;
+        }
+        catch (RuntimeException e) {
+            phase = "build_failed";
+            com.winlator.cmod.telemetry.ErrorReporter.report("linux_session_build", e, "skynet.linux.setup", setupDescription());
+            throw e;
+        }
+        // A scoped callback merges stdout/stderr and drains them before reporting an immediate exit.
+        phase = "spawning";
         synchronized (lock) {
             pid = ProcessHelper.exec(launch.argv, launch.hostEnv, launch.workingDir, status -> {
                 synchronized (lock) {
                     pid = -1;
+                    phase = "exited";
+                    exitStatus = status;
                 }
                 if (terminationCallback != null) terminationCallback.call(status);
-            });
-            if (pid == -1) Log.e(TAG, "The Linux session did not start");
+            }, outputCallback);
+            lastPid = pid;
+            if (pid > 0) phase = "running";
+            if (pid == -1) {
+                phase = "spawn_failed";
+                Log.e(TAG, "The Linux session did not start");
+                com.winlator.cmod.telemetry.ErrorReporter.linux("session_start", "The Linux session did not start (" + setupDescription() + ")", null);
+            }
         }
         applyCpuAffinity();
     }
@@ -151,15 +177,31 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     public int guestStatus(int prootStatus) {
         java.util.regex.Pattern pattern =
                 java.util.regex.Pattern.compile("vpid 1: (terminated with signal|exited with status) (\\d+)");
-        synchronized (tail) {
-            for (java.util.Iterator<String> it = tail.descendingIterator(); it.hasNext(); ) {
-                java.util.regex.Matcher matcher = pattern.matcher(it.next());
-                if (!matcher.find()) continue;
-                int value = Integer.parseInt(matcher.group(2));
-                return matcher.group(1).startsWith("terminated") ? 128 + value : value;
-            }
+        String[] lines = rawOutput.lastOutput(80).split("\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            java.util.regex.Matcher matcher = pattern.matcher(lines[i]);
+            if (!matcher.find()) continue;
+            int value = Integer.parseInt(matcher.group(2));
+            return matcher.group(1).startsWith("terminated") ? 128 + value : value;
         }
         return prootStatus;
+    }
+
+    /** What the session runs on, for a report: the emulator, the runtime, and whether it is proot-less / on Android's C library. */
+    public String setupDescription() {
+        return "emulator=" + container.getExtra("linuxEmulator") + " runtime=" + (runtime != null ? runtime.id : "") + " noProot=" + container.getExtra("linuxNoProot")
+                + " executionMode=" + executionMode + " launcherPhase=" + phase + " rootPid=" + lastPid
+                + " rootExit=" + (exitStatus == Integer.MIN_VALUE ? "pending" : exitStatus)
+                + " bionic=" + container.getExtra("linuxBionic")
+                + " emulatorBuild=" + container.getExtra("linuxEmulatorId")
+                + " box64Preset=" + container.getExtra("linuxEmulatorPreset")
+                + " fexPreset=" + container.getExtra("linuxFexPreset")
+                + " fexThunks=" + container.getExtra("linuxFexThunks")
+                + " linuxDriverRequested=" + container.getExtra("linuxVulkanDriver")
+                + " vulkanOutput=" + container.getExtra("linuxVulkanPresent")
+                + " glDriver=" + container.getExtra("linuxGlDriver")
+                + " tuSysmem=" + container.getExtra("linuxTuSysmem")
+                + " cpuList=" + container.getCPUList();
     }
 
     /** Seconds since the program was started. */
@@ -169,20 +211,31 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
 
     /** The last output lines worth showing to the user (proot's own sandbox warnings are left out). */
     public String lastOutput(int maxLines) {
-        java.util.ArrayList<String> lines = new java.util.ArrayList<>();
-        synchronized (tail) {
-            for (String line : tail) {
-                if (line.contains("can't sanitize binding")) continue;
-                lines.add(line.replace("proot info: ", ""));
-            }
-        }
-        int from = Math.max(0, lines.size() - maxLines);
-        return String.join("\n", lines.subList(from, lines.size()));
+        return rawOutput.lastOutput(maxLines).replace("proot info: ", "");
+    }
+
+    public String diagnosticOutput() { return diagnosticOutput.snapshot(); }
+
+    /** Called off the UI thread only, with telemetry enabled. Does not inspect unrelated process command lines. */
+    public String processSnapshot() {
+        if (!com.winlator.cmod.telemetry.Telemetry.isEnabled()) return "";
+        return processes.snapshot(lastPid);
+    }
+
+    public String crashEvidence() {
+        if (!com.winlator.cmod.telemetry.Telemetry.isEnabled()) return "";
+        return com.winlator.cmod.telemetry.LinuxCrashEvidence.collect(environment.getContext(), startedAt, sessionPids());
+    }
+
+    private java.util.Set<Integer> sessionPids() {
+        java.util.Set<Integer> pids = processes.knownPids();
+        if (lastPid > 0) pids.add(lastPid);
+        return pids;
     }
 
     @Override
     public void stop() {
-        ProcessHelper.removeDebugCallback(outputCallback);
+        phase = "stopping";
         final int root;
         synchronized (lock) {
             root = pid;

@@ -113,6 +113,9 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
         nativeToggleFullscreen();
     }
     
+    @Override public void setForceCursor(boolean force) { nativeSetForceCursor(force); }
+    private native void nativeSetForceCursor(boolean force);
+
     public void setCursorVisible(boolean cursorVisible) {
         this.cursorVisible = cursorVisible;
         nativeSetCursorVisible(cursorVisible);

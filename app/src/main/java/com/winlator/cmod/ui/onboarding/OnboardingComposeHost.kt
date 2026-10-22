@@ -145,7 +145,7 @@ object OnboardingComposeHost {
     }
 }
 
-private enum class OnboardingPage { Welcome, Theme, Components, Privacy, Access }
+private enum class OnboardingPage { Welcome, Theme, Linux, Components, Privacy, Access }
 
 @Composable
 private fun OnboardingFlow(
@@ -179,7 +179,12 @@ private fun OnboardingFlow(
         )
 
         OnboardingPage.Theme -> OnboardingThemeScreen(
-            onContinue = { page = OnboardingPage.Privacy }
+            onContinue = { page = OnboardingPage.Linux }
+        )
+
+        OnboardingPage.Linux -> OnboardingLinuxScreen(
+            onContinue = { page = OnboardingPage.Privacy },
+            back = { page = OnboardingPage.Theme }
         )
 
         OnboardingPage.Components -> OnboardingComponentsScreen(
@@ -210,7 +215,7 @@ private fun OnboardingFlow(
                 com.winlator.cmod.telemetry.Telemetry.setEnabled(activity, share)
                 page = OnboardingPage.Access
             },
-            back = { page = OnboardingPage.Theme }
+            back = { page = OnboardingPage.Linux }
         )
 
         OnboardingPage.Access -> OnboardingAccessScreen(

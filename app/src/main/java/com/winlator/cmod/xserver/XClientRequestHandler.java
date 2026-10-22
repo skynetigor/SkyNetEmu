@@ -39,6 +39,10 @@ public class XClientRequestHandler implements RequestHandler {
     /** Log every request (client, sequence number, opcode) to logcat tag XTrace; for finding what a program waits on. */
     public static volatile boolean trace = false;
 
+    /** Log where key events go (logcat tag XKeys); a file named .xkeys in a Linux container's home turns it on. */
+    private static int requestErrorsLogged;
+    public static volatile boolean keyTrace = false;
+
     /** Count and time every request, and log a summary every few seconds (logcat tag XStats); cheap enough to leave on. */
     public static volatile boolean stats = false;
     private static final java.util.HashMap<Integer, long[]> statTable = new java.util.HashMap<>();
@@ -280,6 +284,11 @@ public class XClientRequestHandler implements RequestHandler {
                         WindowRequests.configureWindow(client, inputStream, outputStream);
                     }
                     break;
+                case 61: // ClearArea
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
+                        WindowRequests.clearArea(client, inputStream, outputStream);
+                    }
+                    break;
                 case ClientOpcodes.GET_GEOMETRY:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
                         WindowRequests.getGeometry(client, inputStream, outputStream);
@@ -316,6 +325,11 @@ public class XClientRequestHandler implements RequestHandler {
                 case ClientOpcodes.SET_SELECTION_OWNER:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
                         SelectionRequests.setSelectionOwner(client, inputStream, outputStream);
+                    }
+                    break;
+                case 24: // ConvertSelection
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
+                        SelectionRequests.convertSelection(client, inputStream, outputStream);
                     }
                     break;
                 case ClientOpcodes.GET_SELECTION_OWNER:
@@ -520,8 +534,6 @@ public class XClientRequestHandler implements RequestHandler {
                 case 36:
                     try (XLock lock = client.xServer.lockAll()) {
                         client.xServer.setGrabbed(true, client);
-                        outputStream.writeSuccessReply(client.getSequenceNumber(), 0);
-                        Log.d("XClientRequestHandler", "X_GrabServer request handled successfully:" + outputStream.buffer.position());
                     }
                     break;
 
@@ -530,8 +542,6 @@ public class XClientRequestHandler implements RequestHandler {
                         if (client.xServer.isGrabbedBy(client)) {
                             client.xServer.setGrabbed(false, null);
                         }
-                        outputStream.writeSuccessReply(client.getSequenceNumber(), 0);
-                        Log.d("XClientRequestHandler", "X_UngrabServer request handled successfully:" + outputStream.buffer.position());
                     }
                     break;
                 case 84: // AllocColor
@@ -542,6 +552,49 @@ public class XClientRequestHandler implements RequestHandler {
                     break;
                 case 32: // UngrabKeyboard: no keyboard grabs are kept, so nothing to release
                     client.skipRequest();
+                    break;
+                case 6: // ChangeSaveSet: a window manager's clients are not given back to the root when it ends yet
+                    client.skipRequest();
+                    break;
+                // A window manager grabs buttons and keys on windows (click to focus, shortcuts) and has a click replayed to the window.
+                case 28: // GrabButton
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.grabButton(client, inputStream, outputStream);
+                    }
+                    break;
+                case 29: // UngrabButton
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.ungrabButton(client, inputStream, outputStream);
+                    }
+                    break;
+                case 33: // GrabKey
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.grabKey(client, inputStream, outputStream);
+                    }
+                    break;
+                case 34: // UngrabKey
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.ungrabKey(client, inputStream, outputStream);
+                    }
+                    break;
+                case 35: // AllowEvents
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+                        GrabRequests.allowEvents(client, inputStream, outputStream);
+                    }
+                    break;
+                case 30: // ChangeActivePointerGrab
+                case 102: // ChangeKeyboardControl
+                    client.skipRequest();
+                    break;
+                case 31: // GrabKeyboard: always granted
+                    client.skipRequest();
+                    try (XStreamLock lock = outputStream.lock()) {
+                        outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+                        outputStream.writeByte((byte) 0); // Success
+                        outputStream.writeShort(client.getSequenceNumber());
+                        outputStream.writeInt(0);
+                        outputStream.writePad(24);
+                    }
                     break;
                 case 103: // GetKeyboardControl
                     try (XStreamLock lock = outputStream.lock()) {
@@ -574,6 +627,10 @@ public class XClientRequestHandler implements RequestHandler {
             }
         }
         catch (XRequestError e) {
+            if (keyTrace && requestErrorsLogged++ < 300) {
+                Log.d("XErrors", "request error: opcode=" + (opcode & 0xff) + " data=" + (requestData & 0xff) + " code=" + (e.getCode() & 0xff)
+                        + " value=" + e.getData() + " client=" + client.resourceIDBase + " seq=" + client.getSequenceNumber());
+            }
             client.skipRequest();
             e.sendError(client, opcode);
         }

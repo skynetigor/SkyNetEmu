@@ -22,6 +22,8 @@ public final class GameSessionRecorder {
     private static long windowMs = -1, rendererMs = -1;
     private static long firstFrameNs, lastFrameNs;
     private static int frames;
+    /** Frames presented since {@link #resetFrameCount}, whether or not a game session is being recorded (a Linux session is not). */
+    private static volatile int framesSeen;
     private static int exitCode = Integer.MIN_VALUE;
     private static String exitKind = "user";
     private static Object[] gameFields;
@@ -58,8 +60,13 @@ public final class GameSessionRecorder {
         active = true;
     }
 
+    static void resetFrameCount() { framesSeen = 0; }
+
+    static int frameCount() { return framesSeen; }
+
     /** The first window of the game showed content. */
     public static void onWindow() {
+        LinuxDiagnostics.onWindow();
         if (active && windowMs < 0) windowMs = SystemClock.elapsedRealtime() - startElapsed;
     }
 
@@ -70,6 +77,7 @@ public final class GameSessionRecorder {
 
     /** A frame of the game's render window was presented. */
     public static void onFrame() {
+        framesSeen++;
         if (!active) return;
         long now = System.nanoTime();
         if (frames == 0) firstFrameNs = now;
@@ -123,6 +131,7 @@ public final class GameSessionRecorder {
                 f.add("skynet.battery.drain_pct"); f.add(s.batteryFirstPct - s.batteryLastPct);
             }
         }
+        f.add("skynet.performance.diagnostics"); f.add(com.winlator.cmod.perf.PerformanceSession.diagnostics());
         Telemetry.event("skynet.game_session", "session_ended", f.toArray());
     }
 

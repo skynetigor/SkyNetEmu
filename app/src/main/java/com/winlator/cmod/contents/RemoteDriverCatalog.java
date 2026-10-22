@@ -75,6 +75,11 @@ public final class RemoteDriverCatalog {
     }
 
     public static String install(Context context, String url) {
+        return install(context, url, null);
+    }
+
+    /** Registry automatic installs verify the pinned archive before importing any files. */
+    public static synchronized String install(Context context, String url, String expectedSha256) {
         File archive = new File(context.getCacheDir(), "winz-driver-" + System.nanoTime() + ".zip");
         try (Response response = new OkHttpClient().newCall(new Request.Builder().url(url).build()).execute()) {
             if (!response.isSuccessful() || response.body() == null) return "";
@@ -83,14 +88,30 @@ public final class RemoteDriverCatalog {
                 int read;
                 while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
             }
-            AdrenotoolsManager manager = new AdrenotoolsManager(context);
-            String installedId = manager.installDriver(Uri.fromFile(archive));
-            if (installedId != null && !installedId.isEmpty()) manager.setDriverSourceUrl(installedId, url);
-            return installedId;
+            return importArchive(context, archive, url, expectedSha256);
         } catch (Exception ignored) {
             return "";
         } finally {
             archive.delete();
         }
+    }
+
+    /** Checks the exact downloaded bytes before the shared importer can extract them. */
+    static String importArchive(Context context, File archive, String sourceUrl, String expectedSha256) throws Exception {
+        if (expectedSha256 != null) {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            try (InputStream input = new java.io.FileInputStream(archive)) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
+            }
+            StringBuilder actual = new StringBuilder();
+            for (byte value : digest.digest()) actual.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
+            if (!actual.toString().equalsIgnoreCase(expectedSha256)) return "";
+        }
+        AdrenotoolsManager manager = new AdrenotoolsManager(context);
+        String installedId = manager.installDriver(Uri.fromFile(archive));
+        if (installedId != null && !installedId.isEmpty()) manager.setDriverSourceUrl(installedId, sourceUrl);
+        return installedId;
     }
 }

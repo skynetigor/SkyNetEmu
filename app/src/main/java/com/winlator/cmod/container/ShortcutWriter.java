@@ -4,7 +4,11 @@ import android.content.Context;
 import android.os.Environment;
 
 import com.winlator.cmod.core.ExeIconExtractor;
+import com.winlator.cmod.core.EnvVars;
+import com.winlator.cmod.core.ExecutableKind;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.WindowsExecutable;
+import com.winlator.cmod.core.WindowsLaunchPlan;
 import com.winlator.cmod.core.WineUtils;
 import com.winlator.cmod.xenvironment.ImageFs;
 
@@ -12,6 +16,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -83,6 +88,22 @@ public final class ShortcutWriter {
      */
     public static File write(Context context, File exe, Container container, String displayName, Map<String, String> extras, List<String> args) {
         try {
+            WindowsExecutable.Architecture architecture = ExecutableKind.windowsArchitecture(exe);
+            Map<String, String> shortcutExtras = new LinkedHashMap<>();
+            if (args != null && !args.isEmpty()) shortcutExtras.put("execArgs",
+                    architecture == WindowsExecutable.Architecture.ARM64
+                            ? WindowsLaunchPlan.serializeArguments(args) : String.join(" ", args));
+            if (extras != null) shortcutExtras.putAll(extras);
+            if (architecture == WindowsExecutable.Architecture.ARM64
+                    && exe.getName().equalsIgnoreCase("BeamNG.drive.arm64.exe")) {
+                String execArgs = shortcutExtras.get("execArgs");
+                String profile = shortcutExtras.get("gameProfile");
+                if (execArgs == null || execArgs.isEmpty()) shortcutExtras.put("execArgs", "-gfx vk -nosteam");
+                if (profile == null || profile.isEmpty()) shortcutExtras.put("gameProfile", "beamng-drive");
+                EnvVars env = new EnvVars("WINEESYNC=0 WINEFSYNC=0 WINEDLLOVERRIDES=browseui=");
+                env.putAll(shortcutExtras.get("envVars"));
+                shortcutExtras.put("envVars", env.toString());
+            }
             File dir = container.getDesktopDir();
             if (!dir.exists() && !dir.mkdirs()) return null;
             File desktop = new File(dir, displayName + ".desktop");
@@ -94,11 +115,13 @@ public final class ShortcutWriter {
             text.append("Icon=").append(displayName).append('\n');
             text.append("container_id:").append(container.id).append('\n');
             StringBuilder extra = new StringBuilder();
-            if (args != null && !args.isEmpty()) extra.append("execArgs=").append(String.join(" ", args)).append('\n');
-            if (extras != null) {
-                for (Map.Entry<String, String> entry : extras.entrySet()) {
-                    if (entry.getValue() != null) extra.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
-                }
+            for (Map.Entry<String, String> entry : shortcutExtras.entrySet()) {
+                // Detection owns this cache: profile/import extras cannot mark an x64 executable as native ARM64.
+                if (WindowsExecutable.SHORTCUT_ARCHITECTURE_KEY.equals(entry.getKey())) continue;
+                if (entry.getValue() != null) extra.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+            }
+            if (architecture != WindowsExecutable.Architecture.UNKNOWN) {
+                extra.append(WindowsExecutable.SHORTCUT_ARCHITECTURE_KEY).append('=').append(architecture.id).append('\n');
             }
             if (extra.length() > 0) text.append("\n[Extra Data]\n").append(extra);
             if (!FileUtils.writeString(desktop, text.toString())) return null;

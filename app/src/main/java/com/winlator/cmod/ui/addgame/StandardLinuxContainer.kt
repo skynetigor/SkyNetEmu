@@ -24,6 +24,16 @@ internal object StandardLinuxContainer {
     const val CONFIG_BOX64 = "builtin-linux-box64"
     const val CONFIG_NATIVE = "builtin-linux-native"
 
+    fun shortcutSettings(context: Context, kind: ExecutableKind): Map<String, String> {
+        val defaults = SteamContainer.defaults(context, false)
+        val choice = if (kind == ExecutableKind.LINUX_X86) LinuxEmulator.FEX
+            else if (usesBox64(kind)) LinuxEmulator.BOX64 else LinuxEmulator.NONE
+        return mapOf(LinuxEmulator.EXTRA_EMULATOR to choice,
+            LinuxEmulator.EXTRA_ID to if (choice == LinuxEmulator.BOX64) defaults.emulator else if (choice == LinuxEmulator.FEX) defaults.fex else "",
+            LinuxEmulator.EXTRA_PRESET to defaults.emulatorPreset,
+            LinuxEmulator.EXTRA_ROOTFS to defaults.rootfs)
+    }
+
     /** Programs that need an x86 emulator: x86-64 ones and scripts (a script may start x86-64 programs). */
     fun usesBox64(kind: ExecutableKind) = kind != ExecutableKind.LINUX_ARM64
 
@@ -39,7 +49,6 @@ internal object StandardLinuxContainer {
         warnings: MutableList<String>
     ): Container? {
         val id = configId(kind)
-        EnvironmentProvider.findLinux(manager, id)?.let { return it }
         val defaults = SteamContainer.defaults(context, true)
         val box64 = usesBox64(kind)
 
@@ -47,7 +56,7 @@ internal object StandardLinuxContainer {
         else LinuxRuntime.listInstalled(context).firstOrNull()?.id ?: defaults.runtime
         val emulatorId = if (!box64) "" else if (LinuxEmulator.isInstalled(context, defaults.emulator)) defaults.emulator
         else LinuxEmulator.list(context, LinuxEmulator.BOX64).firstOrNull()?.id ?: defaults.emulator
-        val driver = if (LinuxDriverManager.isInstalled(context, defaults.driver)) defaults.driver
+        val driver = if (defaults.gpuDriverMapped || LinuxDriverManager.isInstalled(context, defaults.driver)) defaults.driver
         else LinuxDriverManager.list(context).firstOrNull()?.id ?: defaults.driver
 
         val extra = JSONObject()
@@ -68,6 +77,7 @@ internal object StandardLinuxContainer {
             .put("screenSize", Container.DEFAULT_SCREEN_SIZE)
             .put("linuxRuntime", runtime)
             .put("envVars", "")
+            .put("rendererDriverId", "auto")
             .put("extraData", extra)
         val plan = ContainerImporter.planLinux(context, data)
         if (plan.unavailable.isNotEmpty()) {
