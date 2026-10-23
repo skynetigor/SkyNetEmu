@@ -25,9 +25,6 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private static final String TAG = "LinuxProgramLauncher";
     private static final int SIGSTOP = 19;
     private static final int SIGCONT = 18;
-    private static final int SIGTERM = 15;
-    private static final int SIGKILL = 9;
-    private static final long TERM_GRACE_MS = 1500;
 
     private final Container container;
     private final LinuxRuntime.Installed runtime;
@@ -36,7 +33,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private final Object lock = new Object();
     private int pid = -1;
     public int getPid() { synchronized (lock) { return pid; } }
-    private Thread reaper;
+    private com.winlator.cmod.core.ContainerProcess process;
     private long startedAt;
     private volatile String executionMode = "not_built";
 
@@ -102,10 +99,10 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
             com.winlator.cmod.telemetry.ErrorReporter.report("linux_session_build", e, "skynet.linux.setup", setupDescription());
             throw e;
         }
-        // A scoped callback merges stdout/stderr and drains them before reporting an immediate exit.
+        // Root exit status does not wait for output pipes inherited by surviving daemons.
         phase = "spawning";
         synchronized (lock) {
-            pid = ProcessHelper.exec(launch.argv, launch.hostEnv, launch.workingDir, status -> {
+            process = environment.startProcess(launch.argv, launch.hostEnv, launch.workingDir, status -> {
                 synchronized (lock) {
                     pid = -1;
                     phase = "exited";
@@ -113,6 +110,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
                 }
                 if (terminationCallback != null) terminationCallback.call(status);
             }, outputCallback);
+            pid = process.getPid();
             lastPid = pid;
             if (pid > 0) phase = "running";
             if (pid == -1) {
@@ -236,40 +234,15 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     @Override
     public void stop() {
         phase = "stopping";
-        final int root;
         synchronized (lock) {
-            root = pid;
+            if (process != null) process.requestStop();
             pid = -1;
         }
-        final String runtimePath = LinuxRuntime.rootDir(environment.getContext(), runtime.id).getPath();
-        if (root == -1) {
-            killLeftovers(runtimePath);
-            return;
-        }
-
-        List<Integer> tree = processTree(root);
-        for (int p : tree) Process.sendSignal(p, SIGTERM);
-        // Give the programs a moment to close their windows before the rest is killed.
-        reaper = new Thread(() -> {
-            try {
-                Thread.sleep(TERM_GRACE_MS);
-            }
-            catch (InterruptedException ignored) {}
-            for (int p : processTree(root)) Process.sendSignal(p, SIGKILL);
-            Process.sendSignal(root, SIGKILL);
-            killLeftovers(runtimePath);
-        }, "linux-session-reaper");
-        reaper.start();
     }
 
-    /** Blocks until the grace period is over and everything has been killed. Call off the main thread. */
+    /** Waits for owned descendants to be reaped. Call off the main thread. */
     public void awaitTeardown() {
-        Thread thread = reaper;
-        if (thread == null) return;
-        try {
-            thread.join(TERM_GRACE_MS + 3000);
-        }
-        catch (InterruptedException ignored) {}
+        environment.awaitTeardown();
     }
 
     public void suspendProcess() {
@@ -327,17 +300,4 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         }
     }
 
-    /** Processes that escaped the tree (reparented to init) but still run a binary from the runtime. */
-    private static void killLeftovers(String runtimePath) {
-        File[] entries = new File("/proc").listFiles();
-        if (entries == null) return;
-        for (File entry : entries) {
-            try {
-                int pid = Integer.parseInt(entry.getName());
-                String exe = Files.readSymbolicLink(new File(entry, "exe").toPath()).toString();
-                if (exe.startsWith(runtimePath + "/")) Process.sendSignal(pid, SIGKILL);
-            }
-            catch (Exception ignored) {}
-        }
-    }
 }

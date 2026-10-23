@@ -237,7 +237,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     var disableXInput by mutableStateOf(shortcut.getExtra("disableXinput", "0") == "1")
     var relativeMouse by mutableStateOf(shortcut.getExtra("enableRelativeMouse", "0") == "1")
     var disableMouse by mutableStateOf(shortcut.getExtra("disableMouse", "0") == "1")
-    var simulatedTouch by mutableStateOf(shortcut.getExtra("simTouchScreen", "0") == "1")
+    var touchMode by mutableStateOf(com.winlator.cmod.input.TouchInputMode.resolve(container, shortcut, null))
     var syncCpu by mutableStateOf(shortcut.getExtra("syncCpuTopology", if (container.isSyncCpuTopology()) "1" else "0") == "1")
     val cpu = mutableStateListOf<Boolean>().apply {
         val count = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
@@ -1204,7 +1204,15 @@ private fun ShortcutCategoryV2(
                 SettingsDivider()
                 SettingToggle("Disable Mouse", s.disableMouse) { s.disableMouse = it; s.extra("disableMouse", if (it) "1" else null) }
                 SettingsDivider()
-                SettingToggle("Simulated Touchscreen", s.simulatedTouch) { s.simulatedTouch = it; s.extra("simTouchScreen", if (it) "1" else "0") }
+                SettingMappedChoice(context.getString(R.string.input_mode), s.touchMode, linkedMapOf(
+                    "touchscreen" to context.getString(R.string.input_mode_touchscreen),
+                    "touchpad" to context.getString(R.string.input_mode_touchpad),
+                    "mouse" to context.getString(R.string.input_mode_mouse)
+                )) {
+                    s.touchMode = it
+                    s.extra("touchInputMode", it)
+                    s.extra("simTouchScreen", if (it == "touchscreen") "1" else "0")
+                }
             }
         }
 
@@ -1396,4 +1404,3 @@ private fun renameShortcutV2(shortcut: Shortcut, requested: String) {
         if (!newLink.exists()) oldLink.renameTo(newLink)
     }
 }
-

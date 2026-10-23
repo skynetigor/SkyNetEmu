@@ -161,12 +161,7 @@ public abstract class ProcessHelper {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (processOutput != null) processOutput.call(line);
-                    if (PRINT_DEBUG) System.out.println(line);
-                    synchronized (debugCallbacks) {
-                        if (!debugCallbacks.isEmpty()) {
-                            for (Callback<String> callback : debugCallbacks) callback.call(line);
-                        }
-                    }
+                    dispatchOutput(line);
                 }
             }
             catch (IOException e) {
@@ -176,6 +171,13 @@ public abstract class ProcessHelper {
         readerThread.setDaemon(true);
         readerThread.start();
         return readerThread;
+    }
+
+    static void dispatchOutput(String line) {
+        if (PRINT_DEBUG) System.out.println(line);
+        synchronized (debugCallbacks) {
+            for (Callback<String> callback : debugCallbacks) callback.call(line);
+        }
     }
 
     private static void createWaitForThread(java.lang.Process process, final Callback<Integer> terminationCallback,

@@ -37,10 +37,12 @@
 #define MAX_SECTION (256ULL * 1024 * 1024)
 #define MAX_ENTRIES 4096
 static int enabled;
+static int stats_enabled;
 static size_t page_size;
 static char cache_path[PATH_MAX];
 static __thread int in_hook;
 static _Atomic uint64_t hits, created, mapped_bytes, failures;
+static _Atomic uint64_t mmap_calls, cache_attempts, section_matches, large_probes;
 #ifndef SKY_PE_CACHE_TEST
 static void *(*next_mmap)(void *,size_t,int,int,int,off_t);
 #endif
@@ -79,8 +81,8 @@ static int source_quiet(const Key *key) {
     return 1;
 }
 
-/* Accept only Wine's complete, sector-rounded raw section range, never arbitrary
- * file mappings or writable/shared PE sections. All arithmetic is widened. */
+/* Accept complete PE headers or Wine's sector-rounded read-only raw section
+ * range, never arbitrary file mappings or writable/shared sections. */
 static int section_key(int fd, off_t offset, size_t length, Key *key) {
     struct stat s;
     unsigned char dos[64], nt[24], opt[64], sec[40];
@@ -93,6 +95,12 @@ static int section_key(int fd, off_t offset, size_t length, Key *key) {
     if (!count || count>96 || optional<sizeof(opt) ||
         pe+24+optional+(uint64_t)count*40>(uint64_t)s.st_size ||
         !read_at(fd,opt,sizeof(opt),pe+24) || u16(opt)!=0x20b || u32(opt+32)<4096) return 0;
+    uint64_t headers=u32(opt+60);
+    if (!offset && length==headers && headers<=(uint64_t)s.st_size &&
+        pe+24+optional+(uint64_t)count*40<=headers) {
+        *key=source_key(&s,0,length);
+        return 1;
+    }
     for (unsigned i=0;i<count;i++) {
         if (!read_at(fd,sec,sizeof(sec),pe+24+optional+i*40)) return 0;
         uint64_t virt=u32(sec+8), va=u32(sec+12), raw=u32(sec+16), pos=u32(sec+20);
@@ -222,14 +230,17 @@ static void *system_map(void *addr,size_t length,int prot,int flags,int fd,off_t
 #endif
 }
 static int candidate(void *addr,size_t length,int prot,int flags,int fd,off_t offset) {
-    return enabled && fd>=0 && offset>0 && offset%page_size && length && length<=MAX_SECTION &&
+    return enabled && fd>=0 && offset>=0 &&
+        (offset ? offset%page_size : (prot&PROT_EXEC)) && length && length<=MAX_SECTION &&
         addr && !((uintptr_t)addr%page_size) && flags==(MAP_PRIVATE|MAP_FIXED) &&
         (prot&PROT_READ) && !(prot&~(PROT_READ|PROT_WRITE|PROT_EXEC));
 }
 static void *cache_map(void *addr,size_t length,int prot,int flags,int fd,off_t offset) {
     if (!candidate(addr,length,prot,flags,fd,offset)) return MAP_FAILED;
     Key key;
-    if (!section_key(fd,offset,length,&key) || !source_quiet(&key)) return MAP_FAILED;
+    if (!section_key(fd,offset,length,&key)) return MAP_FAILED;
+    atomic_fetch_add(&section_matches,1);
+    if (!source_quiet(&key)) return MAP_FAILED;
     int cached=backing_fd(fd,&key);
     if (cached<0) { atomic_fetch_add(&failures,1);return MAP_FAILED; }
     void *result=system_map(addr,length,prot,flags,cached,page_size);
@@ -248,6 +259,7 @@ static void *cache_map(void *addr,size_t length,int prot,int flags,int fd,off_t 
 }
 static void initialize(void) {
     const char *on=getenv("SKY_PE_IMAGE_CACHE"),*path=getenv("SKY_PE_IMAGE_CACHE_DIR");
+    stats_enabled=getenv("SKY_PE_IMAGE_CACHE_STATS")!=NULL;
     page_size=(size_t)sysconf(_SC_PAGESIZE);
     if (!on || strcmp(on,"1") || !path || path[0]!='/' || strlen(path)>=sizeof(cache_path)) return;
 #ifndef SKY_PE_CACHE_TEST
@@ -265,10 +277,39 @@ __attribute__((constructor)) static void start_cache(void) {
 }
 EXPORT void *mmap(void *addr,size_t length,int prot,int flags,int fd,off_t offset) {
     int saved=errno;
-    // Bionic's emulated TLS allocates on first access. Its anonymous allocator
-    // mappings must bypass TLS lookup, otherwise mmap reenters the TLS lock.
-    if (candidate(addr,length,prot,flags,fd,offset) && !in_hook) {
+    int is_candidate;
+    if (enabled) atomic_fetch_add(&mmap_calls,1);
+    is_candidate=candidate(addr,length,prot,flags,fd,offset);
+    if (is_candidate && !offset) {
+        /* A failed executable header on Android's noexec shared storage makes
+         * Wine skip mmap for every section. Private header backing avoids that. */
+        void *original=system_map(addr,length,prot,flags,fd,offset);
+        if (original!=MAP_FAILED) { errno=saved;return original; }
+        if (errno!=EACCES && errno!=EPERM && errno!=ENODEV && errno!=ENOEXEC) return MAP_FAILED;
+        saved=errno;
+    }
+    // Non-target mappings must not initialize emulated TLS, even for diagnostics.
+    if (is_candidate && !in_hook) {
         in_hook=1;
+        atomic_fetch_add(&cache_attempts,1);
+        if (stats_enabled && length>=16*1024*1024 && atomic_fetch_add(&large_probes,1)<16) {
+            struct stat source;
+            unsigned char dos[64],nt[8];
+            unsigned machine=0;
+            if (!fstat(fd,&source) && read_at(fd,dos,sizeof(dos),0) && u16(dos)==0x5a4d) {
+                uint64_t pe=u32(dos+60);
+                if (pe<=1024*1024 && read_at(fd,nt,sizeof(nt),pe) && u32(nt)==0x4550) machine=u16(nt+4);
+            }
+            Key key;
+            int section=section_key(fd,offset,length,&key);
+            int quiet=section && source_quiet(&key);
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO,"WinePeImageCache",
+                "mmap_probe offset=%lld length=%zu prot=%x flags=%x addr_aligned=%d machine=%x file_size=%lld candidate=%d section=%d quiet=%d",
+                (long long)offset,length,prot,flags,addr && !((uintptr_t)addr%page_size),machine,
+                !fstat(fd,&source)?(long long)source.st_size:-1,is_candidate,section,quiet);
+#endif
+        }
         void *result=cache_map(addr,length,prot,flags,fd,offset);
         in_hook=0;
         if (result!=MAP_FAILED) { errno=saved;return result; }
@@ -281,8 +322,11 @@ EXPORT void *mmap64(void *addr,size_t length,int prot,int flags,int fd,off64_t o
 }
 __attribute__((destructor)) static void cache_stats(void) {
 #ifdef __ANDROID__
-    if (enabled && getenv("SKY_PE_IMAGE_CACHE_STATS"))
-        __android_log_print(ANDROID_LOG_INFO,"WinePeImageCache","hits=%llu created=%llu mapped_kb=%llu failures=%llu",
+    if (enabled && stats_enabled)
+        __android_log_print(ANDROID_LOG_INFO,"WinePeImageCache",
+            "mmap_calls=%llu probes=%llu candidates=%llu sections=%llu hits=%llu created=%llu mapped_kb=%llu failures=%llu",
+            (unsigned long long)atomic_load(&mmap_calls),(unsigned long long)atomic_load(&large_probes),
+            (unsigned long long)atomic_load(&cache_attempts),(unsigned long long)atomic_load(&section_matches),
             (unsigned long long)atomic_load(&hits),(unsigned long long)atomic_load(&created),
             (unsigned long long)(atomic_load(&mapped_bytes)/1024),(unsigned long long)atomic_load(&failures));
 #endif

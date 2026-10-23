@@ -401,7 +401,7 @@ private fun LinuxContainerEditorBody(
         mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() }?.let { if (it == FEXCorePreset.INTERMEDIATE && editing?.getExtra(LinuxFex.EXTRA_PRESET_VERSION) != "2") FEXCorePreset.PERFORMANCE else it } ?: FEXCorePreset.PERFORMANCE)
     }
     // Input: a finger acts where it touches, a button opens the keyboard, and a tap on a text field opens it by itself.
-    var touchscreen by remember { mutableStateOf(editing?.let { com.winlator.cmod.linux.LinuxTouchMode.resolve(it, null, null) != "touchpad" } ?: true) }
+    var touchMode by remember { mutableStateOf(editing?.let { com.winlator.cmod.linux.LinuxTouchMode.resolve(it, null, null) } ?: "native") }
     var keyboardButton by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON) != "0") }
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
@@ -515,8 +515,8 @@ private fun LinuxContainerEditorBody(
         container.putExtra(LinuxBionicSession.EXTRA, if (bionic) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor)
-        container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
-        container.putExtra("linuxTouchMode", if (touchscreen) "native" else "touchpad")
+        container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchMode == "native") "1" else "0")
+        container.putExtra("linuxTouchMode", touchMode)
         container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, if (keyboardButton) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, if (autoKeyboard) "1" else "0")
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
@@ -778,14 +778,18 @@ private fun LinuxContainerEditorBody(
         },
         EditorCategory(
             "input", "Input",
-            (if (touchscreen) "touchscreen" else "touchpad") + (if (keyboardButton) " · keyboard button" else "") +
+            touchMode + (if (keyboardButton) " · keyboard button" else "") +
                 (if (autoKeyboard) " · auto keyboard" else ""),
             false
         ) {
             SettingsCard {
-                SettingToggle("Touchscreen mode (native multitouch)", touchscreen) { touchscreen = it }
+                SettingMappedChoice(context.getString(com.winlator.cmod.R.string.input_mode), touchMode, linkedMapOf(
+                    "native" to context.getString(com.winlator.cmod.R.string.input_mode_native),
+                    "touchpad" to context.getString(com.winlator.cmod.R.string.input_mode_touchpad),
+                    "mouse" to context.getString(com.winlator.cmod.R.string.input_mode_mouse)
+                )) { touchMode = it }
                 Text(
-                    "On: sends independent touch contacts to touch-aware Linux apps. Off: a finger moves the mouse pointer and a tap clicks.",
+                    "Touchscreen sends native touch contacts. Touchpad moves the pointer relatively. Touch mouse clicks and drags at the finger, with the cursor hidden.",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -17,6 +17,12 @@ public class ALSARequestHandler implements RequestHandler {
     @Override
     public boolean handleRequest(Client client) throws IOException {
         ALSAClient alsaClient = (ALSAClient)client.getTag();
+        synchronized (alsaClient) {
+            return handleRequest(alsaClient, client);
+        }
+    }
+
+    private boolean handleRequest(ALSAClient alsaClient, Client client) throws IOException {
         XInputStream inputStream = client.getInputStream();
         XOutputStream outputStream = client.getOutputStream();
 

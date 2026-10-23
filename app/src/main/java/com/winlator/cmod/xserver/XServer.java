@@ -240,6 +240,18 @@ public class XServer {
         }
     }
 
+    /** Finger mouse clicks use the X11 absolute pointer even when a physical mouse uses WinHandler deltas. */
+    public void injectAbsolutePointerButton(boolean pressed) {
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
+            inputDeviceManager.absolutePointerButton = true;
+            try {
+                pointer.setButton(Pointer.Button.BUTTON_LEFT, pressed);
+            } finally {
+                inputDeviceManager.absolutePointerButton = false;
+            }
+        }
+    }
+
     public void injectKeyPress(XKeycode xKeycode) {
         injectKeyPress(xKeycode, 0);
     }

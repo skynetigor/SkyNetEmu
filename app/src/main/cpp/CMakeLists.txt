@@ -8,6 +8,10 @@ add_subdirectory(OpenXR-SDK)
 add_subdirectory(patchelf)
 add_subdirectory(adrenotools)
 
+# Package an executable like libproot.so so it runs from Android's executable native library directory.
+add_executable(libcontainer_supervisor.so winlator/container_supervisor.c)
+target_compile_options(libcontainer_supervisor.so PRIVATE -Wall -Wextra -Werror)
+
 # Add Winlator shared library
 add_library(winlator SHARED
         xr/engine.c

@@ -277,7 +277,7 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
     public void onPointerButtonPress(Pointer.Button button) {
         XInput2Extension xi2 = xi2();
         if (xi2 != null) xi2.onButton(button, true);
-        if (xServer.isRelativeMouseMovement()) {
+        if (!absolutePointerButton && xServer.isRelativeMouseMovement()) {
             WinHandler winHandler = xServer.getWinHandler();
             int wheelDelta = button == Pointer.Button.BUTTON_SCROLL_UP ? MOUSE_WHEEL_DELTA : (button == Pointer.Button.BUTTON_SCROLL_DOWN ? -MOUSE_WHEEL_DELTA : 0);
             winHandler.mouseEvent(MouseEventFlags.getFlagFor(button, true), 0, 0, wheelDelta);
@@ -335,10 +335,11 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
     public void onPointerButtonRelease(Pointer.Button button) {
         XInput2Extension xi2 = xi2();
         if (xi2 != null) xi2.onButton(button, false);
-        if (xServer.isRelativeMouseMovement()) {
+        if (!absolutePointerButton && xServer.isRelativeMouseMovement()) {
             WinHandler winHandler = xServer.getWinHandler();
             winHandler.mouseEvent(MouseEventFlags.getFlagFor(button, false), 0, 0, 0);
         }
+
         else {
             if (pointerFrozen) {
                 frozenReleased = true;
@@ -347,6 +348,8 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             coreRelease(button);
         }
     }
+
+    boolean absolutePointerButton;
 
     private void coreRelease(Pointer.Button button) {
             // A ButtonRelease goes where its ButtonPress went, and is chosen by the window's interest in ButtonRelease.

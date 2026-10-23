@@ -536,17 +536,18 @@
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
-                <Switch
-                    android:id="@+id/SWTouchpadMode"
+                <Button
+                    android:id="@+id/SInputMode"
                     android:layout_width="match_parent"
                     android:layout_height="56dp"
                     android:layout_marginTop="18dp"
                     android:background="@drawable/sidebar_card"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="Touchpad mode"
                     android:textColor="#FFFFFF"
-                    android:textSize="15sp" />
+                    android:textAllCaps="false"
+                    android:saveEnabled="false"
+                    android:contentDescription="@string/input_mode" />
 
                 <LinearLayout
                     android:id="@+id/LLSidebarInputControls"
@@ -1067,4 +1068,3 @@
             android:visibility="gone" />
     </FrameLayout>
 </LinearLayout>
-

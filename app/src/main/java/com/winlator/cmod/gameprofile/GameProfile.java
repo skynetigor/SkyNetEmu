@@ -38,7 +38,7 @@ public final class GameProfile {
      */
     public static final Set<String> ALLOWED_EXTRAS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "graphicsFilterMode", "graphicsSharpness", "graphicsPostFXMode", "graphicsColorMode",
-            "fullscreenStretched", "simTouchScreen", "linuxTouchMode", "linuxNoProot", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal", "fileCache", "hudMode")));
+            "fullscreenStretched", "simTouchScreen", "touchInputMode", "linuxTouchMode", "linuxNoProot", "lsfgMultiplier", "lsfgFlowScale", "steamMinimal", "fileCache", "hudMode")));
 
     /** What a game runs on: Wine (a Windows exe) or a Linux container (a native program). */
     public enum Platform { WINDOWS, LINUX }
@@ -396,6 +396,15 @@ public final class GameProfile {
                 continue;
             }
             if (allowed == null && !key.matches("[A-Za-z_][A-Za-z0-9_]*")) continue;
+            if (!object.isNull(key) && (key.equals("touchInputMode") || key.equals("linuxTouchMode"))) {
+                String value = object.optString(key);
+                boolean valid = Arrays.asList(key.equals("linuxTouchMode") ? "native" : "touchscreen",
+                        "touchpad", "mouse").contains(value);
+                if (!valid) {
+                    Log.w(TAG, "Invalid game profile setting: " + key + "=" + value);
+                    continue;
+                }
+            }
             into.put(key, object.isNull(key) ? null : object.optString(key));
         }
     }

@@ -105,7 +105,8 @@ public final class LinuxShortcutDefaults {
         for (Map.Entry<String, String> entry : effective.extras.entrySet()) {
             if (entry.getValue() != null && !entry.getValue().isEmpty()) shortcut.putExtra(entry.getKey(), entry.getValue());
         }
-        if (!effective.extras.containsKey(LinuxTouchMode.EXTRA) && effective.extras.containsKey(TOUCHSCREEN))
+        if (shortcut.getExtra(LinuxTouchMode.EXTRA).isEmpty()
+                && !effective.extras.containsKey(LinuxTouchMode.EXTRA) && effective.extras.containsKey(TOUCHSCREEN))
             shortcut.putExtra(LinuxTouchMode.EXTRA, LinuxTouchMode.legacy(effective.extras.get(TOUCHSCREEN)));
         shortcut.saveData();
     }
@@ -147,7 +148,7 @@ public final class LinuxShortcutDefaults {
      */
     public static void snapshot(Context context, Container container, Shortcut shortcut) {
         if (shortcut == null || container == null || !container.isLinux()) return;
-        if (!LinuxTouchMode.valid(shortcut.getExtra(LinuxTouchMode.EXTRA))) {
+        if (shortcut.getExtra(LinuxTouchMode.EXTRA).isEmpty()) {
             shortcut.putExtra(LinuxTouchMode.EXTRA, LinuxTouchMode.resolve(container, shortcut,
                     GameProfiles.resolve(context, container, shortcut)));
             shortcut.saveData();

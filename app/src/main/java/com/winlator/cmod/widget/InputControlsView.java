@@ -1,5 +1,6 @@
 package com.winlator.cmod.widget;
 
+import android.view.InputDevice;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -364,7 +365,7 @@ public class InputControlsView extends View {
     }
 
     public void setShowTouchscreenControls(boolean showTouchscreenControls) {
-        if (!showTouchscreenControls && touchpadView != null && touchpadView.isNativeTouch()) cancelNativeInput();
+        if (!showTouchscreenControls && touchpadView != null && touchpadView.ownsGuestContacts()) cancelNativeInput();
         this.showTouchscreenControls = showTouchscreenControls;
     }
 
@@ -427,7 +428,7 @@ public class InputControlsView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        if (touchpadView != null && touchpadView.isNativeTouch()) cancelNativeInput();
+        if (touchpadView != null && touchpadView.ownsGuestContacts()) cancelNativeInput();
     }
 
     @Override
@@ -616,7 +617,7 @@ public class InputControlsView extends View {
             java.util.List<ControlElement> captured = nativeControls.get(id);
             if (captured != null) for (ControlElement element : captured) element.handleTouchUp(id);
         }
-        touchpadView.onNativeTouchEvent(event, nativeControls.keySet());
+        touchpadView.onGuestTouchEvent(event, nativeControls.keySet());
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) nativeControls.remove(id);
         return true;
     }
@@ -624,8 +625,9 @@ public class InputControlsView extends View {
     @Override
     public boolean onTouchEvent(MotionEvent event) {
 
-        if (!editMode && touchpadView != null && touchpadView.isNativeTouch()
-                && event.getToolType(event.getActionIndex()) != MotionEvent.TOOL_TYPE_STYLUS) {
+        if (!editMode && touchpadView != null && touchpadView.ownsGuestContacts()
+                && event.getToolType(event.getActionIndex()) != MotionEvent.TOOL_TYPE_STYLUS
+                && !event.isFromSource(InputDevice.SOURCE_MOUSE)) {
             updateTouchscreenTimeout(event);
             return routeNativeInput(event);
         }

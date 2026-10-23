@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.ConnectivityManager;
-import android.os.Process;
 import android.util.Log;
 
 import androidx.preference.PreferenceManager;
@@ -51,7 +50,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
     private String[] nativeArm64Arguments;
     public void setNativeArm64Arguments(String[] arguments) { nativeArm64Arguments = arguments.clone(); }
-    private static volatile int pid = -1;
+    private volatile int pid = -1;
+    private com.winlator.cmod.core.ContainerProcess process;
     public int getPid() { return pid; }
     private String[] bindingPaths;
     private EnvVars envVars;
@@ -59,7 +59,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String box64Preset = Box64Preset.COMPATIBILITY;
     private String fexcorePreset = FEXCorePreset.INTERMEDIATE;
     private Callback<Integer> terminationCallback;
-    private static final Object lock = new Object();
+    private final Object lock = new Object();
     private final ContentsManager contentsManager;
     private final ContentProfile wineProfile;
     private Container container;
@@ -275,10 +275,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     public void stop() {
         stopping = true;
         synchronized (lock) {
-            if (pid != -1) {
-                Process.killProcess(pid);
-                pid = -1;
-            }
+            if (process != null) process.requestStop();
+            pid = -1;
         }
     }
 
@@ -634,7 +632,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             argv[0] = winePath + "/wine";
             Log.i("WindowsLaunch", "Native ARM64: " + java.util.Arrays.toString(argv));
         } else argv = ProcessHelper.splitCommand(command);
-        return ProcessHelper.exec(argv, execEnvVars.toStringArray(), rootDir, (status) -> {
+        process = environment.startProcess(argv, execEnvVars.toStringArray(), rootDir, (status) -> {
             synchronized (lock) {
                 pid = -1;
             }
@@ -642,6 +640,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             Log.i("GuestProgramLauncher", "Wine/Proton launcher exited with status " + status);
             onProcessExit(status);
         }, output::append);
+        return process.getPid();
     }
 
     private void addBox64EnvVars(EnvVars envVars, boolean enableLogs) {

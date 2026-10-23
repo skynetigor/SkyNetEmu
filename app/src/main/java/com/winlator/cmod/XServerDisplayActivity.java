@@ -238,6 +238,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean isRelativeMouseMovement = false;
     private boolean isMouseDisabled = false;
     private boolean simulateTouchScreen = false;
+    private String touchInputMode = "touchpad";
     private boolean realMouseConnected;
 
     private SensorManager sensorManager;
@@ -612,10 +613,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             isRelativeMouseMovement = shortcut.getExtra("enableRelativeMouse").equals("1");
             isMouseDisabled = shortcut.getExtra("disableMouse").equals("1");
         }
-        if (linuxSession) {
-            simulateTouchScreen = com.winlator.cmod.linux.LinuxTouchMode.NATIVE.equals(
-                    com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, gameProfile));
-        }
+        touchInputMode = linuxSession
+                ? com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, gameProfile)
+                : com.winlator.cmod.input.TouchInputMode.resolve(container, shortcut, gameProfile);
+        simulateTouchScreen = "native".equals(touchInputMode) || "touchscreen".equals(touchInputMode);
 
         if (!simulateTouchScreen) isMouseDisabled = false;
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
@@ -1162,29 +1163,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         Executors.newSingleThreadExecutor().execute(() -> {
 
-            if (linuxSession) {
-                // The app restarts below; the session's processes must be gone before that happens.
-                LinuxProgramLauncherComponent linuxLauncher = environment != null
-                        ? environment.getComponent(LinuxProgramLauncherComponent.class) : null;
-                if (linuxLauncher != null) linuxLauncher.awaitTeardown();
-            }
-            else ProcessHelper.terminateAllWineProcesses();
-
-            long start = System.currentTimeMillis();
-            while (!linuxSession && !ProcessHelper.listRunningWineProcesses().isEmpty()) {
-                long elapsed = System.currentTimeMillis() - start;
-                if (elapsed >= 1500) {
-
-                    for (String pid : ProcessHelper.listRunningWineProcesses()) {
-                        ProcessHelper.killProcess(Integer.parseInt(pid));
-                    }
-                    break;
-                }
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException ignored) {
-                    break;
-                }
+            try {
+                if (environment != null) environment.awaitTeardown();
+            } catch (IllegalStateException error) {
+                Log.e("ContainerShutdown", "Container shutdown did not complete", error);
+                runOnUiThread(() -> {
+                    preloaderDialog.closeOnUiThread();
+                    exiting.set(false);
+                    new android.app.AlertDialog.Builder(this).setMessage(R.string.container_shutdown_failed)
+                            .setPositiveButton(android.R.string.ok, null).show();
+                });
+                return;
             }
             if (shortcut != null && GameSaveManager.shouldAutoBackup(this, shortcut)) {
                 GameSaveManager.BackupResult saveResult = GameSaveManager.backup(shortcut, true);
@@ -1205,6 +1194,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (!isChangingConfigurations() && environment != null)
+            environment.stopEnvironmentComponents();
+        if (inputControlsView != null) inputControlsView.cancelNativeInput();
+        if (touchpadView != null) touchpadView.cancelNativeTouches();
         com.winlator.cmod.linux.FramePipelineDiagnostics.stop();
         if (performanceSession != null) performanceSession.close();
         if (realMouseListener != null) {
@@ -1316,20 +1309,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
         if (isDestroyed()) return;
-        boolean touchpad = !simulateTouchScreen;
+        boolean touchpad = "touchpad".equals(touchInputMode);
         if (touchpadView != null) {
             touchpadView.setTouchpadMode(touchpad);
             touchpadView.setRealMouseConnected(realMouseConnected && !touchpad);
         }
         if (xServerView != null) {
-            xServerView.setForceCursor(touchpad);
-            xServerView.setCursorVisible(touchpad);
+            xServerView.setForceCursor(touchpad || realMouseConnected);
+            xServerView.setCursorVisible(touchpad || realMouseConnected);
         }
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus && inputControlsView != null) inputControlsView.cancelNativeInput();
+        if (!hasFocus && touchpadView != null) touchpadView.cancelNativeTouches();
 
         if (hasFocus && cursorLock)
             touchpadView.requestPointerCapture();
@@ -1900,7 +1895,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         gameWindowZoomConfigured = zoomGameWindow;
-        if (linuxSession) renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
+        renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
         if (zoomGameWindow) renderer.setGameWindowZoom(true);
 
         if (shouldStretch) {
@@ -1918,8 +1913,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             String simTouchScreen = shortcut.getExtra("simTouchScreen");
-            if (linuxSession) touchpadView.setLinuxTouchMode(simulateTouchScreen);
-            else touchpadView.setSimTouchScreen(simTouchScreen.equals("1"));
+            touchpadView.setInputMode(touchInputMode, linuxSession);
             if (simulateTouchScreen) {
                 renderer.setCursorVisible(false);
             }
@@ -1930,11 +1924,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             renderer.setCursorVisible(false);
         }
         if (linuxSession) {
-            touchpadView.setLinuxTouchMode(simulateTouchScreen);
+            touchpadView.setInputMode(touchInputMode, true);
             applyRealMouse();
             setupLinuxKeyboard(rootView);
-            xServer.addOnScreenResizeListener((w, h) -> runOnUiThread(() -> touchpadView.onScreenResized()));
         }
+        touchpadView.setInputMode(touchInputMode, linuxSession);
+        xServer.addOnScreenResizeListener((w, h) -> runOnUiThread(() -> touchpadView.onScreenResized()));
 
         AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
 
@@ -2042,33 +2037,40 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
-        // A finger either acts where it touches (an emulated touchscreen) or moves the pointer like a touchpad; the choice is kept in the shortcut.
-        Switch swTouchpadMode = findViewById(R.id.SWTouchpadMode);
-        if (swTouchpadMode != null) {
-            swTouchpadMode.setChecked(!simulateTouchScreen);
-            swTouchpadMode.setOnCheckedChangeListener((btn, checked) -> {
-                simulateTouchScreen = !checked;
-                if (checked) {
+        android.widget.Button inputMode = findViewById(R.id.SInputMode);
+        if (inputMode != null) {
+            String[] modes = {linuxSession ? "native" : "touchscreen", "touchpad", "mouse"};
+            String[] labels = getResources().getStringArray(linuxSession ? R.array.linux_input_modes : R.array.input_modes);
+            inputMode.setText(labels[java.util.Arrays.asList(modes).indexOf(touchInputMode)]);
+            inputMode.setOnClickListener(button -> com.winlator.cmod.input.TouchInputModeDialog.show(this,
+                    getString(R.string.input_mode), labels, modes, touchInputMode, mode -> {
+                if (mode.equals(touchInputMode)) return;
+                touchInputMode = mode;
+                inputMode.setText(labels[java.util.Arrays.asList(modes).indexOf(mode)]);
+                simulateTouchScreen = "native".equals(mode) || "touchscreen".equals(mode);
+                if (!simulateTouchScreen) {
                     isMouseDisabled = false;
                     Switch disabled = findViewById(R.id.SWDisableMouse);
                     if (disabled != null) disabled.setChecked(false);
                     if (touchpadView != null) touchpadView.setMouseEnabled(true);
                 }
-                if (linuxSession && inputControlsView != null) inputControlsView.cancelNativeInput();
+                if (inputControlsView != null) inputControlsView.cancelNativeInput();
                 if (touchpadView != null) {
-                    if (linuxSession) touchpadView.setLinuxTouchMode(simulateTouchScreen);
-                    else touchpadView.setSimTouchScreen(simulateTouchScreen);
+                    touchpadView.setInputMode(mode, linuxSession);
                 }
                 applyCursorVisibility();
                 if (shortcut != null) {
-                    if (linuxSession) shortcut.putExtra("linuxTouchMode", simulateTouchScreen ? "native" : "touchpad");
+                    shortcut.putExtra(linuxSession ? "linuxTouchMode" : "touchInputMode", mode);
                     shortcut.putExtra("simTouchScreen", simulateTouchScreen ? "1" : "0");
-                    if (checked) {
+                    if (!simulateTouchScreen) {
                         shortcut.putExtra("disableMouse", "0");
                     }
                     shortcut.saveData();
+                } else {
+                    container.putExtra(linuxSession ? "linuxTouchMode" : "touchInputMode", mode);
+                    container.saveData();
                 }
-            });
+            }));
         }
 
         applyCursorVisibility();

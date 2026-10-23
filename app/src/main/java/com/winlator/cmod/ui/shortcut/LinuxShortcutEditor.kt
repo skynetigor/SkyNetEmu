@@ -102,7 +102,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
     var fit by remember { mutableStateOf(shortcut.getExtra(FIT)) }
     var upscaler by remember { mutableStateOf(shortcut.getExtra(UPSCALER)) }
-    var touch by remember { mutableStateOf(shortcut.getExtra("linuxTouchMode")) }
+    var touch by remember { mutableStateOf(com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, null)) }
     var steamClient by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL)) }
     var multiplier by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER)) }
     var lsfgPerformance by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_PERFORMANCE_MODE, "1")) }
@@ -181,7 +181,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 when (key) {
                     FIT -> fit = value
                     UPSCALER -> upscaler = value
-                    "simTouchScreen" -> if (!shown.extras.containsKey("linuxTouchMode")) touch = if (value == "0") "touchpad" else "native"
+                    "simTouchScreen" -> if (!shown.extras.containsKey("linuxTouchMode") && touch != "mouse") touch = if (value == "0") "touchpad" else "native"
                     "linuxTouchMode" -> touch = value
                     LsfgManager.EXTRA_MULTIPLIER -> multiplier = value
                     LsfgManager.EXTRA_FLOW_SCALE -> flowScale = value
@@ -217,7 +217,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(SIZE, size.trim().ifEmpty { null })
         shortcut.putExtra(FIT, fit.ifEmpty { null })
         shortcut.putExtra("linuxTouchMode", touch)
-        shortcut.putExtra("simTouchScreen", if (touch == "touchpad") "0" else "1")
+        shortcut.putExtra("simTouchScreen", if (touch == "native") "1" else "0")
         shortcut.putExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL, steamClient.ifEmpty { null })
         shortcut.putExtra(UPSCALER, upscaler.ifEmpty { null })
         shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, multiplier.ifEmpty { null })
@@ -502,16 +502,17 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         EditorCategory(
             "input", "Input",
-            if (touch == "touchpad") "touchpad" else "touchscreen",
+            touch,
             false
         ) {
             SettingsCard {
                 SettingMappedChoice(
-                    "Touchscreen mode",
+                    context.getString(com.winlator.cmod.R.string.input_mode),
                     touch,
                     linkedMapOf(
-                        "native" to "Touchscreen: native multitouch",
-                        "touchpad" to "Touchpad: a finger moves the pointer"
+                        "native" to context.getString(com.winlator.cmod.R.string.input_mode_native),
+                        "touchpad" to context.getString(com.winlator.cmod.R.string.input_mode_touchpad),
+                        "mouse" to context.getString(com.winlator.cmod.R.string.input_mode_mouse)
                     )
                 ) { touch = it }
                 SettingsDivider()

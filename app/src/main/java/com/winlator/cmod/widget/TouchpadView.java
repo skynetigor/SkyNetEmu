@@ -50,6 +50,23 @@ public class TouchpadView extends View {
     private boolean simTouchScreen = false;
     private Boolean explicitTouchpadMode;
     public void setTouchpadMode(boolean enabled) { explicitTouchpadMode = enabled; }
+    private boolean touchMouse;
+    private boolean legacyLeftHeld, legacyLeftRelative;
+    private int gestureGeneration;
+    private com.winlator.cmod.input.TouchMouseGesture touchMouseGesture;
+    public boolean isTouchMouse() { return touchMouse; }
+    public boolean ownsGuestContacts() { return isNativeTouch() || touchMouse; }
+    public void setInputMode(String mode, boolean linux) {
+        cancelNativeTouches();
+        if (linux) setLinuxTouchMode("native".equals(mode));
+        else {
+            linuxInput = false;
+            nativeTouch = false;
+            setSimTouchScreen("touchscreen".equals(mode));
+            setTouchpadMode(!"touchscreen".equals(mode));
+        }
+        touchMouse = "mouse".equals(mode);
+    }
     private boolean linuxInput, nativeTouch, freshNativeGesture;
     private final java.util.Set<Integer> guestTouches = new java.util.HashSet<>();
 
@@ -58,22 +75,54 @@ public class TouchpadView extends View {
         xServer.setNativeMouseInput(true);
         cancelNativeTouches();
         linuxInput = true; nativeTouch = nativeMode;
+        touchMouse = false;
         setSimTouchScreen(false);
         com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(
                 com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
         if (xi != null) xi.touch.setEnabled(nativeMode);
     }
     public void cancelNativeTouches() {
-        if (linuxInput) {
-            // A mode/transform/lifecycle boundary also releases a gesture begun in Linux touchpad mode.
-            if (fingerPointerButtonLeft != null) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
-            if (fingerPointerButtonRight != null) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
-            fingerPointerButtonLeft = fingerPointerButtonRight = null;
-            java.util.Arrays.fill(fingers, null); numFingers = 0;
-            scrolling = false; scrollAccumY = 0;
+        if (touchMouseGesture != null) touchMouseGesture.cancel();
+        if (legacyLeftHeld) {
+            if (legacyLeftRelative) xServer.getWinHandler().mouseEvent(MouseEventFlags.LEFTUP, 0, 0, 0);
+            else xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+            legacyLeftHeld = false;
         }
+        gestureGeneration++;
+        continueClick = false;
+        if (fingerPointerButtonLeft != null) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+        if (fingerPointerButtonRight != null) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
+        fingerPointerButtonLeft = fingerPointerButtonRight = null;
+        java.util.Arrays.fill(fingers, null); numFingers = 0;
+        scrolling = false; scrollAccumY = 0;
         guestTouches.clear(); freshNativeGesture = true;
         xServer.cancelTouches();
+    }
+    /** Shared overlay ownership route; no native touch is emitted for Touch mouse. */
+    public boolean onGuestTouchEvent(MotionEvent event, java.util.Set<Integer> excluded) {
+        if (!touchMouse) return onNativeTouchEvent(event, excluded);
+        resetTouchscreenTimeout();
+        int action = event.getActionMasked(), index = event.getActionIndex();
+        if (action == MotionEvent.ACTION_CANCEL) { touchMouseGesture.cancel(); return true; }
+        if (action == MotionEvent.ACTION_DOWN) touchMouseGesture.begin();
+        if (!mouseEnabled || realMouseConnected) { touchMouseGesture.cancel(); return true; }
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            float[] p = XForm.transformPoint(xform, event.getX(index), event.getY(index));
+            touchMouseGesture.down(event.getPointerId(index), p[0], p[1],
+                    event.getToolType(index) == MotionEvent.TOOL_TYPE_FINGER
+                            && !event.isFromSource(InputDevice.SOURCE_MOUSE)
+                            && !excluded.contains(event.getPointerId(index)) && guestPoint(p));
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            int i = event.findPointerIndex(touchMouseGesture.primary());
+            if (i >= 0) {
+                float[] p = XForm.transformPoint(xform, event.getX(i), event.getY(i));
+                touchMouseGesture.move(event.getPointerId(i), p[0], p[1]);
+            } else touchMouseGesture.cancel();
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
+            float[] p = XForm.transformPoint(xform, event.getX(index), event.getY(index));
+            touchMouseGesture.up(event.getPointerId(index), p[0], p[1]);
+        }
+        return true;
     }
     @Override protected void onDetachedFromWindow() {
         cancelNativeTouches(); super.onDetachedFromWindow();
@@ -138,6 +187,10 @@ public class TouchpadView extends View {
     public TouchpadView(Context context, XServer xServer, Handler timeoutHandler, Runnable hideControlsRunnable) {
         super(context);
         this.xServer = xServer;
+        touchMouseGesture = new com.winlator.cmod.input.TouchMouseGesture(new com.winlator.cmod.input.TouchMouseGesture.Sink() {
+            public void move(int x, int y) { xServer.injectPointerMove(x, y); }
+            public void button(boolean pressed) { xServer.injectAbsolutePointerButton(pressed); }
+        });
 
         this.timeoutHandler = timeoutHandler; // Store the reference to timeout handler
         this.hideControlsRunnable = hideControlsRunnable; // Store the reference to the hide controls runnable
@@ -254,6 +307,9 @@ public class TouchpadView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (touchMouse && event.getToolType(event.getActionIndex()) == MotionEvent.TOOL_TYPE_FINGER
+                && !event.isFromSource(InputDevice.SOURCE_MOUSE))
+            return onGuestTouchEvent(event, java.util.Collections.emptySet());
         if (isNativeTouch() && event.getToolType(event.getActionIndex()) != MotionEvent.TOOL_TYPE_STYLUS)
             return onNativeTouchEvent(event, java.util.Collections.emptySet());
         if (linuxInput && freshNativeGesture) {
@@ -376,10 +432,13 @@ public class TouchpadView extends View {
                 fingers[pointerId] = new Finger(event.getX(actionIndex), event.getY(actionIndex));
                 numFingers++;
                 if (simTouchScreen) {
+                    final int generation = gestureGeneration;
                     final Runnable clickDelay = () -> {
-                        if (continueClick) {
+                        if (continueClick && generation == gestureGeneration) {
                             xServer.injectPointerMove(lastTouchedPosX, lastTouchedPosY);
                             xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT);
+                            legacyLeftHeld = true;
+                            legacyLeftRelative = false;
                         }
                     };
                     if (pointerId == 0) {
@@ -491,6 +550,8 @@ public class TouchpadView extends View {
 
         // Handle long press for right click (or use a dedicated method to detect long press)
         if (event.getPointerCount() == 1) {
+            legacyLeftRelative = xServer.isRelativeMouseMovement();
+            legacyLeftHeld = true;
             if (xServer.isRelativeMouseMovement())
                 xServer.getWinHandler().mouseEvent(MouseEventFlags.LEFTDOWN, 0, 0, 0);
             else
@@ -511,6 +572,7 @@ public class TouchpadView extends View {
             xServer.getWinHandler().mouseEvent(MouseEventFlags.LEFTUP, 0, 0, 0);
         else
             xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+        legacyLeftHeld = false;
     }
 
     private void handleTwoFingerScroll(MotionEvent event) {
@@ -546,9 +608,12 @@ public class TouchpadView extends View {
         switch (numFingers) {
             case 1:
                 if (simTouchScreen) {
+                    final int generation = gestureGeneration;
                     final Runnable clickDelay = () -> {
-                        if (continueClick)
+                        if (continueClick && generation == gestureGeneration) {
                             xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+                            legacyLeftHeld = false;
+                        }
                     };
                     postDelayed(clickDelay, CLICK_DELAYED_TIME);
                 }
@@ -646,7 +711,9 @@ public class TouchpadView extends View {
 
     private void releasePointerButtonLeft(final Finger finger) {
         if (pointerButtonLeftEnabled && finger == fingerPointerButtonLeft && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
+            final int generation = gestureGeneration;
             postDelayed(() -> {
+                if (generation != gestureGeneration) return;
                 if (linuxInput && finger != fingerPointerButtonLeft) return;
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
                 fingerPointerButtonLeft = null;
@@ -656,7 +723,9 @@ public class TouchpadView extends View {
 
     private void releasePointerButtonRight(final Finger finger) {
         if (pointerButtonRightEnabled && finger == fingerPointerButtonRight && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_RIGHT)) {
+            final int generation = gestureGeneration;
             postDelayed(() -> {
+                if (generation != gestureGeneration) return;
                 if (linuxInput && finger != fingerPointerButtonRight) return;
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
                 fingerPointerButtonRight = null;
@@ -846,11 +915,13 @@ public class TouchpadView extends View {
     }
 
     public void toggleFullscreen() {
+        cancelNativeTouches();
         new Handler().postDelayed(() -> updateXform(getWidth(), getHeight(), xServer.screenInfo.width, xServer.screenInfo.height),
                 UPDATE_FORM_DELAYED_TIME);
     }
     
     public void setMouseEnabled(boolean enabled) {
+        if (!enabled && touchMouseGesture != null) touchMouseGesture.cancel();
         this.mouseEnabled = enabled;
     }
 
@@ -870,6 +941,7 @@ public class TouchpadView extends View {
     }
 
     public void setRealMouseConnected(boolean connected) {
+        if (connected != realMouseConnected && touchMouseGesture != null) touchMouseGesture.cancel();
         this.realMouseConnected = connected;
     }
 }
