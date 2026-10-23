@@ -154,6 +154,7 @@ fun WinlatorTheme(content: @Composable () -> Unit) {
     val theme = WinlatorThemeManager.currentTheme()
     val colors = winlatorColorScheme(theme)
     ConfigureComposeHostFocus()
+    com.winlator.cmod.ui.GamepadNavigation.Bind()
     HideSystemBars(theme)
     ApplyLegacyChrome(colors)
     MaterialTheme(colorScheme = colors, typography = WinlatorTypography, shapes = WinlatorShapes) {
@@ -259,6 +260,7 @@ private fun ApplyLegacyChrome(colors: ColorScheme) {
 
             host.findViewById<BottomNavigationView>(R.id.BottomNavigation)?.let { bottom ->
                 ViewCompat.setBackgroundTintList(bottom, ColorStateList.valueOf(surface))
+                bottom.foreground?.mutate()?.setTint(colors.outlineVariant.toArgb())
                 bottom.itemIconTintList = tint
                 bottom.itemTextColor = tint
                 bottom.itemRippleColor = ColorStateList.valueOf(colors.primary.copy(alpha = 0.14f).toArgb())

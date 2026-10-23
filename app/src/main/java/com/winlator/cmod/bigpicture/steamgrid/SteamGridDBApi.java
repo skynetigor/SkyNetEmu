@@ -7,6 +7,12 @@ import retrofit2.http.Path;
 import retrofit2.http.Query;
 
 public interface SteamGridDBApi {
+    @GET("icons/game/{gameId}")
+    Call<SteamGridGridsResponse> getIconsByGameId(
+            @Header("Authorization") String authToken,
+            @Path("gameId") int gameId,
+            @Query("types") String types
+    );
 
     @GET("search/autocomplete/{term}")
     Call<SteamGridSearchResponse> searchGame(

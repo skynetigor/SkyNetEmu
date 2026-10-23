@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_filter_test_apps">Тестовые приложения</string>
+    <string name="library_view">Вид</string>
+    <string name="library_view_cards">Карточки</string>
+    <string name="library_view_small_icons">Маленькие значки</string>
+    <string name="library_view_medium_icons">Средние значки</string>
+    <string name="library_view_large_icons">Большие значки</string>
+    <string name="library_view_details">Подробнее</string>
+    <string name="library_configure">Настроить</string>
+    <string name="library_enter_container">Открыть контейнер</string>
+    <string name="library_saves">Сохранения</string>
+    <string name="library_storage">Хранилище</string>
+    <string name="library_container_settings">Настройки контейнера</string>
+    <string name="library_play">Играть</string>
+    <string name="library_open">Открыть</string>
+    <string name="library_favorite">В избранное</string>
+    <string name="library_unfavorite">Из избранного</string>
+    <string name="library_remove">Удалить</string>
+    <string name="library_lock_orientation">Зафиксировать ориентацию экрана</string>
+    <string name="library_vertical_mode">Вертикальный режим</string>
+    <string name="library_horizontal_mode">Горизонтальный режим</string>
+    <string name="library_controller_hints">Крестовина / стик: Выбор · A / Cross: Открыть · X / Square: Действия · B / Circle: Назад</string>
+</resources>

@@ -105,7 +105,7 @@ private fun GameDetailScreen(title: String, subtitle: String, artworkPath: Strin
 
     DisposableEffect(activity, landscape) {
         if (!landscape) {
-            activity?.setBottomNavigationVisible(false)
+            activity?.setBottomNavigationVisible(true)
             activity?.setMainToolbarVisible(true)
         }
         onDispose { }
@@ -162,7 +162,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
                 border = BorderStroke(1.dp, Color.White.copy(.16f))
             ) {
                 Column(
-                    Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp),
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
                     Row(verticalAlignment = Alignment.Top) {
@@ -209,7 +209,7 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
 
 @Composable
 private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, favorite: Boolean, callbacks: GameDetailCallbacks, toggleFavorite: () -> Unit, storageText: String) {
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState())) {
         Box(Modifier.fillMaxWidth().aspectRatio(1.28f).background(MaterialTheme.colorScheme.surface)) {
             if (artwork != null) Image(artwork.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(.18f), Color.Transparent, Color.Black.copy(.88f)))))
@@ -221,7 +221,7 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, fa
                 Text(subtitle, color = Color.White.copy(.72f), style = MaterialTheme.typography.bodyMedium)
             }
         }
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = callbacks::onPlay,
                 modifier = Modifier.fillMaxWidth().height(54.dp),

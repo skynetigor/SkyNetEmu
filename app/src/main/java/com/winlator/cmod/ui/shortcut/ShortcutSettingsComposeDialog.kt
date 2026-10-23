@@ -22,6 +22,8 @@ object ShortcutSettingsComposeDialog {
         }
         val dialog = ComponentDialog(fragment.requireContext())
         dialog.show()
+        val controllerInput = dialog.window?.let(com.winlator.cmod.ui.GamepadNavigation::install)
+        dialog.setOnDismissListener { controllerInput?.close() }
         dialog.window?.apply {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundDrawable(ColorDrawable(android.graphics.Color.BLACK))

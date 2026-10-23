@@ -185,6 +185,7 @@ private fun ShortcutDriveLetterRowV2(
                 }
             }
             DropdownMenu(expanded = letterMenuOpen, onDismissRequest = { letterMenuOpen = false }) {
+                com.winlator.cmod.ui.GamepadNavigation.Bind()
                 availableLetters.forEach { letter ->
                     DropdownMenuItem(
                         text = { Text("$letter:") },

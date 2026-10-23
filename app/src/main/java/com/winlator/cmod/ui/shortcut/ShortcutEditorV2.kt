@@ -1302,6 +1302,7 @@ private fun ExecArgumentsEditorV2(value: String, showDirectXPresets: Boolean, on
             if (showDirectXPresets) Box {
                 TextButton(onClick = { open = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    com.winlator.cmod.ui.GamepadNavigation.Bind()
                     execArgumentPresetsV2.forEach { arg ->
                         DropdownMenuItem(
                             text = { Text(arg) },
@@ -1341,7 +1342,7 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
                 TextButton(onClick = { onChanged(extensions.filterNot { it in selected }.joinToString(",")); open = false }) { Text("Done") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Vulkan Extensions") },
+            title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Vulkan Extensions") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     items(extensions) { extension ->

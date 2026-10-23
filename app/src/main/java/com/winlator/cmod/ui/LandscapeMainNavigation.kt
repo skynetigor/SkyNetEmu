@@ -68,14 +68,12 @@ fun applyAppFullscreen(activity: Activity?) {
 fun KeepLandscapeChromeHidden(activity: MainActivity?, restoreChromeOnPortrait: Boolean = true) {
     DisposableEffect(activity, restoreChromeOnPortrait) {
         val toolbar = activity?.findViewById<View>(R.id.Toolbar)
-        val bottomNavigation = activity?.findViewById<View>(R.id.BottomNavigation)
         val drawer = activity?.findViewById<DrawerLayout>(R.id.DrawerLayout)
         val decor = activity?.window?.decorView
 
         fun forceLandscapeChrome() {
             if (activity?.resources?.configuration?.orientation == Configuration.ORIENTATION_LANDSCAPE) {
                 toolbar?.visibility = View.GONE
-                bottomNavigation?.visibility = View.GONE
                 drawer?.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
             }
         }
@@ -97,7 +95,6 @@ fun KeepLandscapeChromeHidden(activity: MainActivity?, restoreChromeOnPortrait: 
                 activity?.resources?.configuration?.orientation != Configuration.ORIENTATION_LANDSCAPE
             ) {
                 toolbar?.visibility = View.VISIBLE
-                bottomNavigation?.visibility = View.VISIBLE
                 drawer?.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED)
             }
         }
@@ -105,11 +102,11 @@ fun KeepLandscapeChromeHidden(activity: MainActivity?, restoreChromeOnPortrait: 
 
     LaunchedEffect(activity) {
         applyAppFullscreen(activity)
-        activity?.setBottomNavigationVisible(false)
+        activity?.setBottomNavigationVisible(true)
         activity?.setMainToolbarVisible(false)
         withFrameNanos { }
         applyAppFullscreen(activity)
-        activity?.setBottomNavigationVisible(false)
+        activity?.setBottomNavigationVisible(true)
         activity?.setMainToolbarVisible(false)
     }
 }
@@ -141,15 +138,6 @@ fun LandscapeMainNavigation(
         Spacer(Modifier.weight(1f))
         if (actionIcon != null && onAction != null) {
             Destination(actionIcon, actionDescription, false, onAction)
-        }
-        Destination(Icons.Outlined.Home, "Library", selected == R.id.main_menu_shortcuts) {
-            activity?.navigateToMainDestination(R.id.main_menu_shortcuts)
-        }
-        Destination(Icons.Outlined.SportsEsports, "Input Controls", selected == R.id.main_menu_input_controls) {
-            activity?.navigateToMainDestination(R.id.main_menu_input_controls)
-        }
-        Destination(Icons.Outlined.Settings, "Settings", selected == R.id.main_menu_settings) {
-            activity?.navigateToMainDestination(R.id.main_menu_settings)
         }
     }
 }

@@ -230,6 +230,7 @@ private fun VCChoice(label: String, selected: String, entries: Array<String>, on
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             entries.forEach { value ->
                 DropdownMenuItem(
                     text = { Text(value) },
@@ -255,6 +256,7 @@ private fun VCDownloadChoice(label: String, selected: String, entries: Array<Str
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             entries.forEach { value ->
                 val ready = value.equals("None", true) || installed.any { it.equals(value, true) } || value.equals(selected, true)
                 DropdownMenuItem(

@@ -35,6 +35,7 @@ import java.io.File;
 public class GameDetailFragment extends Fragment {
     private final String shortcutPath;
     private Shortcut shortcut;
+    private boolean launching;
 
     public GameDetailFragment() {
         this("");
@@ -175,6 +176,8 @@ public class GameDetailFragment extends Fragment {
     }
 
     private void runShortcut() {
+        if (launching) return;
+        launching = true;
         Activity activity = requireActivity();
         if (!XrActivity.isEnabled(requireContext())) {
             Intent intent = new Intent(activity, XServerDisplayActivity.class);
@@ -190,8 +193,13 @@ public class GameDetailFragment extends Fragment {
     }
 
     private void runContainer() {
-        Activity activity = requireActivity();
-        if (!XrActivity.isEnabled(requireContext())) {
+        if (launching) return;
+        launching = true;
+        launchContainer(requireActivity(), shortcut);
+    }
+
+    public static void launchContainer(Activity activity, Shortcut shortcut) {
+        if (!XrActivity.isEnabled(activity)) {
             Intent intent = new Intent(activity, XServerDisplayActivity.class);
             intent.putExtra("container_id", shortcut.container.id);
             activity.startActivity(intent);
@@ -209,7 +217,7 @@ public class GameDetailFragment extends Fragment {
         MainActivity activity = (MainActivity) getActivity();
         activity.setDetailMode(true);
         if (isLandscape()) {
-            activity.setBottomNavigationVisible(false);
+            activity.setBottomNavigationVisible(true);
             activity.setMainToolbarVisible(false);
         }
     }
@@ -217,6 +225,7 @@ public class GameDetailFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        launching = false;
         applyDetailChrome();
     }
 

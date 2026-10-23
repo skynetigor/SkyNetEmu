@@ -12,7 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.winlator.cmod.MainActivity
-import com.winlator.cmod.ui.LibraryToolbarActions
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.theme.WinZTheme
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,7 +33,8 @@ data class LibraryItem @JvmOverloads constructor(
     /** Installed version detected using the game profile, empty when unknown. */
     val version: String = "",
     val steamClient: Boolean = false,
-    val manual: Boolean = false
+    val manual: Boolean = false,
+    val testApp: Boolean = false
 )
 
 @Stable
@@ -102,6 +102,8 @@ object LibraryComposeHost {
     const val ACTION_EXPORT = "export"
     const val ACTION_REMOVE = "remove"
     const val ACTION_FAVORITE = "favorite"
+    const val ACTION_ENTER = "enter"
+    const val ACTION_SAVES = "saves"
 
     @JvmStatic
     @JvmOverloads
@@ -113,7 +115,6 @@ object LibraryComposeHost {
     ): LibraryComposeBinding {
         val activity = context as? MainActivity
         applyAppFullscreen(activity)
-        activity?.let(LibraryToolbarActions::install)
 
         val items = mutableStateOf<List<LibraryItem>>(emptyList())
         val grid = mutableStateOf(initialGridView)
@@ -150,18 +151,24 @@ object LibraryComposeHost {
     }
 }
 
-internal enum class LibraryFilter { All, Favorites, Steam, Custom }
+internal enum class LibraryFilter { All, Favorites, Steam, Custom, TestApps }
 
-internal fun restoreLibraryFilter(name: String?): LibraryFilter =
-    LibraryFilter.values().firstOrNull { it.name == name } ?: LibraryFilter.All
+internal fun availableLibraryFilters(testAppsEnabled: Boolean): List<LibraryFilter> =
+    LibraryFilter.entries.filter { it != LibraryFilter.TestApps || testAppsEnabled }
+
+internal fun restoreLibraryFilter(name: String?, testAppsEnabled: Boolean): LibraryFilter =
+    availableLibraryFilters(testAppsEnabled).firstOrNull { it.name == name } ?: LibraryFilter.All
 
 internal fun filterLibraryItems(items: List<LibraryItem>, filter: LibraryFilter, query: String): List<LibraryItem> {
     val matching = items.filter { item ->
+        if (item.testApp != (filter == LibraryFilter.TestApps)) return@filter false
+        if (item.steamClient && filter != LibraryFilter.Steam) return@filter false
         val included = when (filter) {
             LibraryFilter.All -> true
             LibraryFilter.Favorites -> item.favorite
             LibraryFilter.Steam -> item.steam
             LibraryFilter.Custom -> item.manual && !item.steamClient
+            LibraryFilter.TestApps -> item.testApp
         }
         included && (query.isBlank() || item.name.contains(query.trim(), ignoreCase = true))
     }

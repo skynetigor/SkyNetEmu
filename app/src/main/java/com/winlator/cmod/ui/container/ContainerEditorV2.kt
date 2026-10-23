@@ -1171,7 +1171,7 @@ private fun ContainerVulkanExtensionsV2(
                 }) { Text("Done") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Vulkan Extensions") },
+            title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Vulkan Extensions") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     items(extensions) { extension ->
@@ -1231,4 +1231,3 @@ private fun containerDesktopThemeValueV2(theme: String, background: String, wall
     else
         "$themeId,$backgroundId,#0277bd"
 }
-

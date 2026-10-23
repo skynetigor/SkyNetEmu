@@ -176,7 +176,7 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
 
     DisposableEffect(activity, landscape) {
         if (landscape) {
-            activity?.setBottomNavigationVisible(false)
+            activity?.setBottomNavigationVisible(true)
             activity?.setMainToolbarVisible(false)
         }
         onDispose {

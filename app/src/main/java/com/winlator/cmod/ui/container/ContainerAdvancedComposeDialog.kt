@@ -138,6 +138,8 @@ object ContainerAdvancedComposeDialog {
             dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         dialog.show()
+        val controllerInput = dialog.window?.let(com.winlator.cmod.ui.GamepadNavigation::install)
+        dialog.setOnDismissListener { controllerInput?.close() }
     }
 }
 
@@ -326,7 +328,7 @@ private fun AdvancedEnvironmentPage(rows: MutableList<AdvancedEnvEntry>) {
                 }) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { addOpen = false }) { Text("Cancel") } },
-            title = { Text("Add environment variable") },
+            title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Add environment variable") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
@@ -535,6 +537,7 @@ private fun AdvancedChoice(label: String, selected: String, entries: List<String
             }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             entries.forEach { value ->
                 DropdownMenuItem(
                     text = { Text(value) },
@@ -570,6 +573,7 @@ private fun AdvancedMultiChoice(selected: String, entries: List<String>, onSelec
             confirmButton = { TextButton(onClick = { onSelected(draft.joinToString(",")); open = false }) { Text("Done") } },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
             text = {
+                com.winlator.cmod.ui.GamepadNavigation.Bind()
                 LazyColumn(Modifier.heightIn(max = 430.dp)) {
                     items(entries) { option ->
                         Row(

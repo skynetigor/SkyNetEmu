@@ -305,7 +305,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                 }) { Text("Done") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Select values") },
+            title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Select values") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(options) { option ->
@@ -359,7 +359,7 @@ private fun AddEnvironmentVariableDialog(
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text("Add environment variable") },
+        title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Add environment variable") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SettingChoice("Variable", selected, options) { picked ->

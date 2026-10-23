@@ -491,6 +491,7 @@ internal fun SettingChoice(
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.widthIn(min = 220.dp, max = 420.dp).heightIn(max = 480.dp)
             ) {
+                com.winlator.cmod.ui.GamepadNavigation.Bind()
                 displayEntries.distinct().forEach { value ->
                     DropdownMenuItem(
                         text = { Text(settingDisplayLabel(value), maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -557,6 +558,7 @@ internal fun SettingWineRuntimeChoice(
             onDismissRequest = { expanded = false },
             modifier = Modifier.widthIn(min = 260.dp, max = 460.dp).heightIn(max = 500.dp)
         ) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             options.forEach { option ->
                 val busy = "wine:${option.id}" in installing
                 DropdownMenuItem(
@@ -617,6 +619,7 @@ internal fun SettingInstallChoice(
             onDismissRequest = { expanded = false },
             modifier = Modifier.widthIn(min = 240.dp, max = 440.dp).heightIn(max = 480.dp)
         ) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             catalog.all.forEach { value ->
                 val available = catalog.installed.any { it.equals(value, ignoreCase = true) } || value == selected
                 val busy = "$prefix:$value" in installing
@@ -682,6 +685,7 @@ internal fun SettingDriverChoice(
             onDismissRequest = { expanded = false },
             modifier = Modifier.widthIn(min = 260.dp, max = 460.dp).heightIn(max = 500.dp)
         ) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },

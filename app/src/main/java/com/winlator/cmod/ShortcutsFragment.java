@@ -98,6 +98,7 @@ public class ShortcutsFragment extends Fragment {
     private static final String STEAMGRID_BASE_URL = "https://www.steamgriddb.com/api/v2/";
     private static String STEAMGRID_API_KEY = "0324c52513634547a7b32d6d323635d0";
     private static final ExecutorService DYNAMIC_SHORTCUT_EXECUTOR = Executors.newSingleThreadExecutor();
+    private static final ExecutorService ARTWORK_EXECUTOR = Executors.newFixedThreadPool(2);
     private static final AtomicInteger DYNAMIC_SHORTCUT_SYNC_GENERATION = new AtomicInteger();
     private static volatile String lastDynamicShortcutSignature;
 
@@ -138,6 +139,7 @@ public class ShortcutsFragment extends Fragment {
     private Bundle libraryState = new Bundle();
     
     private boolean isGridView = false;
+    private boolean launching;
     private final ArrayList<Shortcut> allShortcuts = new ArrayList<>();
     private final Set<String> artworkRequests = Collections.synchronizedSet(new HashSet<>());
 
@@ -154,7 +156,7 @@ public class ShortcutsFragment extends Fragment {
         if (savedInstanceState != null && savedInstanceState.getBundle("library_session") != null) {
             libraryState = savedInstanceState.getBundle("library_session");
         }
-        setHasOptionsMenu(true);
+        setHasOptionsMenu(false);
 
         iconPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
             if (uri != null && shortcutForIconUpdate != null) {
@@ -204,6 +206,7 @@ public class ShortcutsFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        launching = false;
         ((MainActivity) requireActivity()).refreshMainNavigation();
         // Re-publish on every app return: the background metadata pass rechecks game-profile detectors,
         // including Steam manifests and version files changed while the app was away.
@@ -214,15 +217,8 @@ public class ShortcutsFragment extends Fragment {
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         preferences = PreferenceManager.getDefaultSharedPreferences(getContext());
-        if (!preferences.getBoolean("enhanced_library_migrated", false)) {
-            isGridView = false;
-            preferences.edit()
-                    .putBoolean("shortcuts_grid_view", false)
-                    .putBoolean("enhanced_library_migrated", true)
-                    .apply();
-        } else {
-            isGridView = preferences.getBoolean("shortcuts_grid_view", false);
-        }
+        // The old true value is Cards; false was the carousel. Missing values default to Icons.
+        isGridView = preferences.getBoolean("shortcuts_grid_view", false);
 
         LibraryComposeBinding binding = LibraryComposeHost.create(
                 requireContext(),
@@ -416,9 +412,10 @@ public class ShortcutsFragment extends Fragment {
                 .build();
 
         SteamGridDBApi api = retrofit.create(SteamGridDBApi.class);
-        api.getGridsByGameId("Bearer " + STEAMGRID_API_KEY, gameId,
-                "alternate", dimensions, "static")
-                .enqueue(new Callback<SteamGridGridsResponse>() {
+        Call<SteamGridGridsResponse> request = "icon".equals(dimensions)
+                ? api.getIconsByGameId("Bearer " + STEAMGRID_API_KEY, gameId, "static")
+                : api.getGridsByGameId("Bearer " + STEAMGRID_API_KEY, gameId, "alternate", dimensions, "static");
+        request.enqueue(new Callback<SteamGridGridsResponse>() {
                     @Override
                     public void onResponse(Call<SteamGridGridsResponse> call,
                                            Response<SteamGridGridsResponse> response) {
@@ -427,8 +424,9 @@ public class ShortcutsFragment extends Fragment {
                                 && !response.body().data.isEmpty()) {
                             downloadAndSaveCover(response.body().data.get(0).url,
                                     destFile, onSuccess, onFail);
-                        } else if (onFail != null) {
-                            onFail.run();
+                        } else {
+                            Log.w(TAG, "SteamGridDB artwork unavailable: HTTP " + response.code());
+                            if (onFail != null) onFail.run();
                         }
                     }
 
@@ -442,12 +440,22 @@ public class ShortcutsFragment extends Fragment {
 
     private void downloadAndSaveCover(String url, File destFile,
                                        Runnable onSuccess, Runnable onFail) {
-        Executors.newSingleThreadExecutor().execute(() -> {
+        ARTWORK_EXECUTOR.execute(() -> {
+            HttpURLConnection conn = null;
             try {
-                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
                 conn.connect();
-                Bitmap bmp = BitmapFactory.decodeStream(conn.getInputStream());
-                if (bmp == null) { if (onFail != null) onFail.run(); return; }
+                Bitmap bmp;
+                try (InputStream input = conn.getInputStream()) {
+                    bmp = BitmapFactory.decodeStream(input);
+                }
+                if (bmp == null) {
+                    Log.w(TAG, "Artwork response is not a supported bitmap");
+                    if (onFail != null) onFail.run();
+                    return;
+                }
 
                 if (destFile.getParentFile() != null) destFile.getParentFile().mkdirs();
 
@@ -460,6 +468,8 @@ public class ShortcutsFragment extends Fragment {
             } catch (Exception e) {
                 Log.e(TAG, "Falha ao baixar cover do SteamGridDB: " + e.getMessage());
                 if (onFail != null) onFail.run();
+            } finally {
+                if (conn != null) conn.disconnect();
             }
         });
     }
@@ -490,10 +500,6 @@ public class ShortcutsFragment extends Fragment {
         allShortcuts.clear();
         if (shortcuts != null) {
             shortcuts.removeIf(shortcut -> shortcut == null || shortcut.file == null || shortcut.file.getName().isEmpty());
-            Bitmap defaultIcon = BitmapFactory.decodeResource(getResources(), R.drawable.icon_wine);
-            for (Shortcut shortcut : shortcuts) {
-                if (shortcut.icon == null) shortcut.icon = defaultIcon;
-            }
             allShortcuts.addAll(shortcuts);
         }
         publishLibraryItems();
@@ -533,7 +539,8 @@ public class ShortcutsFragment extends Fragment {
                     shortcut.isContainerOwned(),
                     "",
                     shortcut.container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteam(shortcut.path),
-                    Shortcut.ORIGIN_MANUAL.equals(shortcut.getExtra(Shortcut.EXTRA_LIBRARY_ORIGIN))
+                    Shortcut.ORIGIN_MANUAL.equals(shortcut.getExtra(Shortcut.EXTRA_LIBRARY_ORIGIN)),
+                    shortcut.container.isLinux() && com.winlator.cmod.linux.LinuxTestPrograms.isDiagnosticProgram(requireContext(), shortcut.path)
             ));
         }
         libraryController.setItems(items);
@@ -557,7 +564,43 @@ public class ShortcutsFragment extends Fragment {
             requestCover(shortcut, cover, autoIcon);
         } else if ("banner".equals(kind)) {
             requestBanner(shortcut, banner);
+        } else if ("icon".equals(kind)) {
+            requestIcon(shortcut, autoIcon);
         }
+    }
+
+    private void requestIcon(Shortcut shortcut, File icon) {
+        final String key = "icon:" + shortcut.file.getPath();
+        if (icon.isFile() || !artworkRequests.add(key)) return;
+        File exe = resolveExeFile(shortcut);
+        Runnable fetchMissing = () -> {
+            if (icon.isFile()) {
+                artworkRequests.remove(key);
+                if (getActivity() != null) getActivity().runOnUiThread(() -> refreshArtworkAndLauncherShortcuts(shortcut));
+                return;
+            }
+            if (!isAdded()) {
+                artworkRequests.remove(key);
+                return;
+            }
+            fetchArtworkFromSteamGrid(shortcut, icon, "icon", () -> {
+                artworkRequests.remove(key);
+                if (getActivity() != null) getActivity().runOnUiThread(() -> refreshArtworkAndLauncherShortcuts(shortcut));
+            }, () -> {
+                Log.w(TAG, "No icon artwork available for " + shortcut.name);
+                // Retain the attempt for this fragment lifetime to avoid retrying on every metadata refresh.
+            });
+        };
+        if (exe != null) ExeIconExtractor.extractAsync(exe, icon, false,
+                () -> {
+                    if (getActivity() != null) getActivity().runOnUiThread(fetchMissing);
+                    else artworkRequests.remove(key);
+                },
+                () -> {
+                    if (getActivity() != null) getActivity().runOnUiThread(fetchMissing);
+                    else artworkRequests.remove(key);
+                });
+        else fetchMissing.run();
     }
 
     private void requestCover(Shortcut shortcut, File cover, File autoIcon) {
@@ -595,10 +638,7 @@ public class ShortcutsFragment extends Fragment {
     }
 
     private void openGameDetails(Shortcut shortcut) {
-        if (shortcut.hasFixedSettings()) {
-            runFromShortcut(shortcut);
-            return;
-        }
+        if (libraryController != null) libraryController.setSelectedShortcutPath(shortcut.file.getPath());
         getParentFragmentManager().beginTransaction()
                 .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
                 .addToBackStack(null)
@@ -695,7 +735,8 @@ public class ShortcutsFragment extends Fragment {
 
     private void runFromShortcut(Shortcut shortcut) {
         Activity activity = getActivity();
-        if (activity == null) return;
+        if (activity == null || launching) return;
+        launching = true;
         shortcut.putExtra("lastRunAt", String.valueOf(System.currentTimeMillis()));
         shortcut.saveData();
         syncDynamicAppShortcuts();
@@ -729,8 +770,14 @@ public class ShortcutsFragment extends Fragment {
         else if (LibraryComposeHost.ACTION_SETTINGS.equals(action)) {
             ShortcutSettingsComposeDialog.show(this, shortcut);
         }
-        else if (shortcut.isContainerOwned() && !LibraryComposeHost.ACTION_FAVORITE.equals(action)) {
-            Toast.makeText(context, "This shortcut belongs to the container and cannot be changed.", Toast.LENGTH_SHORT).show();
+        else if (LibraryComposeHost.ACTION_ENTER.equals(action)) {
+            if (!launching) {
+                launching = true;
+                GameDetailFragment.launchContainer(requireActivity(), shortcut);
+            }
+        }
+        else if (LibraryComposeHost.ACTION_SAVES.equals(action)) {
+            com.winlator.cmod.ui.library.GameSavesComposeDialog.show(this, shortcut);
         }
         else if (LibraryComposeHost.ACTION_STORAGE.equals(action)) {
             com.winlator.cmod.ui.library.GameStorageComposeDialog.show(this, shortcut, this::loadShortcutsList);
@@ -744,6 +791,10 @@ public class ShortcutsFragment extends Fragment {
             iconPickerLauncher.launch("image/*");
         }
         else if (LibraryComposeHost.ACTION_REMOVE.equals(action)) {
+            if (shortcut.isContainerOwned()) {
+                Toast.makeText(context, "This shortcut is removed with its container.", Toast.LENGTH_SHORT).show();
+                return;
+            }
             ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_shortcut, () -> {
                 boolean fileDeleted = shortcut.file.delete();
                 try {

@@ -302,7 +302,7 @@ public class FileManagerFragment extends Fragment {
         if (!(requireActivity() instanceof MainActivity)) return;
         MainActivity activity = (MainActivity) requireActivity();
         boolean landscape = isLandscape();
-        activity.setBottomNavigationVisible(!landscape);
+        activity.setBottomNavigationVisible(true);
         activity.setMainToolbarVisible(!landscape);
 
         Toolbar toolbar = activity.findViewById(R.id.Toolbar);

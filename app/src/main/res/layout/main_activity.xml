@@ -31,21 +31,7 @@
             android:layout_weight="1"
             android:background="@drawable/ui_glass_background" />
 
-        <com.winlator.cmod.ui.WinZBottomNavigationView
-            android:id="@+id/BottomNavigation"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginStart="12dp"
-            android:layout_marginEnd="12dp"
-            android:layout_marginBottom="12dp"
-            android:background="@drawable/ui_bottom_nav_shell"
-            app:itemBackground="@drawable/ui_bottom_nav_item_background"
-            app:itemIconSize="23dp"
-            app:itemIconTint="@color/ui_bottom_navigation_item"
-            app:itemRippleColor="#22FFFFFF"
-            app:itemTextColor="@color/ui_bottom_navigation_item"
-            app:labelVisibilityMode="labeled"
-            app:menu="@menu/enhanced_bottom_navigation" />
+        <include layout="@layout/main_bottom_navigation" />
     </LinearLayout>
 
     <LinearLayout

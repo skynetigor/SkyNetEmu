@@ -147,7 +147,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
         boolean isBigPictureModeEnabled = sharedPreferences.getBoolean("enable_big_picture_mode", false);
 
-        if (isBigPictureModeEnabled) {
+        if (isBigPictureModeEnabled && !getIntent().hasExtra("selected_menu_item_id")) {
             Intent intent = new Intent(MainActivity.this, BigPictureActivity.class);
             startActivity(intent);
         }
@@ -165,7 +165,6 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             if (syncingBottomNavigation) return true;
             int target;
             if (item.getItemId() == R.id.bottom_nav_library) target = R.id.main_menu_shortcuts;
-            else if (item.getItemId() == R.id.bottom_nav_containers) target = R.id.main_menu_containers;
             else if (item.getItemId() == R.id.bottom_nav_controls) target = R.id.main_menu_input_controls;
             else if (item.getItemId() == R.id.bottom_nav_settings) target = R.id.main_menu_settings;
             else return false;
@@ -180,6 +179,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
 
         mainToolbar = findViewById(R.id.Toolbar);
+        getSupportFragmentManager().registerFragmentLifecycleCallbacks(new FragmentManager.FragmentLifecycleCallbacks() {
+            @Override
+            public void onFragmentResumed(@NonNull FragmentManager fm, @NonNull Fragment fragment) {
+                refreshMainNavigation();
+            }
+        }, false);
         setSupportActionBar((androidx.appcompat.widget.Toolbar) mainToolbar);
         ActionBar actionBar = getSupportActionBar();
         if (actionBar != null) {
@@ -437,7 +442,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         if (bottomNavigation == null) return;
         int bottomId = 0;
         if (menuItemId == R.id.main_menu_shortcuts) bottomId = R.id.bottom_nav_library;
-        else if (menuItemId == R.id.main_menu_containers) bottomId = R.id.bottom_nav_containers;
+        else if (menuItemId == R.id.main_menu_containers || menuItemId == R.id.main_menu_file_manager) bottomId = R.id.bottom_nav_settings;
         else if (menuItemId == R.id.main_menu_input_controls) bottomId = R.id.bottom_nav_controls;
         else if (menuItemId == R.id.main_menu_settings) bottomId = R.id.bottom_nav_settings;
         if (bottomId != 0 && bottomNavigation.getSelectedItemId() != bottomId) {
@@ -453,22 +458,38 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     public void setBottomNavigationVisible(boolean visible) {
         if (bottomNavigation == null) return;
-        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
-        bottomNavigation.setVisibility((visible && !isLandscapeOrientation()
-                && !(current instanceof ShortcutsFragment)) ? View.VISIBLE : View.GONE);
+        bottomNavigation.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
     public void refreshMainNavigation() {
-        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
-        boolean detail = current instanceof GameDetailFragment || current instanceof ContainerOverviewFragment
-                || current instanceof ContainerDetailFragment || current instanceof ContainerSectionFragment;
-        setBottomNavigationVisible(!detail);
+        setBottomNavigationVisible(true);
         setMainToolbarVisible(true);
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        if (current instanceof ShortcutsFragment || current instanceof GameDetailFragment
+                || current instanceof com.winlator.cmod.ui.addgame.AddGameFragment) {
+            selectBottomDestination(R.id.main_menu_shortcuts);
+        } else if (current instanceof InputControlsFragment) {
+            selectBottomDestination(R.id.main_menu_input_controls);
+        } else if (current instanceof SettingsFragment || current instanceof ContainersFragment
+                || current instanceof ContainerOverviewFragment || current instanceof ContainerDetailFragment
+                || current instanceof ContainerSectionFragment) {
+            selectBottomDestination(R.id.main_menu_settings);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        int destination = intent.getIntExtra("selected_menu_item_id", 0);
+        if (destination != 0) navigateToMainDestination(destination);
     }
 
     public void setMainToolbarVisible(boolean visible) {
         if (mainToolbar == null) return;
-        mainToolbar.setVisibility((visible && !isLandscapeOrientation()) ? View.VISIBLE : View.GONE);
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        mainToolbar.setVisibility((visible && !isLandscapeOrientation()
+                && !(current instanceof ShortcutsFragment)) ? View.VISIBLE : View.GONE);
     }
 
     public void navigateToMainDestination(int menuItemId) {
@@ -511,7 +532,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     }
 
     public void setDetailMode(boolean detail) {
-        setBottomNavigationVisible(!detail);
+        setBottomNavigationVisible(true);
         ActionBar actionBar = getSupportActionBar();
         if (actionBar != null) {
             actionBar.setDisplayHomeAsUpEnabled(detail);

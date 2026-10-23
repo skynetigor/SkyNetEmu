@@ -65,6 +65,8 @@ object GameStorageComposeDialog {
     fun show(fragment: Fragment, shortcut: Shortcut, onChanged: Runnable?) {
         val dialog = ComponentDialog(fragment.requireContext(), R.style.GameSavesDialog)
         dialog.show()
+        val controllerInput = dialog.window?.let(com.winlator.cmod.ui.GamepadNavigation::install)
+        dialog.setOnDismissListener { controllerInput?.close() }
         dialog.window?.apply {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -191,7 +193,10 @@ private fun GameStoragePanel(shortcut: Shortcut, onClose: () -> Unit, onChanged:
         val enough = freeBytes >= size + (1L shl 30)
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(if (mode == GameTransfer.Mode.COPY) "Copy to internal storage?" else "Move to internal storage?") },
+            title = {
+                com.winlator.cmod.ui.GamepadNavigation.Bind()
+                Text(if (mode == GameTransfer.Mode.COPY) "Copy to internal storage?" else "Move to internal storage?")
+            },
             text = {
                 Text(
                     (if (mode == GameTransfer.Mode.COPY) "The game (${GameTransfer.formatSize(size)}) is copied to internal storage. The original stays where it is."

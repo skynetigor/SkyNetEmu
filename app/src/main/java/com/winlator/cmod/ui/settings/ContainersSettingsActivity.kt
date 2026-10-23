@@ -122,6 +122,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
         applyAppFullscreen(this)
         root = FrameLayout(this).apply { id = View.generateViewId() }
         setContentView(root)
+        com.winlator.cmod.ui.AppBottomNavigation.attach(this, com.winlator.cmod.R.id.bottom_nav_settings)
 
         supportFragmentManager.addOnBackStackChangedListener {
             if (supportFragmentManager.backStackEntryCount == 0 && showingEditor) {
@@ -651,6 +652,7 @@ private fun ContainerMoreButton(
     Box(modifier) {
         ActionButton(Icons.Outlined.MoreVert, "More", Modifier.fillMaxWidth()) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             DropdownMenuItem(
                 text = { Text("Duplicate") },
                 leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
@@ -716,7 +718,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.Storage, null) },
-        title = { Text("Container properties") },
+        title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Container properties") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
