@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 10,
+  "revision": 11,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -41,7 +41,7 @@
       "label": "0.40.x",
       "status": "works",
       "default": true,
-      "notes": "Native Linux x86-64: startup and Automation Test Track loading verified with Box64 0.4.4-r3 on Snapdragon 8 Elite Gen 5. Windows ARM64: retain Proton 9 ARM64EC with DD-Turnip native Vulkan and the current device GPU identity. Disable windows.ui in the ARM64 preset DLL overrides to avoid UISettings text-scaling recursion and a startup stack overflow; the 0.40.1 first-run UI was verified with this workaround. Proton 9 previously loaded GridMapv2; standard Proton 11 and CachyOS 11 failed during Vulkan device creation on the test device. The ARM64 profile remains experimental.",
+      "notes": "Native Linux 0.40.1 x86-64: startup, CEF UI and Smallgrid rendering verified with published Box64 0.4.4-r4 on Snapdragon 8 Elite Gen 5. Main plus seven CEF helpers shared one read-only libcef code-cache inode; r4 is required for ELF caching, and existing shortcuts must select it explicitly. The preset keeps its legacy r3 identifier for compatibility but selects r4. Earlier Automation Test Track loading was verified on r3. Long-run performance is not established; uncapped testing reached Android thermal limits. Windows ARM64: retain Proton 9 ARM64EC with DD-Turnip native Vulkan and the current device GPU identity. Disable windows.ui in the ARM64 preset DLL overrides to avoid UISettings text-scaling recursion and a startup stack overflow; the 0.40.1 first-run UI was verified with this workaround. Proton 9 previously loaded GridMapv2; standard Proton 11 and CachyOS 11 failed during Vulkan device creation on the test device. The ARM64 profile remains experimental.",
       "testedOn": "Samsung Galaxy Z Fold8 Ultra (SM-F976B), Snapdragon 8 Elite Gen 5",
       "match": {
         "versionFile": {

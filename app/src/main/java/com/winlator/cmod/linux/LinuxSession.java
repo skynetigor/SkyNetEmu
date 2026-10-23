@@ -365,6 +365,11 @@ public final class LinuxSession {
         bind(argv, "/dev");
         bind(argv, "/proc");
         bind(argv, "/sys");
+        // Android denies desktop battery probes with EACCES; expose no guest power supplies instead.
+        File powerSupplies = new File(cacheDir, "linux-power-supply");
+        if (!powerSupplies.isDirectory() && !powerSupplies.mkdirs())
+            throw new IllegalStateException("Cannot create guest power supply directory");
+        bind(argv, powerSupplies.getPath(), "/sys/class/power_supply");
         bind(argv, "/dev/urandom", "/dev/random");
         bind(argv, "/proc/self/fd", "/dev/fd");
         for (int fd = 0; fd < 3; fd++) {
@@ -424,6 +429,7 @@ public final class LinuxSession {
                 String root = x86Root.dir.getPath();
                 bind(argv, "/proc", root + "/proc");
                 bind(argv, "/sys", root + "/sys");
+                bind(argv, powerSupplies.getPath(), root + "/sys/class/power_supply");
                 bind(argv, "/dev", root + "/dev");
                 bind(argv, shmDir.getPath(), root + "/dev/shm");
                 bind(argv, inputDir.getPath(), root + "/dev/input");
