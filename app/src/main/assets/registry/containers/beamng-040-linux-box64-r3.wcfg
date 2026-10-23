@@ -9,7 +9,7 @@
     "name": "BeamNG.drive 0.40, Linux (Box64)",
     "screenSize": "native",
     "linuxRuntime": "bannerlator-r9",
-    "envVars": "",
+    "envVars": "BOX64_DYNAREC_STRONGMEM=1",
     "rendererDriverId": "auto",
     "extraData": {
       "linuxEmulator": "box64",
