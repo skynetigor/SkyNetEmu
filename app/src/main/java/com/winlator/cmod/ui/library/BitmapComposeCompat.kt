@@ -33,6 +33,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap as composeAsImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -93,6 +94,7 @@ internal fun LibraryRoot(
     val context = LocalContext.current
     val activity = context as? MainActivity
     val prefs = remember { context.getSharedPreferences("library_compose_state", 0) }
+    val background = rememberLibraryBackgroundSettings()
     var size by remember {
         mutableStateOf(LibraryIconSize.entries.firstOrNull { it.name == prefs.getString("icon_size", null) }
             ?: LibraryIconSize.Medium)
@@ -173,6 +175,7 @@ internal fun LibraryRoot(
                         style = MaterialTheme.typography.labelSmall)
                 }
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    LibraryBackground(background, Modifier.matchParentSize())
                     val cell = if (grid) 172.dp else size.cell.dp
                     val columns = UiNavigationPolicy.libraryColumns(maxWidth.value, cell.value)
                     val stateKey = "library_${filter.name}_$grid"
@@ -225,7 +228,8 @@ internal fun LibraryRoot(
                     if (ids.isEmpty()) {
                         Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                             Text(stringResource(if (query.isNotBlank()) R.string.library_no_search_results
-                                else if (items.isEmpty()) R.string.library_no_games else R.string.library_empty_filter))
+                                else if (items.isEmpty()) R.string.library_no_games else R.string.library_empty_filter),
+                                color = MaterialTheme.colorScheme.onBackground)
                         }
                     } else {
                         LazyVerticalGrid(
@@ -236,6 +240,7 @@ internal fun LibraryRoot(
                         ) {
                             if (showAddGame) item(key = ADD_GAME_TILE) {
                                 AddGameTile(grid, size, pendingFocus == ADD_GAME_TILE, gridEdges(0),
+                                    customBackground = background.kind != LibraryBackgroundKind.Theme,
                                     onFocused = { onFocused(ADD_GAME_TILE) },
                                     moveFocus = { moveFocus(0, it) },
                                     onClick = { activity?.addGame() })
@@ -244,6 +249,7 @@ internal fun LibraryRoot(
                                 val gridIndex = index + if (showAddGame) 1 else 0
                                 LibraryTile(item, grid, size, cb, pendingFocus == item.shortcutPath,
                                     gridEdges(gridIndex),
+                                    customBackground = background.kind != LibraryBackgroundKind.Theme,
                                     onFocused = { onFocused(item.shortcutPath) },
                                     showMenu = { bounds -> showMenu(item, bounds) },
                                     moveFocus = { moveFocus(gridIndex, it) })
@@ -336,7 +342,7 @@ private fun libraryFilterLabel(filter: LibraryFilter): String = stringResource(w
 @Composable
 private fun AddGameTile(
     cards: Boolean, size: LibraryIconSize, requestFocus: Boolean, modifier: Modifier,
-    onFocused: () -> Unit, moveFocus: (Int) -> Boolean, onClick: () -> Unit
+    onFocused: () -> Unit, moveFocus: (Int) -> Boolean, onClick: () -> Unit, customBackground: Boolean
 ) {
     val requester = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
@@ -366,7 +372,10 @@ private fun AddGameTile(
             }
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.library_add_game), textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                color = MaterialTheme.colorScheme.onBackground,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    shadow = if (customBackground) Shadow(MaterialTheme.colorScheme.background, blurRadius = 4f) else null),
+                minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -376,7 +385,7 @@ private fun AddGameTile(
 private fun LibraryTile(
     item: LibraryItem, cards: Boolean, size: LibraryIconSize, cb: LibraryCallbacks,
     requestFocus: Boolean, modifier: Modifier, onFocused: () -> Unit,
-    showMenu: (Rect) -> Unit, moveFocus: (Int) -> Boolean
+    showMenu: (Rect) -> Unit, moveFocus: (Int) -> Boolean, customBackground: Boolean
 ) {
     var bounds by remember { mutableStateOf(Rect.Zero) }
     var focused by remember { mutableStateOf(false) }
@@ -437,13 +446,20 @@ private fun LibraryTile(
                     Icon(Icons.Outlined.MoreVert, actionsLabel, tint = Color.White)
                 }
             }
-        } else Column(Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            LibraryArtwork(item, false, Modifier.size(size.icon.dp).clip(RoundedCornerShape(22))
-                .background(MaterialTheme.colorScheme.surfaceVariant))
-            Spacer(Modifier.height(8.dp))
-            Text(item.name, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
-                maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+        } else LibraryIconContent(item, size, customBackground)
+    }
+}
+
+@Composable
+internal fun LibraryIconContent(item: LibraryItem, size: LibraryIconSize, customBackground: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        LibraryArtwork(item, false, Modifier.size(size.icon.dp).clip(RoundedCornerShape(22))
+            .background(MaterialTheme.colorScheme.surfaceVariant))
+        Spacer(Modifier.height(8.dp))
+        Text(item.name, style = MaterialTheme.typography.bodyMedium.copy(
+            shadow = if (customBackground) Shadow(MaterialTheme.colorScheme.background, blurRadius = 4f) else null),
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center, maxLines = 2, minLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 

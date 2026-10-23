@@ -176,7 +176,7 @@ fun WinlatorThemePreferenceCard(modifier: Modifier = Modifier) {
             ) {
                 Text("Appearance", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Choose the Winlator theme. Changes are applied immediately.",
+                    "Choose the SkyNetEmu theme. Changes are applied immediately.",
                     modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

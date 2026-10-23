@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_background_title">Library background</string>
+    <string name="library_background_summary">Image, animation, video or color</string>
+    <string name="library_background_preview">Preview</string>
+    <string name="library_background_description">Changes are saved immediately. Only the game area changes; filters, the header and navigation keep the app theme. Theme default uses the matching SkyNetEmu animation: Cosmic Gold, OLED Constellation or Pearl Aurora.</string>
+    <string name="library_background_add_media">Add image, animation or video</string>
+    <string name="library_background_media_hint">Images, animated GIF/WebP, MP4 and WebM · up to 100 MB. Media is copied into app storage, center-cropped and muted. Animations loop only while this screen or the Library is visible.</string>
+    <string name="library_background_color">Use a solid color</string>
+    <string name="library_background_color_swatch">Use color %1$s</string>
+    <string name="library_background_red">Red</string>
+    <string name="library_background_green">Green</string>
+    <string name="library_background_blue">Blue</string>
+    <string name="library_background_darkness">Dark overlay: %1$d%%</string>
+    <string name="library_background_blur">Blur: %1$d</string>
+    <string name="library_background_reset">Reset to theme default</string>
+    <string name="library_background_importing">Importing background…</string>
+    <string name="library_background_import_error">Cannot import this background. Choose a readable image, GIF/WebP animation or playable MP4/WebM video under 100 MB. Your previous background is unchanged.</string>
+    <string name="library_background_load_error">Cannot display the saved Library background. Choose another file or reset it in Settings → Appearance → Library background.</string>
+    <string name="library_background_back">Back to Settings</string>
+    <string name="library_background_demo_racing">Racing</string>
+    <string name="library_background_demo_space">Space</string>
+    <string name="library_background_demo_adventure">Adventure</string>
+    <string name="library_background_demo_puzzle">Puzzle</string>
+</resources>

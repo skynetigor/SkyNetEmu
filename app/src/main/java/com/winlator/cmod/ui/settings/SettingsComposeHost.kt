@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.SportsEsports
@@ -195,6 +196,12 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
         },
         EditorCategory("appearance", "Appearance", "Theme and colours", false) {
             WinlatorThemePreferenceCard()
+            NavigationRow(Icons.Outlined.Wallpaper, stringResource(R.string.library_background_title),
+                stringResource(R.string.library_background_summary)) {
+                activity?.supportFragmentManager?.beginTransaction()
+                    ?.replace(R.id.FLFragmentContainer, LibraryBackgroundFragment())
+                    ?.addToBackStack("library_background")?.commit()
+            }
         },
         EditorCategory("environments", "Environments", "Containers, Steam and components", !model.steamReady) {
             NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows and Linux environments") {

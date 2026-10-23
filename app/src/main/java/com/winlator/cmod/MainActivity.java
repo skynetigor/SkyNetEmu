@@ -470,7 +470,8 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             selectBottomDestination(R.id.main_menu_shortcuts);
         } else if (current instanceof InputControlsFragment) {
             selectBottomDestination(R.id.main_menu_input_controls);
-        } else if (current instanceof SettingsFragment || current instanceof ContainersFragment
+        } else if (current instanceof SettingsFragment
+                || current instanceof com.winlator.cmod.ui.settings.LibraryBackgroundFragment || current instanceof ContainersFragment
                 || current instanceof ContainerOverviewFragment || current instanceof ContainerDetailFragment
                 || current instanceof ContainerSectionFragment) {
             selectBottomDestination(R.id.main_menu_settings);
@@ -489,7 +490,8 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         if (mainToolbar == null) return;
         Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
         mainToolbar.setVisibility((visible && !isLandscapeOrientation()
-                && !(current instanceof ShortcutsFragment)) ? View.VISIBLE : View.GONE);
+                && !(current instanceof ShortcutsFragment)
+                && !(current instanceof com.winlator.cmod.ui.settings.LibraryBackgroundFragment)) ? View.VISIBLE : View.GONE);
     }
 
     public void navigateToMainDestination(int menuItemId) {
