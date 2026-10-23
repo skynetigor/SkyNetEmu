@@ -63,7 +63,14 @@ public class NotificationService extends Service {
         stopSelf();
         isRunning = false;
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        android.os.Process.killProcess(android.os.Process.myPid());
+        new Thread(() -> {
+            try {
+                com.winlator.cmod.xenvironment.XEnvironment.stopAll();
+                android.os.Process.killProcess(android.os.Process.myPid());
+            } catch (IllegalStateException error) {
+                android.util.Log.e("ContainerShutdown", "Workers remain after task removal", error);
+            }
+        }, "container-task-shutdown").start();
     }
 
     @Override

@@ -279,6 +279,7 @@ private fun SSChoice(label: String, selected: String, entries: Array<String>, on
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             entries.forEach { value ->
                 DropdownMenuItem(
                     text = { Text(value) },
@@ -310,6 +311,7 @@ private fun SSCompactChoice(selected: String, entries: Array<String>, onSelected
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             entries.forEach { value ->
                 DropdownMenuItem(
                     text = { Text(value) },

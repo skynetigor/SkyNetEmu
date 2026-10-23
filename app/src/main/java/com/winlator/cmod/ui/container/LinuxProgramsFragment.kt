@@ -69,6 +69,7 @@ import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxProgramInstaller
 import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.theme.WinZTheme
@@ -277,8 +278,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     fun detectChoice(path: String): ProfileChoice {
         for (entry in games) {
             val profile = GameProfileCatalog.game(context, entry.id, false) ?: continue
-            val executable = profile.defaults.executable
-            if (executable != null && path.endsWith("/$executable")) return ProfileChoice(entry.id, "")
+            val executables = profile.linuxExecutables + listOfNotNull(profile.defaults.executable)
+            if (executables.any { path.endsWith("/$it") }) return ProfileChoice(entry.id, "")
         }
         return ProfileChoice()
     }
@@ -287,7 +288,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     fun profileExtras(path: String, choice: ProfileChoice?): Map<String, String>? {
         if (choice == null || choice.gameId.isEmpty()) return null
         val profile = GameProfileCatalog.game(context, choice.gameId, false)
-        val executable = profile?.effective(profile.version(choice.versionId))?.executable
+        val executable = profile?.effective(profile.version(choice.versionId), GameProfile.Platform.LINUX)?.executable
         val root = if (executable != null && path.endsWith("/$executable")) path.removeSuffix("/$executable") else ""
         return mapOf(
             GameProfiles.EXTRA_PROFILE to choice.gameId,
@@ -298,11 +299,13 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
 
     /** Adds the shortcut, or asks for another name when this one is taken: two games can share an executable's name. */
     fun addProgram(name: String, path: String, choice: ProfileChoice? = null) {
-        val extras = profileExtras(path, choice)
+        val extras = profileExtras(path, choice).orEmpty() + mapOf(
+            com.winlator.cmod.container.Shortcut.EXTRA_LIBRARY_ORIGIN to com.winlator.cmod.container.Shortcut.ORIGIN_MANUAL
+        )
         if (ContainerManager.linuxShortcutExists(container, name)) {
             nameClash = NameClash(name, path, extras)
         } else {
-            ContainerManager.addLinuxShortcut(container, name, path, extras)
+            ContainerManager.addLinuxShortcut(context, container, name, path, extras)
             tick++
         }
     }
@@ -336,11 +339,10 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             ).show()
             return@rememberLauncherForActivityResult
         }
-        if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) == LinuxEmulator.BOX64) {
-            // Box64 reads an x86-64 program instead of mapping it, so it can stay on shared storage. FEX maps the program
-            // and its libraries into memory as executable, which shared storage refuses: they are copied like ARM64 ones.
+        if (!LinuxProgramInstaller.needsCopy(container, file)) {
+            // Programs already inside this Linux home run in place, including FEX programs and scripts.
             if (detectChoice(file.path).gameId.isNotEmpty()) pendingDirect = file
-            else addProgram(file.nameWithoutExtension, file.path)
+            else addProgram(file.nameWithoutExtension, LinuxProgramInstaller.guestPath(container, file))
             return@rememberLauncherForActivityResult
         }
         // Shared storage cannot execute programs, so the program's folder is copied into the container first.
@@ -400,9 +402,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 items(programs, key = { it.file.path }) { program ->
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -425,8 +427,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                             }) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
                             Surface(
                                 onClick = { start(program) },
-                                modifier = Modifier.size(44.dp),
-                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.size(46.dp),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Start") } }
@@ -436,9 +438,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 items(unused, key = { "unused:" + it.path }) { folder ->
                     Surface(
                         Modifier.fillMaxWidth(),
-                        shape = MaterialTheme.shapes.large,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 1.dp
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -467,7 +469,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         var choice by remember { mutableStateOf(ProfileChoice()) }
         var profile by remember { mutableStateOf<GameProfile?>(null) }
         // With a game profile the path is the game's folder and the program is the profile's executable inside it.
-        val executable = profile?.effective(profile?.version(choice.versionId))?.executable
+        val executable = profile?.effective(profile?.version(choice.versionId), GameProfile.Platform.LINUX)?.executable
         val finalPath = if (choice.gameId.isNotEmpty() && executable != null) path.trim().trimEnd('/') + "/" + executable else path.trim()
         val valid = path.startsWith("/") && path.length > 1
         AlertDialog(
@@ -507,7 +509,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     }
 
     pendingDirect?.let { file ->
-        // A program on storage that is a game of the registry (Box64 runs it where it is): add it with the game's profile, or without.
+        // A game that can run in place: add it with the registry's profile, or without.
         var choice by remember(file) { mutableStateOf(detectChoice(file.path)) }
         AlertDialog(
             onDismissRequest = { pendingDirect = null },
@@ -521,7 +523,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             confirmButton = {
                 TextButton(onClick = {
                     pendingDirect = null
-                    addProgram(file.nameWithoutExtension, file.path, choice)
+                    addProgram(file.nameWithoutExtension, LinuxProgramInstaller.guestPath(container, file), choice)
                 }) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { pendingDirect = null }) { Text("Cancel") } }
@@ -606,7 +608,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Programs cannot run from shared storage, so the folder \"${folder.name}\" " +
+                    LinuxProgramInstaller.copyReason(container, file) + "\n\nThe folder \"${folder.name}\" " +
                         "(${formatSize(pendingCopySize)}) will be copied into this container." +
                         if (gameFolder != null) "\n\nIf the game keeps its data next to this folder, copy the whole game folder \"${gameFolder.name}\" " +
                             "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead, or only the program and read the rest from storage." else ""
@@ -692,7 +694,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             },
             confirmButton = {
                 TextButton(enabled = newName.isNotBlank() && !taken, onClick = {
-                    ContainerManager.addLinuxShortcut(container, newName.trim(), clash.path, clash.extras)
+                    ContainerManager.addLinuxShortcut(context, container, newName.trim(), clash.path, clash.extras)
                     nameClash = null
                     tick++
                 }) { Text("Add") }

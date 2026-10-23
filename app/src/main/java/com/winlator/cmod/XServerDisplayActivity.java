@@ -89,6 +89,7 @@ import com.winlator.cmod.xenvironment.components.LinuxProgramLauncherComponent;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
+import com.winlator.cmod.core.WindowsLaunchPlan;
 import com.winlator.cmod.core.WineRegistryEditor;
 import com.winlator.cmod.core.WineRequestHandler;
 import com.winlator.cmod.core.WineStartMenuCreator;
@@ -117,6 +118,9 @@ import com.winlator.cmod.winhandler.TaskManagerSidebar;
 import com.winlator.cmod.winhandler.WinHandler;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
+import com.winlator.cmod.core.GameFolder;
+import com.winlator.cmod.telemetry.GameSessionRecorder;
+import com.winlator.cmod.telemetry.Telemetry;
 import com.winlator.cmod.xenvironment.XEnvironment;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
@@ -186,6 +190,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private WineInfo wineInfo;
     /** True when the container is a Linux container: the session runs under proot instead of Wine. */
     private boolean linuxSession;
+    /** The shortcut or container asks for the game window to be scaled up whatever the upscaler (Scaling: game window). */
+    private boolean gameWindowZoomConfigured;
+    /** A Linux container started without a shortcut: its XFCE desktop (see {@link com.winlator.cmod.linux.LinuxDesktop}). */
+    private boolean desktopSession;
     /** What the game's registry profile says about the Linux shortcut being run; null when there is none. */
     private GameProfiles.Effective gameProfile;
     private LinuxRuntime.Installed linuxRuntime;
@@ -230,6 +238,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean isRelativeMouseMovement = false;
     private boolean isMouseDisabled = false;
     private boolean simulateTouchScreen = false;
+    private String touchInputMode = "touchpad";
+    private boolean realMouseConnected;
 
     private SensorManager sensorManager;
 
@@ -248,6 +258,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private String screenEffectProfile;
 
     private GuestProgramLauncherComponent guestProgramLauncherComponent;
+    private WindowsLaunchPlan windowsLaunchPlan;
+    private String resolvedRendererDriverId;
     private EnvVars overrideEnvVars;
 
     private void createNotifcationChannel() {
@@ -451,26 +463,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         linuxSession = container.isLinux();
+        com.winlator.cmod.linux.FramePipelineDiagnostics.configure(this);
+        if (shortcutPath != null && !shortcutPath.isEmpty()) {
+            shortcut = new Shortcut(container, new File(shortcutPath));
+            if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
+        }
+        performanceSession = new com.winlator.cmod.perf.PerformanceSession(this, shortcut);
         if (linuxSession) {
-            linuxRuntime = LinuxRuntime.resolve(this, container);
-            if (shortcutPath == null || shortcutPath.isEmpty()) {
-                Toast.makeText(this, "Choose a program to start in this container.", Toast.LENGTH_LONG).show();
-                finish();
-                return;
-            }
+            linuxRuntime = LinuxRuntime.resolve(this, com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut));
             if (linuxRuntime == null) {
                 Toast.makeText(this, "This container's Linux runtime is not installed. Download it in Components.",
                         Toast.LENGTH_LONG).show();
                 finish();
                 return;
             }
+            if (shortcutPath == null || shortcutPath.isEmpty()) {
+                // No program asked for: the container's desktop, when it is switched on and installed.
+                if (!com.winlator.cmod.linux.LinuxDesktop.enabled(container)) {
+                    Toast.makeText(this, "Choose a program to start in this container.", Toast.LENGTH_LONG).show();
+                    finish();
+                    return;
+                }
+                if (!com.winlator.cmod.linux.LinuxDesktop.isInstalled(this, linuxRuntime)) {
+                    // Offered once, then the screen starts again with the desktop in place.
+                    com.winlator.cmod.linux.LinuxDesktop.offerInstall(this, this::recreate, this::finish);
+                    return;
+                }
+                desktopSession = true;
+            }
         }
 
         containerManager.activateContainer(container);
 
-        if (shortcutPath != null && !shortcutPath.isEmpty()) {
-            shortcut = new Shortcut(container, new File(shortcutPath));
-        }
         // What the game's registry profile says about this shortcut (a Linux one only); the shortcut's own choices win over it.
         gameProfile = shortcut != null && container.isLinux() ? GameProfiles.resolve(this, container, shortcut) : null;
         // A Linux shortcut's own frame generation settings win over its container's for this session.
@@ -516,6 +540,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             wineInfo = WineInfo.fromIdentifier(this, contentsManager, wineVersion);
 
             imageFs.setWinePath(wineInfo.path);
+            try {
+                windowsLaunchPlan = WindowsLaunchPlan.resolve(imageFs, container, shortcut, wineInfo);
+            } catch (IllegalArgumentException error) {
+                Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
         }
 
         ProcessHelper.removeAllDebugCallbacks();
@@ -537,6 +568,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         dxwrapper = container.getDXWrapper();
         String dxwrapperConfig = container.getDXWrapperConfig();
         screenSize = container.getScreenSize();
+        if (desktopSession) {
+            // A desktop uses the display's own size (and is drawn at 2x on it, see LinuxDesktop); the container may name another.
+            String own = container.getExtra(com.winlator.cmod.linux.LinuxDesktop.EXTRA_SCREEN);
+            screenSize = own.isEmpty() ? "native" : own;
+        }
         winHandler.setInputType((byte) container.getInputType());
         lc_all = container.getLC_ALL();
 
@@ -577,13 +613,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             isRelativeMouseMovement = shortcut.getExtra("enableRelativeMouse").equals("1");
             isMouseDisabled = shortcut.getExtra("disableMouse").equals("1");
         }
-        if (linuxSession) {
-            // A Linux program is used by touch: the container says whether a finger acts where it touches (on by default),
-            // and a shortcut may say otherwise.
-            String own = shortcut != null ? GameProfiles.extra(shortcut, gameProfile, "simTouchScreen") : "";
-            simulateTouchScreen = !own.isEmpty() ? own.equals("1") : !"0".equals(container.getExtra(LinuxSession.EXTRA_TOUCHSCREEN));
-        }
+        touchInputMode = linuxSession
+                ? com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, gameProfile)
+                : com.winlator.cmod.input.TouchInputMode.resolve(container, shortcut, gameProfile);
+        simulateTouchScreen = "native".equals(touchInputMode) || "touchscreen".equals(touchInputMode);
 
+        if (!simulateTouchScreen) isMouseDisabled = false;
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
         this.dxwrapperConfig = DXVKConfigDialog.parseConfig(dxwrapperConfig);
 
@@ -623,6 +658,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         displayxConfig.put("precisePresentation", precisePresentation ? "1" : "0");
         if ("native".equals(screenSize.trim())) screenSize = nativeScreenSize();
         xServer = new XServer(new ScreenInfo(screenSize), useDisplayX ? "displayx" : "egl", displayxConfig);
+        xServer.setNativeMouseInput(linuxSession);
         if (linuxSession) {
             // A Linux program can list the container's resolution and the standard ones below it and pick one (RandR): the
             // screen takes its size, and the picture is scaled to the display as before.
@@ -632,6 +668,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             randr.setModesEnabled(!new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/no-randr-modes").exists());
         }
         xServer.setWinHandler(winHandler);
+        xServer.desktopSession = desktopSession;
+        xServer.windowManager.desktopSession = desktopSession;
         if (linuxSession) {
             // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3 only takes the
             // Wine wrapper's AHardwareBuffer sockets. Without them clients send images over the socket. Present stays:
@@ -642,12 +680,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     new com.winlator.cmod.xserver.extensions.XFixesExtension());
             xServer.extensions.put(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE,
                     new com.winlator.cmod.xserver.extensions.XInput2Extension(xServer));
+            // An on-screen keyboard of the desktop types through XTEST.
+            xServer.extensions.put(com.winlator.cmod.xserver.extensions.XTestExtension.MAJOR_OPCODE,
+                    new com.winlator.cmod.xserver.extensions.XTestExtension(xServer));
             // Like a real X server, start with the focus on PointerRoot, not None.
             xServer.windowManager.setFocus(xServer.windowManager.rootWindow, WindowManager.FocusRevertTo.POINTER_ROOT);
             xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
             // Only "native" output talks DRI3 (a client hands over dma-bufs); the default draws on the CPU, which Mesa
             // picks by itself when the extension is missing.
-            if (!"native".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT))) {
+            if (!"native".equals(linuxSetting(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT))) {
                 xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
             }
         }
@@ -659,12 +700,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             private void onApplicationWindowDrawn(Window window) {
                 if (!winStarted[0] && isSessionApplicationWindow(window)) {
-                    if (!simulateTouchScreen && !preferences.getBoolean("touchscreen_toggle", false)) {
+                    if (!simulateTouchScreen && (linuxSession || !preferences.getBoolean("touchscreen_toggle", false))) {
                         // A finger is its own pointer, in either direct-touch mode: no cursor to draw.
-                        xServerView.setCursorVisible(true);
+                        applyCursorVisibility();
                     }
                     preloaderDialog.closeOnUiThread();
                     winStarted[0] = true;
+                    GameSessionRecorder.onWindow();
                 }
             }
 
@@ -673,7 +715,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
              * window whose frames it counts. A Linux session has no such tag: the first top-level window that draws is it.
              */
             private void selectFrameRatingWindowOfLinuxSession(Window window) {
-                if (!linuxSession || frameRatingWindowId != -1 || !isSessionApplicationWindow(window)) return;
+                if (!linuxSession || !isSessionApplicationWindow(window)) return;
+                // Telemetry must count accepted direct frames even with the HUD hidden.
+                if (activeRendererWindowId == -1) {
+                    activeRendererWindowId = window.id;
+                    if (xServerView != null) xServerView.setSessionWindowId(window.id);
+                }
+                if (frameRatingWindowId != -1) return;
                 if (!((modernHud != null && modernHud.isUserEnabled())
                         || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) return;
                 frameRatingWindowId = window.id;
@@ -694,6 +742,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onUpdateWindowContent(Window window) {
                 onApplicationWindowDrawn(window);
+                selectFrameRatingWindowOfLinuxSession(window);
+
+                if (window.id == activeRendererWindowId) GameSessionRecorder.onFrame();
 
                 if (frameRatingWindowId == window.id) {
                     if (classicHud != null) classicHud.update();
@@ -705,6 +756,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
                     frameRatingWindowId = window.id;
                     activeRendererWindowId = window.id;
+                    if (xServerView != null) xServerView.setSessionWindowId(window.id);
                     if (xServerView != null) xServerView.setFpsWindowId(window.id);
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
@@ -718,7 +770,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // has just opened. A toolkit waits to be told: SDL keeps no keyboard focus and drops every key,
                 // and only a program that asks for the focus itself (BeamNG does) ever gets one. So the server
                 // gives it, the way a window manager would.
-                if (linuxSession && window.isMappedTopLevel()) {
+                if (linuxSession && !desktopSession && window.isMappedTopLevel()) {
                     xServer.windowManager.setFocus(window, WindowManager.FocusRevertTo.POINTER_ROOT);
                 }
             }
@@ -788,7 +840,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         Runnable runnable = () -> {
             setupUI();
-            setupSidebarInputControls();
+            applyCursorVisibility();
+        setupSidebarInputControls();
             if (controlsProfile.isEmpty()) {
 
                 simulateConfirmInputControlsDialog();
@@ -798,27 +851,54 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     setupLinuxEnvironment();
                     return;
                 }
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
-                applyGameRefreshRateUnlock();
                 try {
+                    if (windowsLaunchPlan.nativeArm64) {
+                        String components = shortcut != null ? shortcut.getExtra("wincomponents", container.getWinComponents()) : container.getWinComponents();
+                        if (!dxwrapper.equals("wined3d") || components.contains("=1"))
+                            throw new IllegalArgumentException("Use the Windows ARM64 preset with Wine builtin DLLs. The selected DirectX wrappers or Windows components contain x86/x64 DLLs.");
+                    }
+                    setupWineSystemFiles();
+                    windowsLaunchPlan.installHelper(this, container);
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                    applyGameRefreshRateUnlock();
                     setupXEnvironment();
-                } catch (PackageManager.NameNotFoundException e) {
-                    throw new RuntimeException(e);
+                } catch (PackageManager.NameNotFoundException | java.io.IOException | IllegalArgumentException e) {
+                    Log.e("WindowsLaunch", "Unable to prepare Windows game", e);
+                    runOnUiThread(() -> showProgramExitDialog(e.getMessage()));
                 }
             });
         };
 
-        if (xServer.screenInfo.height > xServer.screenInfo.width) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            configChangedCallback = runnable;
-        } else
-            runnable.run();
+        Runnable begin = () -> {
+            if (isFinishing() || isDestroyed() || exiting.get()) return;
+            if (xServer.screenInfo.height > xServer.screenInfo.width) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                configChangedCallback = runnable;
+            } else runnable.run();
+        };
+        if ("auto".equalsIgnoreCase(getSelectedRendererDriverId()) && !isDisplayXEnabled() && !useEglRenderer()) {
+            Thread prepareRenderer = new Thread(() -> {
+                try {
+                    preloaderDialog.setStatusText("Selecting Android renderer driver…");
+                    resolvedRendererDriverId = com.winlator.cmod.contents.RendererDriverCatalog.resolve(
+                            getApplicationContext(), "auto", isLinuxNativeOutput(), preloaderDialog::setStatusText);
+                    Log.i("RendererDriver", "requested=auto selected=" + resolvedRendererDriverId);
+                    preloaderDialog.setStatusText(getString(R.string.starting_up));
+                    runOnUiThread(begin);
+                } catch (Exception error) {
+                    runOnUiThread(() -> showRendererDriverFailure(error.getMessage()));
+                }
+            }, "RendererDriverSelection");
+            prepareRenderer.setDaemon(true);
+            prepareRenderer.start();
+        } else begin.run();
     }
 
     /** The window that means the program has started: Wine's marked main window, or a native program's top-level window. */
     private boolean isSessionApplicationWindow(Window window) {
+        // A desktop has no one program: the first window that draws shows it is up (what is a top-level window is the window manager's frames).
+        if (desktopSession) return window.attributes.isMapped() && window.isInputOutput() && window.getWidth() > 1 && window.getHeight() > 1;
         return linuxSession ? window.isMappedTopLevel() : window.isApplicationWindow();
     }
 
@@ -923,9 +1003,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    private com.winlator.cmod.perf.PerformanceSession performanceSession;
+
     @Override
     public void onResume() {
         super.onResume();
+        if (performanceSession != null) performanceSession.resume();
 
         if (environment != null) {
             xServerView.onResume();
@@ -940,9 +1023,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onPause() {
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        if (inputControlsView != null) inputControlsView.cancelNativeInput();
+        if (touchpadView != null) touchpadView.cancelNativeTouches();
         super.onPause();
 
         if (!isInPictureInPictureMode()) {
+            if (performanceSession != null) performanceSession.suspend();
             if (environment != null) {
                 environment.onPause();
                 xServerView.onPause();
@@ -1013,8 +1099,41 @@ public class XServerDisplayActivity extends AppCompatActivity {
         editor.apply();
     }
 
+    /** Hands what is known about the game that is about to start to the telemetry recorder (which does nothing when telemetry is off). */
+    private void startGameSessionRecording() {
+        if (!Telemetry.isEnabled()) return;
+        try {
+            boolean storageKnown = false, internal = false;
+            if (shortcut != null) {
+                GameFolder game = GameFolder.of(imageFs, container, shortcut.path);
+                if (game != null) {
+                    storageKnown = true;
+                    internal = GameFolder.isInternal(this, game.folder);
+                }
+            }
+            GameSessionRecorder.start(this,
+                    blankToNull(shortcut != null ? shortcut.getExtra("gameProfile") : ""),
+                    blankToNull(shortcut != null ? shortcut.getExtra("gameProfileVersion") : ""),
+                    blankToNull(container.getExtra("configId")),
+                    blankToNull(container.getWineVersion()),
+                    blankToNull(container.getEmulator()),
+                    blankToNull(container.getGraphicsDriver()),
+                    envVars.has("SKY_FSCACHE"),
+                    storageKnown ? (internal ? "internal" : "shared") : null);
+        }
+        catch (RuntimeException ignored) {}
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isEmpty() ? null : value;
+    }
+
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
+        com.winlator.cmod.linux.FramePipelineDiagnostics.stop();
+        if (performanceSession != null) performanceSession.close();
+        com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
+        GameSessionRecorder.end();
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
         boolean removeLoadingBar = PreferenceManager.getDefaultSharedPreferences(this)
                 .getBoolean("remove_loading_bar_when_booting_games", false);
@@ -1030,6 +1149,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (midiHandler != null)
             midiHandler.stop();
 
+        if (xServer != null) {
+            com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+            if (xi != null) xi.touch.close();
+        }
         LsfgManager.stopVsyncClock();
         if (environment != null)
             environment.stopEnvironmentComponents();
@@ -1040,29 +1163,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         Executors.newSingleThreadExecutor().execute(() -> {
 
-            if (linuxSession) {
-                // The app restarts below; the session's processes must be gone before that happens.
-                LinuxProgramLauncherComponent linuxLauncher = environment != null
-                        ? environment.getComponent(LinuxProgramLauncherComponent.class) : null;
-                if (linuxLauncher != null) linuxLauncher.awaitTeardown();
-            }
-            else ProcessHelper.terminateAllWineProcesses();
-
-            long start = System.currentTimeMillis();
-            while (!linuxSession && !ProcessHelper.listRunningWineProcesses().isEmpty()) {
-                long elapsed = System.currentTimeMillis() - start;
-                if (elapsed >= 1500) {
-
-                    for (String pid : ProcessHelper.listRunningWineProcesses()) {
-                        ProcessHelper.killProcess(Integer.parseInt(pid));
-                    }
-                    break;
-                }
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException ignored) {
-                    break;
-                }
+            try {
+                if (environment != null) environment.awaitTeardown();
+            } catch (IllegalStateException error) {
+                Log.e("ContainerShutdown", "Container shutdown did not complete", error);
+                runOnUiThread(() -> {
+                    preloaderDialog.closeOnUiThread();
+                    exiting.set(false);
+                    new android.app.AlertDialog.Builder(this).setMessage(R.string.container_shutdown_failed)
+                            .setPositiveButton(android.R.string.ok, null).show();
+                });
+                return;
             }
             if (shortcut != null && GameSaveManager.shouldAutoBackup(this, shortcut)) {
                 GameSaveManager.BackupResult saveResult = GameSaveManager.backup(shortcut, true);
@@ -1073,6 +1184,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             }
 
+            // The process ends right after this: one bounded attempt to send the session summary.
+            if (performanceSession != null) performanceSession.awaitRestore();
+            Telemetry.flushNow(1500);
             preloaderDialog.closeOnUiThread();
             runOnUiThread(() -> AppUtils.restartApplication(getApplicationContext()));
         });
@@ -1080,6 +1194,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (!isChangingConfigurations() && environment != null)
+            environment.stopEnvironmentComponents();
+        if (inputControlsView != null) inputControlsView.cancelNativeInput();
+        if (touchpadView != null) touchpadView.cancelNativeTouches();
+        com.winlator.cmod.linux.FramePipelineDiagnostics.stop();
+        if (performanceSession != null) performanceSession.close();
         if (realMouseListener != null) {
             InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
             if (inputManager != null) inputManager.unregisterInputDeviceListener(realMouseListener);
@@ -1091,6 +1211,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             winlatorLogcatLogger = null;
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        if (xServer != null) {
+            com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+            if (xi != null) xi.touch.close();
+        }
         LsfgManager.stopVsyncClock();
         LsfgManager.endSession();
         super.onDestroy();
@@ -1153,8 +1277,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /**
-     * With a real mouse connected the touch emulation of a mouse (touchpad, touch screen, simulated touch) is
-     * switched off, and the cursor, which the touch modes hide, is shown. Follows the mouse being plugged in or out.
+     * Track physical mouse devices. Explicit touchpad mode still accepts fingers; cursor visibility follows the mode.
      */
     private void watchRealMouse() {
         InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
@@ -1175,17 +1298,33 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         final boolean realMouse = connected;
         runOnUiThread(() -> {
-            if (touchpadView != null) touchpadView.setRealMouseConnected(realMouse);
-            // The cursor is only hidden by the touch modes, so only they need it brought back.
-            if (xServerView != null && (simulateTouchScreen || preferences.getBoolean("touchscreen_toggle", false))) {
-                xServerView.setCursorVisible(realMouse);
-            }
+            realMouseConnected = realMouse;
+            applyCursorVisibility();
         });
+    }
+
+    private void applyCursorVisibility() {
+        if (android.os.Looper.myLooper() != getMainLooper()) {
+            runOnUiThread(this::applyCursorVisibility);
+            return;
+        }
+        if (isDestroyed()) return;
+        boolean touchpad = "touchpad".equals(touchInputMode);
+        if (touchpadView != null) {
+            touchpadView.setTouchpadMode(touchpad);
+            touchpadView.setRealMouseConnected(realMouseConnected && !touchpad);
+        }
+        if (xServerView != null) {
+            xServerView.setForceCursor(touchpad || realMouseConnected);
+            xServerView.setCursorVisible(touchpad || realMouseConnected);
+        }
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus && inputControlsView != null) inputControlsView.cancelNativeInput();
+        if (!hasFocus && touchpadView != null) touchpadView.cancelNativeTouches();
 
         if (hasFocus && cursorLock)
             touchpadView.requestPointerCapture();
@@ -1268,6 +1407,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.saveData();
     }
 
+    /**
+     * The experimental file-system cache (libfscache.so, see winlator/fscache.c): a switch on the container that a shortcut can
+     * override (its "fileCache" extra is "" to follow the container, "1" for on, "0" for off). It becomes the SKY_FSCACHE
+     * variables the launcher reads; a SKY_FSCACHE the user typed among the environment variables is left alone unless the
+     * shortcut says off.
+     */
+    private void applyFileCache() {
+        String own = shortcut != null ? shortcut.getExtra("fileCache") : "";
+        boolean on = own.isEmpty() ? "1".equals(container.getExtra("fileCache")) : "1".equals(own);
+        if (!own.isEmpty() && !on) {
+            envVars.remove("SKY_FSCACHE");
+            envVars.remove("SKY_FSCACHE_PROBE");
+        } else if (on && !envVars.has("SKY_FSCACHE")) {
+            envVars.put("SKY_FSCACHE", "1");
+            if (!envVars.has("SKY_FSCACHE_PROBE")) envVars.put("SKY_FSCACHE_PROBE", "1");
+        }
+    }
+
     private void setupXEnvironment() throws PackageManager.NameNotFoundException {
 
         envVars.put("LC_ALL", lc_all);
@@ -1295,16 +1452,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
             guestProgramLauncherComponent.setContainer(this.container);
             guestProgramLauncherComponent.setWineInfo(this.wineInfo);
 
-            String guestExecutable = "wine explorer /desktop=shell," + xServer.screenInfo + " " + getWineStartCommand();
-
-            guestProgramLauncherComponent.setGuestExecutable(guestExecutable);
+            if (windowsLaunchPlan.nativeArm64) {
+                guestProgramLauncherComponent.setNativeArm64Arguments(windowsLaunchPlan.wineArguments(xServer.screenInfo.toString(), shortcut));
+            } else {
+                guestProgramLauncherComponent.setGuestExecutable("wine explorer /desktop=shell," + xServer.screenInfo + " " + getWineStartCommand());
+            }
 
             envVars.putAll(container.getEnvVars());
 
             if (shortcut != null)
                 envVars.putAll(shortcut.getExtra("envVars"));
 
+            applyFileCache();
+
             applyOpenGLDriverEnvVars();
+            windowsLaunchPlan.applyEnvironment(envVars);
 
             if (!wineCpuTopologyValue.isEmpty()) {
                 envVars.put("WINE_CPU_TOPOLOGY", wineCpuTopologyValue);
@@ -1365,7 +1527,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> runOnUiThread(this::exit));
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            GameSessionRecorder.onGuestExit(status);
+            runOnUiThread(() -> onWineProgramExit(guestProgramLauncherComponent, status));
+        });
 
         environment.addComponent(guestProgramLauncherComponent);
 
@@ -1374,7 +1539,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         }
 
+        startGameSessionRecording();
         environment.startEnvironmentComponents();
+        if (performanceSession != null) performanceSession.setGuestRoot(guestProgramLauncherComponent.getPid());
         LsfgManager.startVsyncClock(this, container);
 
         winHandler.start();
@@ -1386,6 +1553,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     }
 
+    private void onWineProgramExit(GuestProgramLauncherComponent launcher, int status) {
+        if (exiting.get() || isFinishing() || isDestroyed()) return;
+        if (!launcher.getOutput().hasFailure(status)) {
+            exit();
+            return;
+        }
+        String message = launcher.getOutput().exitMessage(status, launcher.secondsRunning());
+        com.winlator.cmod.telemetry.ErrorReporter.report("wine_program_exit", "WineProgramExit", message);
+        showProgramExitDialog(message);
+    }
+
     /** A Linux program ended: a failure is explained to the user before the session is closed. */
     private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
         int status = launcher.guestStatus(prootStatus);
@@ -1394,21 +1572,66 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
         preloaderDialog.closeOnUiThread();
+        com.winlator.cmod.telemetry.ErrorReporter.linuxExit(status, launcher.secondsRunning(), launcher.setupDescription(), launcher.lastOutput(40));
+        // Exit reporting captured this session's suppliers; a dead launcher must not trigger later stall warnings.
+        com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
         String reason = status > 128
                 ? "was stopped by signal " + (status - 128) + (status == 139 ? " (a crash)" : "")
                 : "exited with code " + status;
         String output = launcher.lastOutput(12);
         String message = "The program " + reason + " after " + launcher.secondsRunning() + " s."
                 + (output.isEmpty() ? "" : "\n\n" + output);
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("The program stopped")
+        showProgramExitDialog(message);
+    }
+
+    private boolean programExitDialogShown;
+
+    private void showProgramExitDialog(String message) {
+        if (programExitDialogShown || exiting.get() || isFinishing() || isDestroyed()) return;
+        programExitDialogShown = true;
+        preloaderDialog.closeOnUiThread();
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.program_stopped)
                 .setMessage(message)
                 .setPositiveButton(android.R.string.ok, (d, w) -> exit())
+                .setNeutralButton(R.string.copy_error, null)
                 .setOnCancelListener(d -> exit())
-                .show();
+                .create();
+        dialog.setOnShowListener(d -> {
+            android.widget.TextView text = dialog.findViewById(android.R.id.message);
+            if (text != null) {
+                text.setTextIsSelectable(true);
+                // Selectable text otherwise takes initial focus and can scroll straight to the last
+                // diagnostic. Start at the exit explanation; long-press selection still works.
+                for (android.view.ViewParent parent = text.getParent(); parent instanceof View;
+                     parent = parent.getParent()) {
+                    if (parent instanceof android.widget.ScrollView) {
+                        android.widget.ScrollView scroll = (android.widget.ScrollView) parent;
+                        scroll.setFocusableInTouchMode(true);
+                        scroll.setDescendantFocusability(android.view.ViewGroup.FOCUS_BEFORE_DESCENDANTS);
+                        scroll.requestFocus();
+                        scroll.post(() -> scroll.scrollTo(0, 0));
+                        break;
+                    }
+                }
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
+                        getSystemService(CLIPBOARD_SERVICE);
+                if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                        getString(R.string.program_stopped), message));
+            });
+        });
+        dialog.show();
     }
 
     /** Starts the X server, audio and the Linux program (the desktop, or the shortcut's program) under proot. */
+    /** A Linux setting: the shortcut's own when it sets one, otherwise the container's. */
+    private String linuxSetting(String name) {
+        String own = shortcut != null ? shortcut.getExtra(name) : "";
+        return !own.isEmpty() ? own : container.getExtra(name);
+    }
+
     private void setupLinuxEnvironment() {
         String rootPath = imageFs.getRootDir().getPath();
         FileUtils.clear(imageFs.getTmpDir());
@@ -1417,6 +1640,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XClientRequestHandler.trace = new File(container.getLinuxHomeDir(), ".xtrace").exists();
         // A file named .xstats turns on a summary every few seconds of what the X server is asked to do and how long it takes (tag XStats).
         XClientRequestHandler.stats = new File(container.getLinuxHomeDir(), ".xstats").exists();
+        XClientRequestHandler.keyTrace = new File(container.getLinuxHomeDir(), ".xkeys").exists();
+        // A file named .xdump logs the stack of every thread 15 seconds in (logcat tag XDump): for finding what a hung X client waits on.
+        if (new File(container.getLinuxHomeDir(), ".xdump").exists()) {
+            Thread dumper = new Thread(() -> {
+                try { Thread.sleep(15000); } catch (InterruptedException e) { return; }
+                for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+                    StringBuilder text = new StringBuilder("== " + entry.getKey().getName() + " " + entry.getKey().getState());
+                    for (StackTraceElement frame : entry.getValue()) text.append("\n    ").append(frame);
+                    Log.w("XDump", text.toString());
+                }
+            }, "xdump");
+            dumper.setDaemon(true);
+            dumper.start();
+        }
 
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(
@@ -1431,15 +1668,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = LinuxSession.programCommand(this, container, shortcut);
-        LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
+        // The x86 emulator of the program: the container's, or the one its shortcut sets (the desktop has none: it is the container's).
+        Container linuxContainer = desktopSession ? container : com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut);
+        if (desktopSession) com.winlator.cmod.linux.LinuxDesktop.prepareLaunchers(this, container);
+        String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command(this, com.winlator.cmod.linux.LinuxDesktop.scaleFor(xServer.screenInfo.width))
+                : LinuxSession.programCommand(this, linuxContainer, shortcut);
+        LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(linuxContainer, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.
         launcher.setTerminationCallback((status) -> runOnUiThread(
                 () -> handler.postDelayed(() -> onLinuxProgramExit(launcher, status), 500)));
         environment.addComponent(launcher);
 
+        String rendererDriver = getSelectedRendererDriverId();
+        com.winlator.cmod.telemetry.LinuxDiagnostics.start(this, new File(container.getLinuxHomeDir(), ".local/share/Steam/logs"),
+                launcher::diagnosticOutput, () -> launcher.setupDescription()
+                        + " rendererRequested=" + rendererDriver
+                        + " rendererPresent=" + (shortcut != null ? shortcut.getRendererPresentMode() : container.getRendererPresentMode())
+                        + " resolution=" + xServer.screenInfo.width + "x" + xServer.screenInfo.height,
+                launcher::processSnapshot, launcher::crashEvidence);
         environment.startEnvironmentComponents();
+        if (performanceSession != null) performanceSession.setGuestRoot(launcher.getPid());
     }
 
     private void createWrapperScript(String path, String content) {
@@ -1458,6 +1707,41 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return container != null ? container.getSurfaceFormat() : "rgba8";
     }
 
+    private String getSelectedRendererDriverId() {
+        if (resolvedRendererDriverId != null) return resolvedRendererDriverId;
+        String id = shortcut != null ? shortcut.getRendererDriverId()
+                : (container != null ? container.getRendererDriverId() : "");
+        if (id == null || id.isEmpty()) id = graphicsDriverConfig != null ? graphicsDriverConfig.get("version") : null;
+        return id;
+    }
+
+    private boolean isLinuxNativeOutput() {
+        return linuxSession && container != null
+                && "native".equals(linuxSetting(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
+    }
+
+    private boolean useEglRenderer() {
+        return !isDisplayXEnabled() && ((linuxSession && !isLinuxNativeOutput())
+                || (shortcut != null ? shortcut.getRendererNative() : container != null && container.getRendererNative()));
+    }
+
+    private void showRendererDriverFailure(String message) {
+        if (isFinishing() || isDestroyed() || exiting.get()) return;
+        String selected = getSelectedRendererDriverId();
+        String diagnostics = "rendererRequested=" + (resolvedRendererDriverId == null ? selected : "auto")
+                + " rendererSelected=" + selected;
+        Log.e("RendererDriver", diagnostics + " error=" + message);
+        com.winlator.cmod.telemetry.Telemetry.event("skynet.error", "launch", "failure",
+                "error.type", "renderer_initialization_failed", "error.message", message,
+                "skynet.renderer.diagnostics", diagnostics);
+        preloaderDialog.closeOnUiThread();
+        new android.app.AlertDialog.Builder(this).setTitle("Renderer driver unavailable")
+                .setMessage(message + "\n\nRenderer driver: " + selected
+                        + "\nChoose Auto or a compatible Android Turnip driver in the shortcut's Renderer driver setting.")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> exit())
+                .setOnCancelListener(dialog -> exit()).show();
+    }
+
     private void setupUI() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
 
@@ -1465,10 +1749,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // The Vulkan renderer loads a bionic driver prepared for Wine containers, so Linux sessions use EGL.
         // "Native" Vulkan output hands frames over as dma-bufs, which only the Vulkan renderer can import.
-        boolean linuxNativeOutput = linuxSession && container != null
-                && "native".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
-        boolean useEGL = !useDisplayX && ((linuxSession && !linuxNativeOutput) || (shortcut != null ? shortcut.getRendererNative()
-                : (container != null && container.getRendererNative())));
+        boolean linuxNativeOutput = isLinuxNativeOutput();
+        boolean useEGL = useEglRenderer();
 
         if (useDisplayX || useEGL) {
             xServerView = new XServerView(this, xServer);
@@ -1481,6 +1763,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (renderer instanceof VulkanXServerView) {
             VulkanXServerView vkRenderer = (VulkanXServerView) renderer;
+            if (linuxNativeOutput) {
+                vkRenderer.requireDmaBufImport(this::showRendererDriverFailure);
+            } else if (resolvedRendererDriverId != null && !"system".equalsIgnoreCase(resolvedRendererDriverId)) {
+                vkRenderer.requireSelectedDriver(this::showRendererDriverFailure);
+            }
 
             EnvVars vulkanStartupVars = new EnvVars();
             if (container != null) vulkanStartupVars.putAll(container.getEnvVars());
@@ -1491,11 +1778,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     || "yes".equalsIgnoreCase(validationValue);
             vkRenderer.setValidationEnabled(validationEnabled, AppUtils.getNativeLibDir(this));
 
-            String rendererDriverId = shortcut != null ? shortcut.getRendererDriverId()
-                    : (container != null ? container.getRendererDriverId() : "");
-            if (rendererDriverId == null || rendererDriverId.isEmpty()) {
-                rendererDriverId = graphicsDriverConfig != null ? graphicsDriverConfig.get("version") : null;
-            }
+            String rendererDriverId = getSelectedRendererDriverId();
             if (rendererDriverId != null && !rendererDriverId.isEmpty() && !rendererDriverId.equalsIgnoreCase("system")) {
                 try {
                     String driverPath = getFilesDir().getAbsolutePath() + "/contents/adrenotools/" + rendererDriverId + "/";
@@ -1506,9 +1789,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     String libraryName = adrenotoolsManager.getLibraryName(rendererDriverId);
                     String nativeLibDir = AppUtils.getNativeLibDir(this);
-                    if (!libraryName.isEmpty())
+                    if (linuxNativeOutput || resolvedRendererDriverId != null || !libraryName.isEmpty())
                         vkRenderer.setDriverInfo(driverPath, libraryName, nativeLibDir);
-                } catch (Exception ignored) {
+                } catch (Exception error) {
+                    if (linuxNativeOutput || resolvedRendererDriverId != null) {
+                        vkRenderer.setDriverInfo(getFilesDir().getAbsolutePath() + "/contents/adrenotools/" + rendererDriverId + "/", "", AppUtils.getNativeLibDir(this));
+                    }
+                    android.util.Log.e("XServerDisplayActivity", "Unable to prepare renderer driver " + rendererDriverId, error);
                 }
             }
 
@@ -1560,7 +1847,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         if (container != null) {
-            String hudModeExtra = container.getExtra("hudMode");
+            String hudModeExtra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             int hudMode = !hudModeExtra.isEmpty()
                     ? Integer.parseInt(hudModeExtra)
                     : (container.isShowFPS() ? 1 : 0);
@@ -1590,14 +1877,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         boolean shouldStretch = false;
+        // The Steam container is always native size, so the window of nearly every game is smaller than its screen: it is scaled to the
+        // screen unless the container says otherwise ("scaleGameWindow" = 0). A container made before this was a default has no value.
+        boolean steamWindowDefault = linuxSession && container != null && com.winlator.cmod.steam.SteamContainer.isManaged(container)
+                && container.getExtra("scaleGameWindow").isEmpty();
+        // "2": scale the game's own window to the screen (a game smaller than a native-size container), with the upscaler.
+        boolean zoomGameWindow = false;
 
         if (shortcut != null && shortcutFullscreenStretched != null) {
 
-            shouldStretch = shortcutFullscreenStretched.equals("1");
-        } else if (container != null && container.isFullscreenStretched()) {
+            zoomGameWindow = shortcutFullscreenStretched.equals("2");
+            shouldStretch = shortcutFullscreenStretched.equals("1") || zoomGameWindow;
+        } else if (container != null && (container.isFullscreenStretched() || steamWindowDefault)) {
 
             shouldStretch = true;
+            zoomGameWindow = linuxSession && ("1".equals(container.getExtra("scaleGameWindow")) || steamWindowDefault);
         }
+
+        gameWindowZoomConfigured = zoomGameWindow;
+        renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
+        if (zoomGameWindow) renderer.setGameWindowZoom(true);
 
         if (shouldStretch) {
 
@@ -1614,25 +1913,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             String simTouchScreen = shortcut.getExtra("simTouchScreen");
-            touchpadView.setSimTouchScreen(linuxSession ? simulateTouchScreen : simTouchScreen.equals("1"));
+            touchpadView.setInputMode(touchInputMode, linuxSession);
             if (simulateTouchScreen) {
                 renderer.setCursorVisible(false);
             }
         }
         else if (linuxSession && simulateTouchScreen) {
             // A container started without a shortcut (its desktop).
-            touchpadView.setSimTouchScreen(true);
+            touchpadView.setLinuxTouchMode(true);
             renderer.setCursorVisible(false);
         }
         if (linuxSession) {
+            touchpadView.setInputMode(touchInputMode, true);
+            applyRealMouse();
             setupLinuxKeyboard(rootView);
-            xServer.addOnScreenResizeListener((w, h) -> runOnUiThread(() -> touchpadView.onScreenResized()));
         }
+        touchpadView.setInputMode(touchInputMode, linuxSession);
+        xServer.addOnScreenResizeListener((w, h) -> runOnUiThread(() -> touchpadView.onScreenResized()));
 
         AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
 
         setupSidebarHudControls();
         setupSidebarGraphicsControls();
+        if (com.winlator.cmod.linux.FramePipelineDiagnostics.enabled()) {
+            FrameLayout.LayoutParams probeLayout=new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.TOP | android.view.Gravity.CENTER_HORIZONTAL);
+            probeLayout.topMargin=Math.round(32*getResources().getDisplayMetrics().density);
+            rootView.addView(new com.winlator.cmod.widget.FramePipelineOverlay(this),probeLayout);
+        }
     }
 
     private ActivityResultLauncher<Intent> controlsEditorActivityResultLauncher = registerForActivityResult(
@@ -1728,9 +2037,47 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
+        android.widget.Button inputMode = findViewById(R.id.SInputMode);
+        if (inputMode != null) {
+            String[] modes = {linuxSession ? "native" : "touchscreen", "touchpad", "mouse"};
+            String[] labels = getResources().getStringArray(linuxSession ? R.array.linux_input_modes : R.array.input_modes);
+            inputMode.setText(labels[java.util.Arrays.asList(modes).indexOf(touchInputMode)]);
+            inputMode.setOnClickListener(button -> com.winlator.cmod.input.TouchInputModeDialog.show(this,
+                    getString(R.string.input_mode), labels, modes, touchInputMode, mode -> {
+                if (mode.equals(touchInputMode)) return;
+                touchInputMode = mode;
+                inputMode.setText(labels[java.util.Arrays.asList(modes).indexOf(mode)]);
+                simulateTouchScreen = "native".equals(mode) || "touchscreen".equals(mode);
+                if (!simulateTouchScreen) {
+                    isMouseDisabled = false;
+                    Switch disabled = findViewById(R.id.SWDisableMouse);
+                    if (disabled != null) disabled.setChecked(false);
+                    if (touchpadView != null) touchpadView.setMouseEnabled(true);
+                }
+                if (inputControlsView != null) inputControlsView.cancelNativeInput();
+                if (touchpadView != null) {
+                    touchpadView.setInputMode(mode, linuxSession);
+                }
+                applyCursorVisibility();
+                if (shortcut != null) {
+                    shortcut.putExtra(linuxSession ? "linuxTouchMode" : "touchInputMode", mode);
+                    shortcut.putExtra("simTouchScreen", simulateTouchScreen ? "1" : "0");
+                    if (!simulateTouchScreen) {
+                        shortcut.putExtra("disableMouse", "0");
+                    }
+                    shortcut.saveData();
+                } else {
+                    container.putExtra(linuxSession ? "linuxTouchMode" : "touchInputMode", mode);
+                    container.saveData();
+                }
+            }));
+        }
+
+        applyCursorVisibility();
         Switch swRelativeMouse = findViewById(R.id.SWRelativeMouse);
         if (swRelativeMouse != null) {
-            swRelativeMouse.setChecked(isRelativeMouseMovement);
+            swRelativeMouse.setEnabled(!linuxSession);
+            swRelativeMouse.setChecked(!linuxSession && isRelativeMouseMovement);
             swRelativeMouse.setOnCheckedChangeListener((btn, checked) -> {
                 isRelativeMouseMovement = checked;
                 if (xServer != null)
@@ -1745,6 +2092,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 isMouseDisabled = checked;
                 if (touchpadView != null)
                     touchpadView.setMouseEnabled(!isMouseDisabled);
+                applyCursorVisibility();
             });
         }
 
@@ -1965,7 +2313,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if      (modernHud  != null) currentMode = 2;
         else if (classicHud != null) currentMode = 1;
         else if (container  != null) {
-            String extra = container.getExtra("hudMode");
+            String extra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             if (!extra.isEmpty())           currentMode = Integer.parseInt(extra);
             else if (container.isShowFPS()) currentMode = 1;
         }
@@ -2115,15 +2463,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void saveHudModeToContainer(int mode) {
         if (container == null) return;
-        container.putExtra("hudMode", String.valueOf(mode));
-        container.setShowFPS(mode != 0);
-        container.saveData();
+        if (linuxSession && shortcut != null) {
+            shortcut.putExtra("hudMode", String.valueOf(mode));
+            shortcut.saveData();
+        } else {
+            container.putExtra("hudMode", String.valueOf(mode));
+            container.setShowFPS(mode != 0);
+            container.saveData();
+        }
         if (xServerView instanceof XServerView) {
             ((XServerView) xServerView).setShowFPS(mode != 0);
         }
     }
 
     private void setupSidebarGraphicsControls() {
+        findViewById(R.id.BTPerformanceTuning).setOnClickListener(v ->
+                com.winlator.cmod.ui.settings.PerformanceTuningDialog.show(this, shortcut, performanceSession));
         final boolean isVulkanRenderer = xServerView instanceof VulkanXServerView;
 
         View reshadePanel = findViewById(R.id.LLSubReshade);
@@ -2179,7 +2534,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ArrayAdapter<String> a = createSidebarSpinnerAdapter(fpsLabels);
             a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             spNativeFPS.setAdapter(a);
-            String savedFps = container != null ? container.getExtra("graphicsFpsPreset") : "";
+            String savedFps = container != null ? (linuxSession ? linuxSetting("graphicsFpsPreset") : container.getExtra("graphicsFpsPreset")) : "";
             int savedFpsPos = savedFps.isEmpty() ? 0 : Integer.parseInt(savedFps);
             if (savedFpsPos < 0 || savedFpsPos >= fpsLabels.length) savedFpsPos = 0;
             spNativeFPS.setSelection(savedFpsPos);
@@ -2193,8 +2548,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (vkRenderer != null) vkRenderer.setFpsLimit(fpsLimit);
                     if (nativeRenderer != null) nativeRenderer.setFpsLimit(fpsLimit);
                     if (!isVulkanRenderer && container != null) {
-                        container.putExtra("graphicsFpsPreset", String.valueOf(pos));
-                        container.saveData();
+                        if (linuxSession && shortcut != null) {
+                            shortcut.putExtra("graphicsFpsPreset", String.valueOf(pos));
+                            shortcut.saveData();
+                        } else {
+                            container.putExtra("graphicsFpsPreset", String.valueOf(pos));
+                            container.saveData();
+                        }
                     }
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
@@ -2204,6 +2564,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (btSaveGraphicsPreset != null) {
             btSaveGraphicsPreset.setOnClickListener(v -> {
                 if (container == null) return;
+                if (linuxSession && shortcut != null) {
+                shortcut.putExtra("graphicsFpsPreset",
+                    String.valueOf(spNativeFPS != null ? spNativeFPS.getSelectedItemPosition() : 0));
+                if (vkRenderer != null) {
+                    shortcut.putExtra("graphicsFilterMode",
+                        String.valueOf(swEnableFSR != null && swEnableFSR.isChecked()
+                            ? (spUpscalerMode != null ? spUpscalerMode.getSelectedItemPosition() + 2 : 2) : 0));
+                    shortcut.putExtra("graphicsSharpness",
+                        String.valueOf(sbSharpness != null ? sbSharpness.getValue() : 50f));
+                    shortcut.putExtra("graphicsPostFXMode",
+                        String.valueOf(spPostFXMode != null ? spPostFXMode.getSelectedItemPosition() : 0));
+                    shortcut.putExtra("graphicsColorMode", "0");
+                }
+                shortcut.saveData();
+                } else {
                 container.putExtra("graphicsFpsPreset",
                     String.valueOf(spNativeFPS != null ? spNativeFPS.getSelectedItemPosition() : 0));
                 if (vkRenderer != null) {
@@ -2217,6 +2592,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     container.putExtra("graphicsColorMode", "0");
                 }
                 container.saveData();
+                }
                 Toast.makeText(this, "Preset saved", Toast.LENGTH_SHORT).show();
             });
         }
@@ -2237,7 +2613,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
-        String savedSharp = container != null ? container.getExtra("graphicsSharpness") : "";
+        String savedSharp = container != null ? (linuxSession ? linuxSetting("graphicsSharpness") : container.getExtra("graphicsSharpness")) : "";
         float  initSharp  = savedSharp.isEmpty() ? 50f : Float.parseFloat(savedSharp);
         if (sbSharpness != null) {
             sbSharpness.setValue(initSharp);
@@ -2268,8 +2644,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     spUpscalerMode.setSelection(savedMode - 2);
                 vkRenderer.setFilterMode(spUpscalerMode != null
                     ? spUpscalerMode.getSelectedItemPosition() + 2 : 2);
+                // An upscaler has nothing to scale up while a game's window sits 1:1 in a native-size container: scale the window.
+                if (linuxSession) vkRenderer.setGameWindowZoom(true);
             }
             swEnableFSR.setOnCheckedChangeListener((btn, checked) -> {
+                if (linuxSession) vkRenderer.setGameWindowZoom(checked || gameWindowZoomConfigured);
                 if (spUpscalerMode != null)
                     spUpscalerMode.setVisibility(checked ? View.VISIBLE : View.GONE);
                 vkRenderer.setFilterMode(checked
@@ -2285,7 +2664,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             spPostFXMode.setAdapter(a);
 
-            String savedPFX = container != null ? container.getExtra("graphicsPostFXMode") : "";
+            String savedPFX = container != null ? (linuxSession ? linuxSetting("graphicsPostFXMode") : container.getExtra("graphicsPostFXMode")) : "";
             int initPFX = savedPFX.isEmpty() ? 0 : Integer.parseInt(savedPFX);
             if (initPFX < 0 || initPFX >= pfxLabels.length) initPFX = 0;
 
@@ -2301,7 +2680,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
-        String savedPFXInit = container != null ? container.getExtra("graphicsPostFXMode") : "";
+        String savedPFXInit = container != null ? (linuxSession ? linuxSetting("graphicsPostFXMode") : container.getExtra("graphicsPostFXMode")) : "";
         boolean dlsRestored = !savedPFXInit.isEmpty() && Integer.parseInt(savedPFXInit) == 1;
         int sharpVis = (fsrOn || dlsRestored) ? View.VISIBLE : View.GONE;
         if (lblSharpnessHeader != null) lblSharpnessHeader.setVisibility(sharpVis);
@@ -2379,7 +2758,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * but the program shows its text cursor (an I-beam) over one, so that is what is looked for after a tap.
      */
     private void setupLinuxKeyboard(FrameLayout rootView) {
-        if (!"0".equals(container.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
+        if (desktopSession) {
+            // A desktop has its own on-screen keyboard (skynet-osk, run by the session): the Android one stays closed, and a tap on
+            // a text field is passed to the keyboard of the desktop through a file in the guest's /tmp, which it watches.
+            File show = new File(com.winlator.cmod.linux.LinuxRuntime.rootDir(this, linuxRuntime.id), "tmp/" + com.winlator.cmod.linux.LinuxDesktop.OSK_SHOW_FILE);
+            touchpadView.setFingerUpCallback(() -> {
+                for (int delay : new int[]{300, 800, 1500}) {
+                    handler.postDelayed(() -> {
+                        com.winlator.cmod.xserver.Window under = xServer.inputDeviceManager.getPointWindow();
+                        com.winlator.cmod.xserver.Cursor cursor = under != null ? under.attributes.getCursor() : null;
+                        if (com.winlator.cmod.xserver.TextCursor.isTextCursor(cursor)) {
+                            try { show.createNewFile(); } catch (java.io.IOException ignored) {}
+                        }
+                    }, delay);
+                }
+            });
+            return;
+        }
+        if (!"0".equals(linuxSetting(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
             android.widget.ImageButton button = new android.widget.ImageButton(this);
             button.setImageResource(android.R.drawable.ic_menu_edit);
             android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
@@ -2396,7 +2792,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             button.setOnClickListener(v -> AppUtils.showKeyboard(this));
             rootView.addView(button, params);
         }
-        if (!"0".equals(container.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD))) {
+        if (!"0".equals(linuxSetting(LinuxSession.EXTRA_AUTO_KEYBOARD))) {
             touchpadView.setFingerUpCallback(() -> {
                 // The program changes the cursor when the pointer arrives over a field, and a slow one takes a while: look
                 // again a few times after the tap. The keyboard opens when a text cursor is seen. It is never closed from
@@ -3155,7 +3551,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         File system32dlls = null;
         File syswow64dlls = null;
 
-        if (wineInfo.isArm64EC())
+        if (wineInfo.isArm64EC() || (windowsLaunchPlan != null && windowsLaunchPlan.nativeArm64))
             system32dlls = new File(imageFs.getWinePath() + "/lib/wine/aarch64-windows");
         else
             system32dlls = new File(imageFs.getWinePath() + "/lib/wine/x86_64-windows");
@@ -3390,7 +3786,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public boolean isShowFPS() {
         if (container == null) return false;
-        String hudMode = container.getExtra("hudMode");
+        String hudMode = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
         return !hudMode.isEmpty() ? !"0".equals(hudMode) : container.isShowFPS();
     }
 
@@ -3421,6 +3817,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (property != null) {
             if (activeRendererWindowId == -1 && propName.contains("_MESA_DRV")) {
                 activeRendererWindowId = window.id;
+                if (xServerView != null) xServerView.setSessionWindowId(window.id);
+                GameSessionRecorder.onRenderer();
             }
 
             if (propName.contains("_MESA_DRV_ENGINE_NAME")
@@ -3431,6 +3829,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             activeRendererWindowId = -1;
             lastRendererName = null;
+            if (xServerView != null) xServerView.setSessionWindowId(-1);
         }
 
         if (classicHud == null && modernHud == null) return;

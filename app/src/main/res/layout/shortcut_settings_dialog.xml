@@ -651,11 +651,11 @@
                         android:layout_height="wrap_content"
                         android:text="Disable Mouse" />
 
-                    <CheckBox
-                        android:id="@+id/CBTouchscreenMode"
+                    <Spinner
+                        android:id="@+id/SInputMode"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/simulate_touch_screen" />
+                        android:contentDescription="@string/input_mode" />
 
                 </LinearLayout>
 

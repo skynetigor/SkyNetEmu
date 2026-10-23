@@ -111,7 +111,9 @@ import com.winlator.cmod.ui.settings.normalizeResolution
 import com.winlator.cmod.ui.settings.readConfig
 import com.winlator.cmod.ui.settings.writeConfig
 import com.winlator.cmod.winhandler.WinHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -132,11 +134,13 @@ private class ContainerEditorStateV2(
     manager: ContainerManager,
     val editing: Container?
 ) {
+    val nativeArm64 = editing?.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY) == WineInfo.NATIVE_ARM64_CONTAINER_VALUE
     private val preferredDriver = if (GPUInformation.isDriverSupported(DefaultVersion.WRAPPER_ADRENO, context)) {
         DefaultVersion.WRAPPER_ADRENO
     } else DefaultVersion.WRAPPER
 
     var runtime by mutableStateOf(editing?.wineVersion.orEmpty())
+    var runtimeCatalogLoaded by mutableStateOf(false)
     var name by mutableStateOf(editing?.name ?: "Container-${manager.nextContainerId}")
     var screen by mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE)
     var audio by mutableStateOf(editing?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER)
@@ -163,6 +167,7 @@ private class ContainerEditorStateV2(
         WineThemeManager.getUserWallpaperFile(context).takeIf { it.isFile }?.lastModified() ?: 0L
     )
     var mouseWarp by mutableStateOf(editing?.getExtra("mouseWarpOverride", "disable") ?: "disable")
+    var fileCache by mutableStateOf((editing?.getExtra("fileCache", "") ?: "") == "1")
     var drives by mutableStateOf(editing?.drives ?: Container.DEFAULT_DRIVES)
 
     var renderer by mutableStateOf(
@@ -316,7 +321,7 @@ private class ContainerEditorStateV2(
         displayXPerformanceMode, displayXPresentAtRefreshRate, displayXBackPressure,
         displayXPrecisePresentation, graphicsDriver, graphicsConfig,
         wrapper, wrapperConfig, emulator, fexVersion, boxVersion, fexPreset, boxPreset, exclusive, xinput, dinput,
-        syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, envVars,
+        syncCpu, startup, openGlDefaultInitialized, autoMesaGlVersionOverride, fileCache, envVars,
         cpu64.joinToString(), cpu32.joinToString(), components.entries.sortedBy { it.key }.joinToString()
     ).joinToString("|")
 }
@@ -338,7 +343,13 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
     var creating by remember { mutableStateOf(false) }
 
     val runtimeOptions by produceState<List<WineRuntimeOption>>(emptyList(), revision) {
-        value = loadWineRuntimeOptions(context)
+        state.runtimeCatalogLoaded = false
+        val options = loadWineRuntimeOptions(context)
+        value = if (state.nativeArm64) withContext(Dispatchers.IO) {
+            val installedContents = ContentsManager(context).apply { syncContents() }
+            options.filter { it.installed && WineInfo.fromIdentifier(context, installedContents, it.id).supportsNativeArm64() }
+        } else options
+        state.runtimeCatalogLoaded = true
     }
     LaunchedEffect(runtimeOptions, editing?.id) {
         if (state.runtime.isBlank()) state.runtime = runtimeOptions.firstOrNull { it.installed }?.id.orEmpty()
@@ -467,7 +478,8 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.putExtra("oboeApi", state.oboeApi)
         container.putExtra("oboeAdaptive", if (state.oboeAdaptive) "1" else "0")
         container.putExtra("oboeExclusive", if (state.oboeExclusive) "1" else "0")
-        container.setEmulator(if (arm64) if (state.emulator == "FEXCore") "FEXCore" else "Box64" else "Box64")
+        if (!state.nativeArm64)
+            container.setEmulator(if (arm64) if (state.emulator == "FEXCore") "FEXCore" else "Box64" else "Box64")
         container.setWinComponents(serializeContainerComponentsV2(state.components))
         container.setShowFPS(state.hudMode != 0)
         container.setFullscreenStretched(state.fullscreen)
@@ -486,6 +498,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         container.setLC_ALL(state.locale)
         container.putExtra("hudMode", state.hudMode.toString())
         container.putExtra("mouseWarpOverride", state.mouseWarp)
+        container.putExtra("fileCache", if (state.fileCache) "1" else "0")
         container.putExtra("openGlDefaultInitialized", if (state.openGlDefaultInitialized) "1" else "0")
         container.putExtra("autoMesaGlVersionOverride", if (state.autoMesaGlVersionOverride) "1" else "0")
         container.saveData()
@@ -548,6 +561,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                 put("extraData", JSONObject()
                     .put("hudMode", state.hudMode.toString())
                     .put("mouseWarpOverride", state.mouseWarp)
+                    .put("fileCache", if (state.fileCache) "1" else "0")
                     .put("useDisplayX", if (state.renderer == "DisplayX") "1" else "0")
                     .put("surfaceFormat", state.surfaceFormat)
                     .put("trueDisplayX", if (state.trueDisplayX) "1" else "0")
@@ -733,7 +747,16 @@ private fun ContainerCategoryV2(
             SettingsCard {
                 SettingText("Name", s.name) { s.name = it }
                 SettingsDivider()
-                SettingWineRuntimeChoice("Wine / Proton", s.runtime, runtimes, installing, installWine) { s.runtime = it }
+                if (s.nativeArm64 && runtimes.isEmpty()) {
+                    Text(if (s.runtimeCatalogLoaded) "No compatible installed Wine/Proton runtime is available for this ARM64 native container. Install its runtime in Settings > Components."
+                        else "Checking native ARM64 runtimes…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                } else {
+                    SettingWineRuntimeChoice("Wine / Proton", s.runtime, runtimes, installing, installWine) { s.runtime = it }
+                }
+                if (s.nativeArm64) Text("Windows ARM64 native", style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
             }
             SettingsCard {
                 SettingChoice(
@@ -953,10 +976,16 @@ private fun ContainerCategoryV2(
                 }
             }
             // Shares the editor's Container instance, so saveExisting() persists these extras too.
-            s.editing?.let { ContainerLsfgCard(it) } ?: ContainerLsfgUnavailableCard()
+            if (!s.nativeArm64) {
+                s.editing?.let { ContainerLsfgCard(it) } ?: ContainerLsfgUnavailableCard()
+            }
         }
 
-        "Compatibility" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        "Compatibility" -> if (s.nativeArm64) SettingsCard {
+            Text("Windows ARM64 native", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(14.dp))
+            Text("${s.runtime}\nVulkan and Wine built-in graphics libraries.",
+                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+        } else Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
                 val shownWrapper = wrapperEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.wrapper, true) } ?: s.wrapper
                 SettingChoice("DX Wrapper", shownWrapper, wrapperEntries) { s.wrapper = StringUtils.parseIdentifier(it) }
@@ -1081,16 +1110,27 @@ private fun ContainerCategoryV2(
                 SettingToggle("Sync CPU Topology", s.syncCpu) { s.syncCpu = it }
                 SettingsDivider()
                 CpuSelectorRow("Processor Affinity", s.cpu64) { index, checked -> s.cpu64[index] = checked }
-                SettingsDivider()
-                CpuSelectorRow("Processor Affinity (32-bit apps)", s.cpu32) { index, checked -> s.cpu32[index] = checked }
+                if (!s.nativeArm64) {
+                    SettingsDivider()
+                    CpuSelectorRow("Processor Affinity (32-bit apps)", s.cpu32) { index, checked -> s.cpu32[index] = checked }
+                }
             }
-            SettingsCard {
+            if (!s.nativeArm64) SettingsCard {
                 containerComponentRowsV2.forEachIndexed { index, (key, label) ->
                     val entries = listOf("Builtin (Wine)", "Native (Windows)")
                     val selected = entries[(s.components[key] ?: 0).coerceIn(0, 1)]
                     SettingChoice(label, selected, entries) { s.components[key] = entries.indexOf(it).coerceAtLeast(0) }
                     if (index != containerComponentRowsV2.lastIndex) SettingsDivider()
                 }
+            }
+            SettingsCard {
+                SettingToggle(
+                    "File system cache (experimental)",
+                    s.fileCache,
+                    description = "Speeds up games kept on shared storage by answering repeated file-system questions from memory. " +
+                        "It may show stale data if the game's files are changed outside the game. Applies at the next start. " +
+                        "A shortcut can override it."
+                ) { s.fileCache = it }
             }
         }
     }
@@ -1131,7 +1171,7 @@ private fun ContainerVulkanExtensionsV2(
                 }) { Text("Done") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Vulkan Extensions") },
+            title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Vulkan Extensions") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     items(extensions) { extension ->
@@ -1191,4 +1231,3 @@ private fun containerDesktopThemeValueV2(theme: String, background: String, wall
     else
         "$themeId,$backgroundId,#0277bd"
 }
-

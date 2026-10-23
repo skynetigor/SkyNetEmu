@@ -13,6 +13,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.winlator.cmod.ui.settings.RailEditor
+import com.winlator.cmod.ui.settings.SettingText
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.Surface
@@ -64,16 +71,23 @@ import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.box64.Box64PresetManager
+import com.winlator.cmod.ui.settings.LinuxDriverPicker
+import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
+import com.winlator.cmod.ui.settings.RendererDriverPicker
+import com.winlator.cmod.ui.settings.rememberRendererDriverPicker
 import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.fexcore.FEXCorePreset
 import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxEmulatorSetup
+import com.winlator.cmod.linux.LinuxFex
 import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRuntimeCatalog
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask
 import com.winlator.cmod.linux.LinuxRuntimeInstaller
 import com.winlator.cmod.linux.LinuxSession
+import com.winlator.cmod.linux.LinuxBionicSession
 import com.winlator.cmod.steam.SteamContainer
 import com.winlator.cmod.ui.settings.CpuSelectorRow
 import com.winlator.cmod.ui.settings.EditorCategory
@@ -175,25 +189,13 @@ private class RuntimeInstallUi {
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
 private val HUD_LABELS = listOf("Off", "Classic", "Modern")
 
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        modifier = Modifier.padding(start = 4.dp, top = 6.dp),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-}
-
 /** What the Steam settings screen adds to the container editor. */
 private class SteamScreen(
     val defaults: SteamContainer.Defaults,
     /** The container exists (so every component is installed): the settings can be changed. */
     val ready: Boolean,
     /** The card above the settings: what is to be downloaded, and how far it is. */
-    val header: @Composable () -> Unit,
-    /** Wipes the Steam container and makes a new one from the defaults. */
-    val onReset: () -> Unit
+    val header: @Composable () -> Unit
 )
 
 @Composable
@@ -207,7 +209,7 @@ private fun LinuxContainerEditor(
 ) {
     val context = LocalContext.current
     val manager = remember { ContainerManager(context) }
-    if (steam) {
+    if (steam || editId == null) {
         SteamSettingsScreen(manager, refreshTick, install, onBack, onDone)
         return
     }
@@ -235,11 +237,10 @@ private fun SteamSettingsScreen(
     var planTick by remember { mutableIntStateOf(0) }
 
     // What is still to be downloaded: the catalogs are read off the main thread, again after a download ended or on "try again".
+    // With the container there already, what is left is FEX and the root filesystem for 32-bit games.
     LaunchedEffect(container == null, refreshTick, install.finishedTick, planTick) {
-        if (container == null) {
-            plan = null
-            plan = withContext(Dispatchers.IO) { SteamContainer.plan(context) }
-        }
+        plan = null
+        plan = withContext(Dispatchers.IO) { SteamContainer.plan(context) }
     }
     // The container appears when the last component is in.
     LaunchedEffect(install.finishedTick) {
@@ -265,7 +266,7 @@ private fun SteamSettingsScreen(
     key(container?.id) {
         LinuxContainerEditorBody(
             container,
-            SteamScreen(defaults, container != null, header) { container = SteamContainer.reset(context, manager) },
+            SteamScreen(defaults, container != null, header),
             manager, refreshTick, install, onBack, onDone
         )
     }
@@ -291,15 +292,24 @@ private fun SteamComponentsCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                return@Column
+                // What is still missing is FEX and the root filesystem: without them a 32-bit game (Tomb Raider, 2013) cannot start.
+                if (plan == null || plan.error != null || plan.install.isEmpty()) return@Column
+                Text("32-bit games", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Games with 32-bit code (Tomb Raider, 2013) run on FEX with an x86-64 root filesystem. Download them to play those games.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text("Steam needs a few components", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "The Linux runtime, Box64 (it runs the games' x86-64 code) and the Turnip graphics driver. The settings below are Steam's own; " +
-                    "they can be changed once everything is installed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            else {
+                Text("Steam needs a few components", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "The Linux runtime, Box64 (it runs the games' x86-64 code), the Turnip graphics driver, and FEX with a root filesystem " +
+                        "for 32-bit games. The settings below are Steam's own; they can be changed once everything is installed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (plan == null) {
                 Text("Checking what has to be downloaded…")
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -354,6 +364,7 @@ private fun entryInstalled(context: android.content.Context, entry: LinuxRuntime
     com.winlator.cmod.linux.LinuxPackages.KIND_RUNTIME -> LinuxRuntime.isInstalled(context, entry.id)
     com.winlator.cmod.linux.LinuxPackages.KIND_EMULATOR -> LinuxEmulator.isInstalled(context, entry.id)
     com.winlator.cmod.linux.LinuxPackages.KIND_DRIVER -> LinuxDriverManager.isInstalled(context, entry.id)
+    com.winlator.cmod.linux.LinuxPackages.KIND_ROOTFS -> com.winlator.cmod.linux.LinuxRootfs.isInstalled(context, entry.id)
     else -> false
 }
 
@@ -374,6 +385,8 @@ private fun LinuxContainerEditorBody(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: steam?.defaults?.driver ?: "") }
+    var rendererDriverId by remember { mutableStateOf(editing?.rendererDriverId ?: "auto") }
+    val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
     var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: if (steam != null) LinuxEmulator.BOX64 else LinuxEmulator.NONE) }
     var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: steam?.defaults?.emulator ?: "") }
     var emulatorPreset by remember {
@@ -385,13 +398,18 @@ private fun LinuxContainerEditorBody(
     // FEX only: the root filesystem it runs in, its own preset, and whether the guest's Vulkan/OpenGL go to the runtime's.
     var rootfsId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ROOTFS) ?: "") }
     var fexPreset by remember {
-        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() } ?: FEXCorePreset.INTERMEDIATE)
+        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() }?.let { if (it == FEXCorePreset.INTERMEDIATE && editing?.getExtra(LinuxFex.EXTRA_PRESET_VERSION) != "2") FEXCorePreset.PERFORMANCE else it } ?: FEXCorePreset.PERFORMANCE)
     }
     // Input: a finger acts where it touches, a button opens the keyboard, and a tap on a text field opens it by itself.
-    var touchscreen by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_TOUCHSCREEN) != "0") }
+    var touchMode by remember { mutableStateOf(editing?.let { com.winlator.cmod.linux.LinuxTouchMode.resolve(it, null, null) } ?: "native") }
     var keyboardButton by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON) != "0") }
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
+    var tuSysmem by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM) == "1") }
+    var prootEnabled by remember { mutableStateOf(LinuxSession.prootEnabled(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
+    var bionic by remember { mutableStateOf(editing?.getExtra(LinuxBionicSession.EXTRA) == "1" && !prootEnabled) }
+    var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
+    var glVendor by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_VENDOR)?.ifEmpty { null } ?: "nvidia") }
     var glDriver by remember {
         // OpenGL 4.6 on the Adreno through Zink (over Turnip) works; new containers use it, and one without a choice keeps llvmpipe.
         mutableStateOf(
@@ -416,7 +434,10 @@ private fun LinuxContainerEditorBody(
         )
     }
     // Scaled to fit the window with the proportions kept; unchecked, the screen is drawn 1:1 in the middle.
-    var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: true) }
+    // The Steam container scales a game's window by default (see XServerDisplayActivity): a container that has no value yet shows it on.
+    val steamScaling = editing != null && SteamContainer.isManaged(editing) && editing.getExtra("scaleGameWindow").isEmpty()
+    var stretched by remember { mutableStateOf(steamScaling || (editing?.isFullscreenStretched ?: true)) }
+    var scaleWindow by remember { mutableStateOf(steamScaling || editing?.getExtra("scaleGameWindow") == "1") }
     var upscaler by remember {
         mutableStateOf(editing?.getExtra("graphicsFilterMode")?.takeIf { m -> UPSCALER_MODES.any { it.first == m } } ?: "0")
     }
@@ -432,10 +453,12 @@ private fun LinuxContainerEditorBody(
     var offered by remember { mutableStateOf<LinuxRuntimeCatalog.Entry?>(null) }
 
     val runtimes = remember(refreshTick, install.finishedTick) { LinuxRuntime.listInstalled(context) }
-    val drivers = remember(refreshTick) { LinuxDriverManager.list(context) }
+    val linuxDriverPicker = rememberLinuxDriverPicker(driverId) { driverId = it }
     val boxBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
-    val fexBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.FEX) }
-    val rootfsList = remember(refreshTick) { LinuxRootfs.list(context) }
+    // Read again when FEX has been downloaded from this screen.
+    var fexInstallTick by remember { mutableIntStateOf(0) }
+    val fexBuilds = remember(refreshTick, fexInstallTick) { LinuxEmulator.list(context, LinuxEmulator.FEX) }
+    val rootfsList = remember(refreshTick, fexInstallTick) { LinuxRootfs.list(context) }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // Until the user picks one, the first installed runtime is used.
@@ -445,9 +468,8 @@ private fun LinuxContainerEditorBody(
     val freeBytes = context.filesDir.usableSpace
     val neededBytes = offered?.let { LinuxRuntimeInstaller.requiredBytes(it) } ?: 0L
     val notEnoughSpace = needsDownload && offered != null && offered!!.size > 0 && freeBytes < neededBytes
-    val busy = creating || install.running || waitingForRuntime
+    val busy = creating || install.running || waitingForRuntime || linuxDriverPicker.installing.isNotEmpty() || rendererDriverPicker.installing.isNotEmpty()
     val canSave = if (steam != null) editing != null && !busy else name.isNotBlank() && sizeValid && !busy && !notEnoughSpace
-    var confirmReset by remember { mutableStateOf(false) }
 
     LaunchedEffect(needsDownload) {
         if (needsDownload && offered == null) {
@@ -472,7 +494,10 @@ private fun LinuxContainerEditorBody(
             else cpuSelected.indices.filter { cpuSelected[it] }.joinToString(",")
         )
         container.setFullscreenStretched(stretched)
+        // Off is written as 0 for the Steam container: no value there means "on".
+        container.putExtra("scaleGameWindow", if (scaleWindow) "1" else if (SteamContainer.isManaged(container)) "0" else "")
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
+        container.setRendererDriverId(rendererDriverId)
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
         container.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulator)
@@ -483,8 +508,15 @@ private fun LinuxContainerEditorBody(
         // Until the user picks one, the first installed root filesystem is used.
         container.putExtra(LinuxEmulator.EXTRA_ROOTFS, if (emulator == LinuxEmulator.FEX) (rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.firstOrNull())?.id ?: "" else "")
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
+        container.putExtra(LinuxFex.EXTRA_PRESET_VERSION, "2")
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
-        container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
+        container.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, if (tuSysmem) "1" else "")
+        container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (prootEnabled) "0" else "1")
+        container.putExtra(LinuxBionicSession.EXTRA, if (bionic) "1" else "0")
+        container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
+        container.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor)
+        container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchMode == "native") "1" else "0")
+        container.putExtra("linuxTouchMode", touchMode)
         container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, if (keyboardButton) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, if (autoKeyboard) "1" else "0")
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
@@ -564,13 +596,7 @@ private fun LinuxContainerEditorBody(
 
     val categories = listOfNotNull(
         if (steam != null) null else EditorCategory("general", "General", name.ifBlank { "Unnamed" }, name.isBlank()) {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
+            SettingsCard { SettingText("Name", name) { name = it } }
         },
         EditorCategory(
             "runtime", "Runtime",
@@ -618,6 +644,8 @@ private fun LinuxContainerEditorBody(
                         runtimes.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
                     ) { chosenRuntimeId = it }
                 }
+                SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = false }
+                SettingToggle("Run on Android's C library, without glibc (experimental, Box64)", bionic) { bionic = it; if (it) prootEnabled = false }
             }
         },
         EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {
@@ -649,11 +677,8 @@ private fun LinuxContainerEditorBody(
                 if (emulator == LinuxEmulator.FEX) {
                     SettingsDivider()
                     if (fexBuilds.isEmpty()) {
-                        Text(
-                            "No FEX build is installed. Install one in Components → Linux Emulator.",
-                            modifier = Modifier.padding(14.dp),
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        // FEX comes with the root filesystem it runs in: one button downloads whatever is missing.
+                        FexDownloadPrompt(onInstalled = { fexInstallTick++ })
                     } else {
                         val shown = fexBuilds.firstOrNull { it.id == emulatorId } ?: fexBuilds.first()
                         SettingMappedChoice(
@@ -664,12 +689,9 @@ private fun LinuxContainerEditorBody(
                     }
                     SettingsDivider()
                     if (rootfsList.isEmpty()) {
-                        // FEX runs programs in an x86-64 userland of its own; without one it cannot start.
-                        Text(
-                            "No x86-64 root filesystem is installed. FEX needs one: install it in Components → Linux Root Filesystem.",
-                            modifier = Modifier.padding(14.dp),
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        // FEX runs programs in an x86-64 userland of its own; without one it cannot start. With no FEX build either,
+                        // the prompt above already offers both.
+                        if (fexBuilds.isNotEmpty()) FexDownloadPrompt(onInstalled = { fexInstallTick++ })
                     } else {
                         val shownRootfs = rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.first()
                         SettingMappedChoice(
@@ -682,6 +704,14 @@ private fun LinuxContainerEditorBody(
                     SettingMappedChoice("FEX preset", fexPreset, fexPresets) { fexPreset = it }
                     SettingsDivider()
                     SettingToggle("Use the runtime's Vulkan (FEX thunk)", fexThunks) { fexThunks = it }
+                    SettingsDivider()
+                    SettingToggle("32-bit games on the GPU (OpenGL thunk)", fexGl32) { fexGl32 = it }
+                    SettingsDivider()
+                    SettingMappedChoice(
+                        "GPU a 32-bit game is told it has",
+                        glVendor,
+                        linkedMapOf("nvidia" to "NVIDIA", "amd" to "AMD", "mesa" to "As it is (Mesa / zink)")
+                    ) { glVendor = it }
                 }
             }
         },
@@ -703,6 +733,9 @@ private fun LinuxContainerEditorBody(
                 SettingsDivider()
                 SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
                 SettingsDivider()
+                // For a container larger than the game: the game's own window is scaled up, so the upscaler works on its resolution.
+                SettingToggle("Scale the game window to the screen (a game smaller than the container)", scaleWindow) { scaleWindow = it }
+                SettingsDivider()
                 // The picture is scaled by the Vulkan renderer, which "native" output uses; the CPU-copy output draws with EGL.
                 SettingMappedChoice(
                     "Upscaler (needs native output and Fit to screen)",
@@ -711,22 +744,14 @@ private fun LinuxContainerEditorBody(
                 ) { upscaler = it }
                 SettingsDivider()
                 SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
+                if (!softwareOutput) {
+                    SettingsDivider()
+                    RendererDriverPicker(rendererDriverId, rendererDriverPicker) { rendererDriverId = it }
+                }
                 SettingsDivider()
-                val driverEntries = LinkedHashMap<String, String>().apply {
-                    put("", "Runtime default")
-                    drivers.forEach { put(it.id, it.label()) }
-                    // A driver that was removed after being chosen stays visible until another is picked.
-                    if (driverId.isNotEmpty() && driverId !in this) put(driverId, "$driverId (not installed)")
-                }
-                SettingMappedChoice("Turnip driver", driverId, driverEntries) { driverId = it }
-                if (drivers.isEmpty()) {
-                    Text(
-                        "Import a Linux Turnip zip in Components → Linux Driver to choose another version.",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
+                SettingsDivider()
+                LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 SettingsDivider()
                 SettingMappedChoice(
                     "OpenGL driver",
@@ -753,14 +778,18 @@ private fun LinuxContainerEditorBody(
         },
         EditorCategory(
             "input", "Input",
-            (if (touchscreen) "touchscreen" else "touchpad") + (if (keyboardButton) " · keyboard button" else "") +
+            touchMode + (if (keyboardButton) " · keyboard button" else "") +
                 (if (autoKeyboard) " · auto keyboard" else ""),
             false
         ) {
             SettingsCard {
-                SettingToggle("Touchscreen mode (a tap clicks where you touch)", touchscreen) { touchscreen = it }
+                SettingMappedChoice(context.getString(com.winlator.cmod.R.string.input_mode), touchMode, linkedMapOf(
+                    "native" to context.getString(com.winlator.cmod.R.string.input_mode_native),
+                    "touchpad" to context.getString(com.winlator.cmod.R.string.input_mode_touchpad),
+                    "mouse" to context.getString(com.winlator.cmod.R.string.input_mode_mouse)
+                )) { touchMode = it }
                 Text(
-                    "Off: the screen works like a laptop's touchpad, a finger moves the pointer and a tap clicks under it.",
+                    "Touchscreen sends native touch contacts. Touchpad moves the pointer relatively. Touch mouse clicks and drags at the finger, with the cursor hidden.",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -816,35 +845,68 @@ private fun LinuxContainerEditorBody(
             Text(if (editing != null || steam != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")
         }
     }
-    val resetButton: @Composable () -> Unit = {
-        if (steam != null && editing != null) {
-            OutlinedButton(onClick = { confirmReset = true }, modifier = Modifier.fillMaxWidth()) { Text("Reset Steam") }
+
+    if (steam != null) {
+        // The Steam settings are a page of the app's Settings, in their layout.
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Linux") },
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
+                )
+            }
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                GroupedSettings(categories, header = steam.header, enabled = steam.ready) {
+                    problems()
+                    saveButton()
+                }
+            }
         }
-    }
-    if (confirmReset && steam != null) {
-        AlertDialog(
-            onDismissRequest = { confirmReset = false },
-            title = { Text("Reset Steam?") },
-            text = { Text("Steam's container is deleted with everything in it (the sign-in, the downloaded games) and made again from the defaults.") },
-            confirmButton = { TextButton(onClick = { confirmReset = false; steam.onReset() }) { Text("Reset") } },
-            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
-        )
+        return
     }
 
+    // A container is edited in the layout of the Windows container editor: the groups in a rail (chips in portrait), "Create
+    // container" in a bar at the bottom of a new one, and an existing one saved when the screen is left.
+    val toastContext = LocalContext.current
+    fun leave() {
+        when {
+            linuxDriverPicker.installing.isNotEmpty() || rendererDriverPicker.installing.isNotEmpty() -> android.widget.Toast.makeText(toastContext, "Wait for the driver download to finish.", android.widget.Toast.LENGTH_SHORT).show()
+            editing == null || busy -> onBack()
+            canSave -> save()
+            else -> android.widget.Toast.makeText(toastContext, "Fix the highlighted settings first.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    androidx.activity.compose.BackHandler(onBack = ::leave)
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(if (steam != null) "Steam" else if (editing != null) "Edit Linux container" else "New Linux container") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
+                title = { Text(if (editing == null) "New container" else name.ifBlank { editing.name }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = ::leave) { Icon(Icons.Outlined.ArrowBack, null) } }
             )
+        },
+        bottomBar = {
+            if (editing == null) {
+                Surface(modifier = Modifier.navigationBarsPadding(), color = MaterialTheme.colorScheme.background) {
+                    Button(
+                        onClick = ::save,
+                        enabled = canSave,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            if (busy) "Creating…" else if (needsDownload) "Download runtime and create" else "Create container",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            GroupedSettings(categories, header = steam?.header, enabled = steam?.ready != false) {
-                problems()
-                saveButton()
-                resetButton()
-            }
+            RailEditor("Container settings", categories, header = problems)
         }
     }
 }

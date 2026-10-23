@@ -167,6 +167,7 @@ class DisplayX {
         JNICache *cache;
         EffectComposer *effectComposer;
         
+        bool forceCursor = false;
         bool cursorVisible = false;
         
         void start();

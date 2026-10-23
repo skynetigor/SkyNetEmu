@@ -122,6 +122,7 @@ public final class WinlatorLogcatLogger implements Callback<String> {
     }
 
     private void writeLine(String line) {
+        com.winlator.cmod.telemetry.LinuxDiagnostics.rendererLogLine(line);
         synchronized (writerLock) {
             if (writer == null) return;
             try {

@@ -102,7 +102,7 @@ private fun ContainersScreen(
 
     DisposableEffect(activity, landscape) {
         if (landscape) {
-            activity?.setBottomNavigationVisible(false)
+            activity?.setBottomNavigationVisible(true)
             activity?.setMainToolbarVisible(false)
         }
         onDispose {

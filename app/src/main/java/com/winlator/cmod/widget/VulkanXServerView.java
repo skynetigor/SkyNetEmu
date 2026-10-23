@@ -5,6 +5,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.view.Surface;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
@@ -40,19 +41,39 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener {
 
     private long nativeHandle = 0;
+    private long rendererSampleAt;
+    private boolean importFailureReported;
     private final Object lock = new Object();
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
 
     private boolean fullscreen = false;
+    private volatile boolean gameWindowZoom = false;
+    private volatile int[] gameZoomRect;
+    private volatile Runnable onGameZoomChanged;
     private float magnifierZoom = 1.0f;
     private boolean screenOffsetYRelativeToCursor = false;
     public int surfaceWidth;
     public int surfaceHeight;
     private String[] unviewableWMClasses = null;
     private boolean cursorVisible = false;
+    private boolean forceCursor;
     private String driverPath = null;
     private ExecutorService initExecutor = null;
+    private boolean requireDmaBufImport;
+    private boolean requireSelectedDriver;
+    private java.util.function.Consumer<String> initializationError;
+
+    public void requireDmaBufImport(java.util.function.Consumer<String> onError) {
+        requireDmaBufImport = true;
+        initializationError = onError;
+    }
+
+    public void requireSelectedDriver(java.util.function.Consumer<String> onError) {
+        requireSelectedDriver = true;
+        initializationError = onError;
+    }
+
     private volatile boolean initComplete = false;
     private volatile boolean inPipMode = false;
     private String driverLibraryName = null;
@@ -72,6 +93,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private WinlatorHUD hudRef = null;
     private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
+    private volatile int sessionWindowId = -1;
     private volatile int fpsLimit = 0;
 
     private static volatile boolean nativeLibLoaded = false;
@@ -108,7 +130,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native long nativeInit(Surface surface,
                                    int screenWidth, int screenHeight,
                                    String driverPath, String libraryName, String nativeLibDir,
-                                   boolean validationEnabled);
+                                   boolean validationEnabled, boolean requireDmaBufImport, boolean requireSelectedDriver, boolean pipelineEnabled);
     private native void nativeResize(long handle, int width, int height);
     private native void nativeDestroy(long handle);
     private native void nativeDetachSurface(long handle);
@@ -117,8 +139,14 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
-    @FastNative private native void nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
+    @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
         int w, int h, int stride, int offset);
+    private native String nativeRendererDiagnostics(long handle);
+    private native String nativePipelineDiagnostics(long handle);
+    private native void nativeSetPipelineTarget(long handle, long id);
+    public String pipelineDiagnostics() {
+        synchronized(lock) {return nativeHandle!=0?nativePipelineDiagnostics(nativeHandle):"pipe_available=0";}
+    }
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long id,
         long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
@@ -199,25 +227,32 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                         nativeSetSharpness(nativeHandle, pendingSharpness);
                         updateTransform();
-                        nativeSetCursorVisible(nativeHandle, cursorVisible);
+                        sendCursorToNative(lastCursor);
                         initComplete = true;
                         return;
                     }
                 }
 
-                nativeHandle = nativeInit(
-                    surface,
-                    xServer.screenInfo.width, xServer.screenInfo.height,
-                    driverPath, driverLibraryName, nativeLibDir, validationEnabled);
+                try {
+                    nativeHandle = nativeInit(
+                            surface,
+                            xServer.screenInfo.width, xServer.screenInfo.height,
+                            driverPath, driverLibraryName, nativeLibDir, validationEnabled, requireDmaBufImport, requireSelectedDriver, com.winlator.cmod.linux.FramePipelineDiagnostics.enabled());
+                } catch (IllegalStateException error) {
+                    Log.e("VulkanXServerView", "Renderer initialization failed", error);
+                    if (initializationError != null) post(() -> initializationError.accept(error.getMessage()));
+                    return;
+                }
 
                 if (nativeHandle != 0) {
+                    com.winlator.cmod.linux.FramePipelineDiagnostics.renderer(this::pipelineDiagnostics);
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
                     nativeSetSharpness(nativeHandle, pendingSharpness);
                     updateTransform();
-                    nativeSetCursorVisible(nativeHandle, cursorVisible);
+                    sendCursorToNative(lastCursor);
 
                     if (isColdInit) {
                         Window root = xServer.windowManager.rootWindow;
@@ -230,6 +265,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     nativeSetVerboseLog(nativeHandle, true);
                     nativeDumpRendererInfo(nativeHandle);
+                    sampleRendererDiagnostics(true);
                 }
             }
             initComplete = true;
@@ -244,6 +280,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             viewTransformation.update(surfaceWidth, surfaceHeight, w, h);
             updateTransform();
         }
+        // Whether the game's window fills the screen depends on the screen's size.
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
     }
 
     public void onSurfaceChanged(int width, int height) {
@@ -296,8 +334,77 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public void onResume() {}
 
+    @Override
+    public void setGameWindowZoom(boolean on) {
+        gameWindowZoom = on;
+        queueEvent(this::refreshGameZoom);
+    }
+
+    @Override
+    public int[] getGameZoomRect() { return gameWindowZoom ? gameZoomRect : null; }
+
+    @Override
+    public void setOnGameZoomChanged(Runnable listener) { onGameZoomChanged = listener; }
+
+    /**
+     * The window to scale up: the biggest mapped window directly under the root that is not a menu or tooltip (override-redirect)
+     * and does not cover the X screen already. A full-screen window under the game (the Steam client) is passed over; when the
+     * only windows are full-screen ones, or none, the screen is shown as it is.
+     */
+    private int[] pickGameWindow() {
+        final int screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
+        Window[] children;
+        try {
+            // The list is changed by the X server's thread: copy it in one step instead of walking it.
+            children = xServer.windowManager.rootWindow.getChildren().toArray(new Window[0]);
+        } catch (RuntimeException e) {
+            return gameZoomRect;
+        }
+        Window best = null;
+        for (Window child : children) {
+            if (child == null || !child.isMappedTopLevel() || child.attributes.isOverrideRedirect()) continue;
+            if (child.getWidth() < 100 || child.getHeight() < 100) continue;
+            // The Steam client's own windows (its update and login windows) are not the game: they stay as they are.
+            String name = child.getName();
+            if (name.equals("Steam") || name.startsWith("Steam - ") || name.startsWith("Steam Big Picture")) continue;
+            if (child.getWidth() >= screenW && child.getHeight() >= screenH) continue;
+            if (best == null || (long) child.getWidth() * child.getHeight() >= (long) best.getWidth() * best.getHeight()) best = child;
+        }
+        if (best == null) return null;
+        return new int[]{best.getX(), best.getY(), best.getWidth(), best.getHeight()};
+    }
+
+    /** Picks the window again after the windows changed (on the render thread) and redraws if it, or its place, is another. */
+    private void refreshGameZoom() {
+        if (!gameWindowZoom && gameZoomRect == null) return;
+        int[] rect = gameWindowZoom ? pickGameWindow() : null;
+        synchronized (lock) {
+            if (java.util.Arrays.equals(rect, gameZoomRect)) return;
+            gameZoomRect = rect;
+            updateTransform();
+        }
+        Runnable listener = onGameZoomChanged;
+        if (listener != null) listener.run();
+    }
+
     private void updateTransform() {
         if (nativeHandle == 0) return;
+        final int[] zoomRect = gameWindowZoom ? gameZoomRect : null;
+        if (zoomRect != null && surfaceWidth > 0 && surfaceHeight > 0) {
+            viewTransformation.update(surfaceWidth, surfaceHeight,
+                xServer.screenInfo.width, xServer.screenInfo.height);
+            // The window's rectangle is mapped onto the view, aspect kept, and everything else is cut off by the scissor.
+            final float screenW = xServer.screenInfo.width, screenH = xServer.screenInfo.height;
+            final float s = Math.min((float) surfaceWidth / zoomRect[2], (float) surfaceHeight / zoomRect[3]);
+            final float destW = zoomRect[2] * s, destH = zoomRect[3] * s;
+            final float x0 = (surfaceWidth - destW) * 0.5f, y0 = (surfaceHeight - destH) * 0.5f;
+            final float sx = s * screenW / surfaceWidth, sy = s * screenH / surfaceHeight;
+            final float ox = x0 * screenW / surfaceWidth - zoomRect[0] * sx;
+            final float oy = y0 * screenH / surfaceHeight - zoomRect[1] * sy;
+            nativeSetTransformAndScissor(nativeHandle, ox, oy, sx, sy, true,
+                (int) x0, (int) y0, (int) Math.ceil(destW), (int) Math.ceil(destH));
+            return;
+        }
         final float zoom = magnifierZoom;
         final float ptrX = xServer.pointer.getX();
         final float ptrY = xServer.pointer.getY();
@@ -335,6 +442,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     private void sendCursorToNative(Cursor cursor) {
         if (nativeHandle == 0) return;
+        if (forceCursor) cursor = null;
         Drawable cd; short hotX = 0, hotY = 0;
         boolean effVis = cursorVisible;
         if (cursor != null) {
@@ -393,6 +501,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onDestroyWindow(Window window) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         compositeRedirectedWindows.remove(window.id);
         queueEvent(() -> {
@@ -404,6 +513,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onMapWindow(Window window) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -415,6 +525,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUnmapWindow(Window window) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         queueEvent(() -> {
             synchronized (lock) {
@@ -456,6 +567,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @Override
     public void onUpdateWindowGeometry(Window window, boolean resized) {
+        if (gameWindowZoom) queueEvent(this::refreshGameZoom);
         final long id = window.id;
         final long contentId = did(window.getContent());
         final int x = window.getX(), y = window.getY(), w = window.getWidth(), h = window.getHeight();
@@ -488,24 +600,54 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
-        if (window.id == fpsWindowId) {
-            if (hudRef != null) hudRef.onFrame();
-            if (classicHudRef != null) classicHudRef.update();
-        }
         synchronized (lock) {
             if (nativeHandle == 0 || pixmap == null) return;
+            if (window.id==sessionWindowId && com.winlator.cmod.linux.FramePipelineDiagnostics.enabled())
+                nativeSetPipelineTarget(nativeHandle,did(window.getContent()));
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
                 if (pixmap.dmaBufFd >= 0) {
-                    nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
+                    boolean accepted = nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
                         pixmap.dmaBufFd, pixmap.width, pixmap.height, pixmap.dmaBufStride, pixmap.dmaBufOffset);
+                    if (!accepted) {
+                        if (!importFailureReported) {
+                            importFailureReported = true;
+                            try {
+                                String details = nativeRendererDiagnostics(nativeHandle);
+                                Log.e("VulkanXServerView", "Linux frame import failed: " + details);
+                                com.winlator.cmod.telemetry.LinuxDiagnostics.rendererImportFailed(details);
+                            } catch (Exception ignored) {}
+                            if (requireDmaBufImport && initializationError != null) {
+                                post(() -> initializationError.accept("The selected renderer driver could not import the game's DMA-BUF frame."));
+                            }
+                        }
+                        return;
+                    }
                 }
                 else if (pixmap.backingAHB != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
                         pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
                 }
+                else return;
+                sampleRendererDiagnostics(false);
             }
         }
+        // Incoming Present requests are not proof that the renderer accepted their buffers.
+        if (window.id == sessionWindowId) com.winlator.cmod.telemetry.GameSessionRecorder.onFrame();
+        if (window.id == fpsWindowId) {
+            if (hudRef != null) hudRef.onFrame();
+            if (classicHudRef != null) classicHudRef.update();
+        }
+    }
+
+    /** At most one small snapshot every five seconds, and only for opted-in telemetry. Caller holds lock. */
+    private void sampleRendererDiagnostics(boolean force) {
+        if (nativeHandle == 0 || !com.winlator.cmod.telemetry.Telemetry.isEnabled()) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (!force && now - rendererSampleAt < 5000) return;
+        rendererSampleAt = now;
+        try { com.winlator.cmod.telemetry.LinuxDiagnostics.rendererSnapshot(nativeRendererDiagnostics(nativeHandle)); }
+        catch (Exception ignored) {}
     }
 
     public void addDirectContent(int windowId, Drawable drawable, GPUImage gpuImage) {
@@ -598,6 +740,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (drawable.backingAHB != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(drawable),
                         drawable.backingAHB, drawable.width, drawable.height, rx, ry);
+                    sampleRendererDiagnostics(false);
                 }
             }
         }
@@ -620,6 +763,13 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         cursorVisible = visible;
         synchronized (lock) {
             if (nativeHandle != 0) { nativeSetCursorVisible(nativeHandle, visible); if (visible) sendCursorToNative(lastCursor); }
+        }
+    }
+
+    @Override public void setForceCursor(boolean force) {
+        synchronized (lock) {
+            forceCursor = force;
+            sendCursorToNative(lastCursor);
         }
     }
 
@@ -705,6 +855,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setUnviewableWMClasses(String... classes) { this.unviewableWMClasses = classes; }
 
     public void setFpsWindowId(int id) { fpsWindowId = id; }
+    @Override
+    public void setSessionWindowId(int id) { sessionWindowId = id; com.winlator.cmod.linux.FramePipelineDiagnostics.targetWindow(id); }
     public void setFrameRating(Object fr) {
         if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
         else if (fr instanceof FrameRating) classicHudRef = (FrameRating) fr;

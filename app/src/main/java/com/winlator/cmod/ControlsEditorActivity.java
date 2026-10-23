@@ -77,6 +77,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         super.onCreate(bundle);
         AppUtils.hideSystemUI(this);
         setContentView(R.layout.controls_editor_activity);
+        com.winlator.cmod.ui.AppBottomNavigation.attach(this, R.id.bottom_nav_controls);
 
         inputControlsView = new InputControlsView(this);
         inputControlsView.setEditMode(true);

@@ -128,7 +128,7 @@ private fun InputControlsScreen(model: InputControlsModel, callbacks: InputContr
 
     DisposableEffect(activity, landscape) {
         if (landscape) {
-            activity?.setBottomNavigationVisible(false)
+            activity?.setBottomNavigationVisible(true)
             activity?.setMainToolbarVisible(false)
         }
         onDispose {

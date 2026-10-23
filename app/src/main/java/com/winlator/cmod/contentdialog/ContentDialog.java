@@ -27,6 +27,28 @@ import com.winlator.cmod.core.UnitUtils;
 import java.util.ArrayList;
 
 public class ContentDialog extends Dialog {
+    private AutoCloseable controllerInput;
+
+    @Override
+    public void show() {
+        super.show();
+        if (controllerInput == null && getWindow() != null) {
+            controllerInput = com.winlator.cmod.ui.GamepadNavigation.install(getWindow());
+        }
+    }
+
+    @Override
+    public void dismiss() {
+        if (controllerInput != null) {
+            try {
+                controllerInput.close();
+            } catch (Exception e) {
+                android.util.Log.e("ContentDialog", "Unable to release controller input", e);
+            }
+            controllerInput = null;
+        }
+        super.dismiss();
+    }
     public Runnable onConfirmCallback;
     private Runnable onCancelCallback;
     private final View contentView;
@@ -64,12 +86,14 @@ public class ContentDialog extends Dialog {
         }
 
         View confirmButton = contentView.findViewById(R.id.BTConfirm);
+        confirmButton.setFocusable(true);
         confirmButton.setOnClickListener((v) -> {
             if (onConfirmCallback != null) onConfirmCallback.run();
             dismiss();
         });
 
         View cancelButton = contentView.findViewById(R.id.BTCancel);
+        cancelButton.setFocusable(true);
         cancelButton.setOnClickListener((v) -> {
             if (onCancelCallback != null) onCancelCallback.run();
             dismiss();

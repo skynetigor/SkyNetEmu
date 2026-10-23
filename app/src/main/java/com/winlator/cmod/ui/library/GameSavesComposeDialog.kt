@@ -55,6 +55,8 @@ object GameSavesComposeDialog {
     fun show(fragment: Fragment, shortcut: Shortcut) {
         val dialog = ComponentDialog(fragment.requireContext(), R.style.GameSavesDialog)
         dialog.show()
+        val controllerInput = dialog.window?.let(com.winlator.cmod.ui.GamepadNavigation::install)
+        dialog.setOnDismissListener { controllerInput?.close() }
         dialog.window?.apply {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))

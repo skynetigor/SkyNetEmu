@@ -87,6 +87,43 @@ public class Window extends XResource {
         this.borderWidth = borderWidth;
     }
 
+    /**
+     * ClearArea: paints the window's background over the area (a width or height of 0 reaches the edge). A window manager draws its
+     * frames by giving a window a pixmap for a background and clearing it. A parent-relative background is the parent's, in line with it.
+     */
+    public void clearArea(int x, int y, int width, int height) {
+        Drawable content = getContent();
+        if (content == null) return;
+        if (width <= 0) width = getWidth() - x;
+        if (height <= 0) height = getHeight() - y;
+        if (width <= 0 || height <= 0) return;
+        Window source = this;
+        int offsetX = 0, offsetY = 0;
+        while (source.attributes.isBackgroundParentRelative() && source.getParent() != null) {
+            offsetX += source.getX();
+            offsetY += source.getY();
+            source = source.getParent();
+        }
+        Drawable tile = source.attributes.getBackgroundTile();
+        if (tile != null && tile.width > 0 && tile.height > 0) {
+            int tw = tile.width, th = tile.height;
+            for (int dy = y; dy < y + height; ) {
+                int ty = Math.floorMod(dy + offsetY, th);
+                int rows = Math.min(th - ty, y + height - dy);
+                for (int dx = x; dx < x + width; ) {
+                    int tx = Math.floorMod(dx + offsetX, tw);
+                    int columns = Math.min(tw - tx, x + width - dx);
+                    content.copyArea((short) tx, (short) ty, (short) dx, (short) dy, (short) columns, (short) rows, tile);
+                    dx += columns;
+                }
+                dy += rows;
+            }
+        }
+        else if (source.attributes.hasBackgroundPixel()) {
+            content.fillRect(x, y, width, height, source.attributes.getBackgroundPixel());
+        }
+    }
+
     public Drawable getContent() {
         return content;
     }
@@ -258,6 +295,14 @@ public class Window extends XResource {
     public boolean hasEventListenerFor(int eventId) {
         for (EventListener eventListener : eventListeners) {
             if (eventListener.isInterestedIn(eventId)) return true;
+        }
+        return false;
+    }
+
+    /** Whether a client other than {@code client} listens for the event (only that one's redirect counts against a request). */
+    public boolean hasEventListenerForOthers(int eventId, XClient client) {
+        for (EventListener eventListener : eventListeners) {
+            if (eventListener.client != client && eventListener.isInterestedIn(eventId)) return true;
         }
         return false;
     }

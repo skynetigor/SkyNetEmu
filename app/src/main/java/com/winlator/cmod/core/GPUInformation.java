@@ -16,10 +16,11 @@ public abstract class GPUInformation {
 
         return !renderer.toLowerCase().contains("unknown");
     }
-    public native static String getVulkanVersion(String driverName, Context context);
-    public native static int getVendorID(String driverName, Context context);
-    public native static String getRenderer(String driverName, Context context);
-    public native static String[] enumerateExtensions(String driverName, Context context);
+    // The JNI probe uses shared Vulkan handles; serialize probes from UI and launch workers.
+    public synchronized native static String getVulkanVersion(String driverName, Context context);
+    public synchronized native static int getVendorID(String driverName, Context context);
+    public synchronized native static String getRenderer(String driverName, Context context);
+    public synchronized native static String[] enumerateExtensions(String driverName, Context context);
 
     static {
         System.loadLibrary("winlator");

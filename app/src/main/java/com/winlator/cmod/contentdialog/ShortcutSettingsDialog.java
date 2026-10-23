@@ -335,9 +335,14 @@ public class ShortcutSettingsDialog extends ContentDialog implements DXVKConfigD
         final CheckBox cbDisableMouseShortcut = findViewById(R.id.CBDisableMouse);
         cbDisableMouseShortcut.setChecked(shortcut.getExtra("disableMouse").equals("1"));
 
-        final CheckBox cbSimTouchScreen = findViewById(R.id.CBTouchscreenMode);
-        String isTouchScreenMode = shortcut.getExtra("simTouchScreen");
-        cbSimTouchScreen.setChecked(isTouchScreenMode.equals("1") ? true : false);
+        final Spinner inputMode = findViewById(R.id.SInputMode);
+        final String[] touchModes = {shortcut.container.isLinux() ? "native" : "touchscreen", "touchpad", "mouse"};
+        inputMode.setAdapter(new ArrayAdapter<>(context, android.R.layout.simple_spinner_dropdown_item,
+                context.getResources().getStringArray(shortcut.container.isLinux() ? R.array.linux_input_modes : R.array.input_modes)));
+        String resolvedTouchMode = shortcut.container.isLinux()
+                ? com.winlator.cmod.linux.LinuxTouchMode.resolve(shortcut.container, shortcut, null)
+                : com.winlator.cmod.input.TouchInputMode.resolve(shortcut.container, shortcut, null);
+        inputMode.setSelection(java.util.Arrays.asList(touchModes).indexOf(resolvedTouchMode));
 
         ContainerDetailFragment.createWinComponentsTabFromShortcut(this, getContentView(),
                 shortcut.getExtra("wincomponents", shortcut.container.getWinComponents()), isDarkMode);
@@ -455,7 +460,9 @@ public class ShortcutSettingsDialog extends ContentDialog implements DXVKConfigD
             shortcut.putExtra("enableRelativeMouse", cbEnableRelativeMouse.isChecked() ? "1" : null);
             shortcut.putExtra("disableMouse", cbDisableMouseShortcut.isChecked() ? "1" : null);
 
-            boolean touchscreenMode = cbSimTouchScreen.isChecked();
+            String mode = touchModes[inputMode.getSelectedItemPosition()];
+            shortcut.putExtra(shortcut.container.isLinux() ? "linuxTouchMode" : "touchInputMode", mode);
+            boolean touchscreenMode = mode.equals("native") || mode.equals("touchscreen");
             shortcut.putExtra("simTouchScreen", touchscreenMode ? "1" : "0");
 
             String execArgs = etExecArgs.getText().toString();
@@ -1004,4 +1011,3 @@ public class ShortcutSettingsDialog extends ContentDialog implements DXVKConfigD
         update.run();
     }
 }
-

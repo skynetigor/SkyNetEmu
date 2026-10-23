@@ -3,13 +3,15 @@
 #define _WIN32_WINNT 0x0600
 #endif
 
+#include <winsock2.h>
+#include <windows.h>
 #include <psapi.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tlhelp32.h>
-#include <windows.h>
-#include <winsock2.h>
 
 
 #define SERVER_PORT 7946
@@ -48,7 +50,73 @@ typedef struct {
 } ProcessPacket;
 #pragma pack(pop)
 
+// These offsets are the Java WinHandler protocol, independent of the Windows ABI.
+_Static_assert(sizeof(ProcessPacket) == 58, "ProcessPacket must match WinHandler");
+_Static_assert(offsetof(ProcessPacket, memory) == 13, "Unexpected memory offset");
+_Static_assert(offsetof(ProcessPacket, name) == 26, "Unexpected name offset");
+
+static int readInt(const char *buffer) {
+  int value;
+  memcpy(&value, buffer, sizeof(value));
+  return value;
+}
+
+static short readShort(const char *buffer) {
+  short value;
+  memcpy(&value, buffer, sizeof(value));
+  return value;
+}
+
+// Apply the Windows command-line quoting rules, including quotes and trailing
+// backslashes. Fixed-size strcat buffers corrupt long game launch arguments.
+static char *quoteArguments(int argc, char **argv, int first) {
+  size_t capacity = 1;
+  for (int i = first; i < argc; i++) {
+    size_t length = strlen(argv[i]);
+    if (length > (SIZE_MAX - capacity - 3) / 2)
+      return NULL;
+    capacity += length * 2 + 3;
+  }
+  char *result = (char *)malloc(capacity);
+  if (!result)
+    return NULL;
+  char *out = result;
+  for (int i = first; i < argc; i++) {
+    if (i != first)
+      *out++ = ' ';
+    // Some games parse GetCommandLine directly and require plain switches.
+    // Quote only arguments which need it, while preserving CRT round-tripping.
+    if (argv[i][0] && !strpbrk(argv[i], " \t\r\n\v\f\"")) {
+      size_t length = strlen(argv[i]);
+      memcpy(out, argv[i], length);
+      out += length;
+      continue;
+    }
+    *out++ = '"';
+    const char *arg = argv[i];
+    while (*arg) {
+      size_t slashes = 0;
+      while (*arg == '\\') {
+        slashes++;
+        arg++;
+      }
+      if (*arg == '"' || *arg == '\0')
+        slashes *= 2;
+      while (slashes--)
+        *out++ = '\\';
+      if (*arg == '"')
+        *out++ = '\\';
+      if (*arg)
+        *out++ = *arg++;
+    }
+    *out++ = '"';
+  }
+  *out = '\0';
+  return result;
+}
+
 SOCKET sock;
+HANDLE serverReadyEvent;
 struct sockaddr_in clientAddr;
 int clientAddrLen = sizeof(clientAddr);
 volatile BOOL running = TRUE;
@@ -62,6 +130,8 @@ PidNode *seenPidsHead = NULL;
 
 void addSeenPid(DWORD pid) {
   PidNode *newNode = (PidNode *)malloc(sizeof(PidNode));
+  if (!newNode)
+    return;
   newNode->pid = pid;
   newNode->next = seenPidsHead;
   seenPidsHead = newNode;
@@ -82,8 +152,10 @@ void sendCursorFeedback() {
   if (GetCursorPos(&ptr)) {
     BYTE buffer[5];
     buffer[0] = RC_CURSOR_POS_FEEDBACK;
-    *(short *)(buffer + 1) = (short)ptr.x;
-    *(short *)(buffer + 3) = (short)ptr.y;
+    short x = (short)ptr.x;
+    short y = (short)ptr.y;
+    memcpy(buffer + 1, &x, sizeof(x));
+    memcpy(buffer + 3, &y, sizeof(y));
     sendto(sock, (const char *)buffer, 5, 0, (struct sockaddr *)&clientAddr,
            clientAddrLen);
   }
@@ -154,24 +226,25 @@ void handleExec(const char *payload, int len) {
 
   if (len < 8)
     return;
-  int filenameLen = *(int *)(payload);
-  int paramsLen = *(int *)(payload + 4);
+  int filenameLen = readInt(payload);
+  int paramsLen = readInt(payload + 4);
 
-  if (len < 8 + filenameLen)
+  if (filenameLen <= 0 || paramsLen < 0 || filenameLen > len - 8 ||
+      paramsLen > len - 8 - filenameLen)
     return;
 
   char *filename = (char *)malloc(filenameLen + 1);
   char *params = (char *)malloc(paramsLen + 1);
 
-  if (filename) {
-    memcpy(filename, payload + 8, filenameLen);
-    filename[filenameLen] = '\0';
+  if (!filename || !params) {
+    free(filename);
+    free(params);
+    return;
   }
-
-  if (params) {
-    memcpy(params, payload + 8 + filenameLen, paramsLen);
-    params[paramsLen] = '\0';
-  }
+  memcpy(filename, payload + 8, filenameLen);
+  filename[filenameLen] = '\0';
+  memcpy(params, payload + 8 + filenameLen, paramsLen);
+  params[paramsLen] = '\0';
 
   ShellExecuteA(NULL, "open", filename, params, NULL, SW_SHOW);
 
@@ -183,8 +256,14 @@ void handleExec(const char *payload, int len) {
 
 void handleKillProcess(const char *payload, int len) {
 
-  int nameLen = *(int *)payload;
+  if (len < 4)
+    return;
+  int nameLen = readInt(payload);
+  if (nameLen <= 0 || nameLen > len - 4)
+    return;
   char *name = (char *)malloc(nameLen + 1);
+  if (!name)
+    return;
   memcpy(name, payload + 4, nameLen);
   name[nameLen] = '\0';
 
@@ -211,8 +290,10 @@ void handleKillProcess(const char *payload, int len) {
 
 void handleSetAffinity(const char *buffer, int len) {
 
-  int pid = *(int *)(buffer + 5);
-  int mask = *(int *)(buffer + 9);
+  if (len < 14)
+    return;
+  int pid = readInt(buffer + 5);
+  int mask = readInt(buffer + 9);
 
   if (pid != 0) {
     HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
@@ -222,7 +303,11 @@ void handleSetAffinity(const char *buffer, int len) {
     }
   } else {
     int nameLen = (unsigned char)buffer[13];
+    if (nameLen <= 0 || nameLen > len - 14)
+      return;
     char *name = (char *)malloc(nameLen + 1);
+    if (!name)
+      return;
     memcpy(name, buffer + 14, nameLen);
     name[nameLen] = '\0';
 
@@ -266,8 +351,14 @@ BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam) {
 }
 
 void handleBringToFront(const char *buffer, int len) {
-  int nameLen = *(int *)(buffer + 1);
+  if (len < 5)
+    return;
+  int nameLen = readInt(buffer + 1);
+  if (nameLen <= 0 || nameLen > len - 5)
+    return;
   char *name = (char *)malloc(nameLen + 1);
+  if (!name)
+    return;
   memcpy(name, buffer + 5, nameLen);
   name[nameLen] = '\0';
 
@@ -305,33 +396,45 @@ void handleBringToFront(const char *buffer, int len) {
 void handleInput(const char *buffer, int len) {
   BYTE code = buffer[0];
   if (code == RC_MOUSE_EVENT) {
+    if (len < 16)
+      return;
 
-    int flags = *(int *)(buffer + 5);
-    short dx = *(short *)(buffer + 9);
-    short dy = *(short *)(buffer + 11);
-    short wheel = *(short *)(buffer + 13);
+    int flags = readInt(buffer + 5);
+    short dx = readShort(buffer + 9);
+    short dy = readShort(buffer + 11);
+    short wheel = readShort(buffer + 13);
     BYTE feedback = (BYTE)buffer[15];
 
     mouse_event(flags, dx, dy, wheel, 0);
     if (feedback)
       sendCursorFeedback();
   } else if (code == RC_KEYBOARD_EVENT) {
+    if (len < 6)
+      return;
 
     BYTE vkey = (BYTE)buffer[1];
-    int flags = *(int *)(buffer + 2);
+    int flags = readInt(buffer + 2);
     keybd_event(vkey, 0, flags, 0);
   }
 }
 
 DWORD WINAPI ServerThread(LPVOID lpParam) {
   WSADATA wsaData;
-  if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
-    return 0;
+  int error = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (error != 0) {
+    fprintf(stderr, "winhandler: helper startup failed: WSAStartup error %d\n", error);
+    running = FALSE;
+    SetEvent(serverReadyEvent);
+    return 1;
+  }
 
   sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (sock == INVALID_SOCKET) {
+    fprintf(stderr, "winhandler: helper startup failed: socket error %d\n", WSAGetLastError());
     WSACleanup();
-    return 0;
+    running = FALSE;
+    SetEvent(serverReadyEvent);
+    return 1;
   }
 
   struct sockaddr_in serverAddr;
@@ -341,9 +444,12 @@ DWORD WINAPI ServerThread(LPVOID lpParam) {
 
   if (bind(sock, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) ==
       SOCKET_ERROR) {
+    fprintf(stderr, "winhandler: helper startup failed: bind error %d\n", WSAGetLastError());
     closesocket(sock);
     WSACleanup();
-    return 0;
+    running = FALSE;
+    SetEvent(serverReadyEvent);
+    return 1;
   }
 
   clientAddr.sin_family = AF_INET;
@@ -353,6 +459,7 @@ DWORD WINAPI ServerThread(LPVOID lpParam) {
   char initBuffer[64];
   initBuffer[0] = RC_INIT;
   sendto(sock, initBuffer, 1, 0, (struct sockaddr *)&clientAddr, clientAddrLen);
+  SetEvent(serverReadyEvent);
 
   char buffer[BUFFER_SIZE];
   while (running) {
@@ -372,7 +479,9 @@ DWORD WINAPI ServerThread(LPVOID lpParam) {
       case RC_INIT:
         break;
       case RC_EXEC:
-        handleExec(buffer + 5, len - 5);
+        if (len >= 5)
+          handleExec(buffer + 5, len - 5);
+        break;
       case RC_KILL_PROCESS:
         handleKillProcess(buffer + 1, len - 1);
         break;
@@ -435,7 +544,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   int affinity = 0;
   char *directory = NULL;
   char *executable = "wfm.exe";
-  char *params = NULL;
 
   int argc = __argc;
   char **argv = __argv;
@@ -463,34 +571,66 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
   }
 
-  char execArgs[2048] = {0};
-  if (argIdx < argc) {
-    for (int i = argIdx; i < argc; i++) {
-      strcat(execArgs, "\"");
-      strcat(execArgs, argv[i]);
-      strcat(execArgs, "\" ");
-    }
+  char *execArgs = quoteArguments(argc, argv, argIdx);
+  if (!execArgs) {
+    fprintf(stderr, "winhandler: helper startup failed: cannot allocate game arguments\n");
+    return 1;
+  }
+
+  // The input server must be available while ShellExecute starts the game;
+  // shell extensions and startup dialogs can block that call for some time.
+  serverReadyEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+  if (!serverReadyEvent) {
+    fprintf(stderr, "winhandler: helper startup failed: CreateEvent error %lu\n",
+            (unsigned long)GetLastError());
+    free(execArgs);
+    return 1;
+  }
+  HANDLE hThread = CreateThread(NULL, 0, ServerThread, NULL, 0, NULL);
+  if (!hThread) {
+    fprintf(stderr, "winhandler: helper startup failed: CreateThread error %lu\n",
+            (unsigned long)GetLastError());
+    CloseHandle(serverReadyEvent);
+    free(execArgs);
+    return 1;
+  }
+  DWORD readyStatus = WaitForSingleObject(serverReadyEvent, 5000);
+  CloseHandle(serverReadyEvent);
+  if (readyStatus != WAIT_OBJECT_0 || !running) {
+    if (readyStatus != WAIT_OBJECT_0)
+      fprintf(stderr, "winhandler: helper startup failed: input server did not become ready\n");
+    CloseHandle(hThread);
+    free(execArgs);
+    return 1;
   }
 
   SHELLEXECUTEINFOA sei = {0};
   sei.cbSize = sizeof(SHELLEXECUTEINFOA);
-  sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+  sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
   sei.lpFile = executable;
   sei.lpParameters = execArgs[0] ? execArgs : NULL;
   sei.lpDirectory = directory;
   sei.nShow = SW_SHOW;
 
-  ShellExecuteExA(&sei);
+  if (!ShellExecuteExA(&sei)) {
+    fprintf(stderr, "winhandler: could not start '%s' (Windows error %lu)\n",
+            executable, (unsigned long)GetLastError());
+    free(execArgs);
+    CloseHandle(hThread);
+    return 1;
+  }
+  free(execArgs);
   if (sei.hProcess)
     CloseHandle(sei.hProcess);
 
-  HANDLE hThread = CreateThread(NULL, 0, ServerThread, NULL, 0, NULL);
-
   if (affinity > 0) {
     handleChildProcesses(affinity);
-  } else {
-    WaitForSingleObject(hThread, INFINITE);
   }
+  WaitForSingleObject(hThread, INFINITE);
 
-  return 0;
+  DWORD serverStatus = 0;
+  GetExitCodeThread(hThread, &serverStatus);
+  CloseHandle(hThread);
+
+  return (int)serverStatus;
 }

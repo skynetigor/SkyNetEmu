@@ -39,10 +39,15 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerManager;
+import com.winlator.cmod.container.ShortcutWriter;
+import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.ExeIconExtractor;
+import com.winlator.cmod.core.ExecutableKind;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.WineUtils;
+import com.winlator.cmod.core.WineInfo;
+import com.winlator.cmod.core.WindowsExecutable;
 import com.winlator.cmod.ui.FileManagerLandscapeNavHost;
 import com.winlator.cmod.ui.theme.WinlatorLegacyTheme;
 import com.winlator.cmod.xenvironment.ImageFs;
@@ -65,6 +70,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class FileManagerFragment extends Fragment {
     private static final String ARG_START_PATH = "start_path";
     private static final String ARG_DRIVE_ROOT = "drive_root";
+    private static final String ARG_FOLDER_REQUEST = "folder_request";
+    public static final String RESULT_FOLDER_PATH = "folder_path";
+    private View chooseFolderButton;
 
     private RecyclerView recyclerView;
     private TextView tvCurrentPath;
@@ -86,10 +94,70 @@ public class FileManagerFragment extends Fragment {
     private ProgressBar progressBar;
     private TextView progressText;
     private TextView progressPercent;
-    private boolean isOperationCancelled = false;
+    private volatile boolean isOperationCancelled = false;
 
     private interface ContainerAction {
         void onContainerSelected(Container container);
+    }
+
+    /** A file manager for choosing the exe of a new game: "Add this game" hands the path to {@link MainActivity#onGamePicked}. */
+    public static FileManagerFragment forNewGame() {
+        FileManagerFragment fragment = new FileManagerFragment();
+        Bundle args = new Bundle();
+        args.putBoolean("pick_game", true);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    /** As {@link #forNewGame()}, opened in the given folder (the game's own folder, when its program has to be picked). */
+    public static FileManagerFragment forNewGame(File startDir) {
+        FileManagerFragment fragment = forNewGame();
+        if (startDir != null) fragment.getArguments().putString(ARG_START_PATH, startDir.getAbsolutePath());
+        return fragment;
+    }
+
+    private boolean pickingGame() {
+        return getArguments() != null && getArguments().getBoolean("pick_game", false);
+    }
+
+    /** Reuses the game browser to choose a directory without running or changing files. */
+    public static FileManagerFragment forFolderSelection(File startDir, String requestKey) {
+        FileManagerFragment fragment = new FileManagerFragment();
+        Bundle args = new Bundle();
+        args.putString(ARG_FOLDER_REQUEST, requestKey);
+        if (startDir != null) args.putString(ARG_START_PATH, startDir.getAbsolutePath());
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    private boolean pickingFolder() {
+        return getArguments() != null && getArguments().containsKey(ARG_FOLDER_REQUEST);
+    }
+
+    private void installFolderSelection(View view) {
+        if (!pickingFolder()) return;
+        LinearLayout bar = new LinearLayout(requireContext());
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        android.widget.Button cancel = new androidx.appcompat.widget.AppCompatButton(requireContext());
+        cancel.setText(R.string.cancel);
+        cancel.setOnClickListener(v -> getParentFragmentManager().popBackStack());
+        android.widget.Button choose = new androidx.appcompat.widget.AppCompatButton(requireContext());
+        choose.setText(R.string.use_this_folder);
+        choose.setEnabled(false);
+        choose.setOnClickListener(v -> {
+            if (currentDir == null || !currentDir.canWrite()) return;
+            Bundle result = new Bundle();
+            result.putString(RESULT_FOLDER_PATH, currentDir.getAbsolutePath());
+            getParentFragmentManager().setFragmentResult(
+                    requireArguments().getString(ARG_FOLDER_REQUEST), result);
+            getParentFragmentManager().popBackStack();
+        });
+        chooseFolderButton = choose;
+        bar.addView(cancel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams chooseParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        chooseParams.setMarginStart(dp(8));
+        bar.addView(choose, chooseParams);
+        ((LinearLayout) view.findViewById(R.id.FileManagerHeader)).addView(bar, 0);
     }
 
     /** A file manager whose "run" and "add shortcut" actions go to the given Wine container without asking. */
@@ -98,6 +166,16 @@ public class FileManagerFragment extends Fragment {
         Bundle args = new Bundle();
         args.putInt("container_id", containerId);
         fragment.setArguments(args);
+        return fragment;
+    }
+
+    public static FileManagerFragment forContainerFiles(Container container) {
+        FileManagerFragment fragment = forContainer(container.id);
+        Bundle args = fragment.requireArguments();
+        File start = container.isLinux() ? container.getLinuxHomeDir() : container.getRootDir();
+        if (!start.isDirectory()) start = container.getRootDir();
+        args.putString(ARG_START_PATH, start.getAbsolutePath());
+        args.putString(ARG_DRIVE_ROOT, container.getRootDir().getAbsolutePath());
         return fragment;
     }
 
@@ -141,10 +219,14 @@ public class FileManagerFragment extends Fragment {
         }
 
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
+        installFolderSelection(view);
 
         Bundle args = getArguments();
         File startDir = null;
         if (args != null) {
+            String clipboardPath = args.getString("clipboard_path", "");
+            if (!clipboardPath.isEmpty()) clipboardFile = new File(clipboardPath);
+            isCutOperation = args.getBoolean("clipboard_cut", false);
             String startPath = args.getString(ARG_START_PATH, "");
             String rootPath = args.getString(ARG_DRIVE_ROOT, "");
             if (!startPath.isEmpty()) startDir = new File(startPath);
@@ -179,7 +261,7 @@ public class FileManagerFragment extends Fragment {
         super.onConfigurationChanged(newConfig);
         if (!isAdded() || currentDir == null) return;
 
-        Bundle args = new Bundle();
+        Bundle args = getArguments() == null ? new Bundle() : new Bundle(getArguments());
         args.putString(ARG_START_PATH, currentDir.getAbsolutePath());
         if (currentDriveRoot != null) args.putString(ARG_DRIVE_ROOT, currentDriveRoot.getAbsolutePath());
 
@@ -220,7 +302,7 @@ public class FileManagerFragment extends Fragment {
         if (!(requireActivity() instanceof MainActivity)) return;
         MainActivity activity = (MainActivity) requireActivity();
         boolean landscape = isLandscape();
-        activity.setBottomNavigationVisible(!landscape);
+        activity.setBottomNavigationVisible(true);
         activity.setMainToolbarVisible(!landscape);
 
         Toolbar toolbar = activity.findViewById(R.id.Toolbar);
@@ -413,6 +495,15 @@ public class FileManagerFragment extends Fragment {
         File dRoot = Environment.getExternalStorageDirectory();
         File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         File dTarget = downloads.exists() ? downloads : dRoot;
+        for (Container container : containerManager.getContainers()) {
+            File folder = container.isLinux() ? container.getLinuxHomeDir() : container.getRootDir();
+            if (!folder.isDirectory()) folder = container.getRootDir();
+            final File target = folder;
+            driveOptionsPanel.addView(createDriveOptionRow(
+                    container.getName(), container.isLinux() ? "Linux container" : "Windows container",
+                    samePath(currentDriveRoot, container.getRootDir()),
+                    () -> openDrive(target, container.getRootDir())));
+        }
         driveOptionsPanel.addView(createDriveOptionRow(
                 "Drive D:", "Downloads", samePath(currentDriveRoot, dRoot), () -> openDrive(dTarget, dRoot)));
 
@@ -562,6 +653,7 @@ public class FileManagerFragment extends Fragment {
         }
 
         currentDir = dir;
+        if (chooseFolderButton != null) chooseFolderButton.setEnabled(dir.canWrite());
         if (currentDriveRoot == null) currentDriveRoot = inferDriveRoot(dir);
         tvCurrentPath.setText(dir.getAbsolutePath());
         updateDriveButtonLabel(dir);
@@ -591,6 +683,15 @@ public class FileManagerFragment extends Fragment {
     private void updateDriveButtonLabel(File dir) {
         if (tvDriveName == null || ivDriveIcon == null) return;
 
+        for (Container container : containerManager.getContainers()) {
+            if (samePath(currentDriveRoot, container.getRootDir())) {
+                tvDriveName.setText(container.getName());
+                ivDriveIcon.setImageResource(container.isLinux()
+                        ? android.R.drawable.ic_menu_manage : R.drawable.icon_wine);
+                return;
+            }
+        }
+
         String path = normalizeFilePath(dir.getAbsolutePath());
         String primary = normalizeFilePath(Environment.getExternalStorageDirectory().getAbsolutePath());
         if (path.contains("/.wine/drive_c")) {
@@ -610,6 +711,15 @@ public class FileManagerFragment extends Fragment {
 
     private void performContainerAction(File file, ContainerAction action) {
         ArrayList<Container> containers = containerManager.getWineContainers();
+        if (isNativeArm64Executable(file)) {
+            ContentsManager contents = new ContentsManager(requireContext());
+            contents.syncContents();
+            containers.removeIf(container -> !supportsNativeArm64(container, contents));
+            if (containers.isEmpty()) {
+                routeNativeAddGame(file);
+                return;
+            }
+        }
         if (containers == null || containers.isEmpty()) {
             Toast.makeText(getContext(), "Create a container first!", Toast.LENGTH_SHORT).show();
             return;
@@ -635,76 +745,24 @@ public class FileManagerFragment extends Fragment {
         }
     }
 
-    private File getRemovableStorageRoot(File file) {
-        if (file == null) return null;
-        String path = normalizeFilePath(file.getAbsolutePath());
-        if (!path.startsWith("/storage/")) return null;
-
-        String rest = path.substring("/storage/".length());
-        int slash = rest.indexOf('/');
-        String volume = slash >= 0 ? rest.substring(0, slash) : rest;
-        if (volume.isEmpty() || volume.equals("emulated") || volume.equals("self")) return null;
-
-        File root = new File("/storage/" + volume);
-        return root.exists() && root.isDirectory() ? root : null;
+    private boolean isNativeArm64Executable(File file) {
+        return ExecutableKind.windowsArchitecture(file) == WindowsExecutable.Architecture.ARM64;
     }
 
-    private void setDriveMapping(Container container, String letter, String path) {
-        StringBuilder rebuilt = new StringBuilder();
-        for (String[] drive : container.drivesIterator()) {
-            if (drive == null || drive.length < 2 || drive[0] == null || drive[1] == null) continue;
-            String existingLetter = drive[0].replace(":", "").trim().toUpperCase(Locale.ENGLISH);
-            if (existingLetter.equals(letter)) continue;
-            rebuilt.append(existingLetter).append(':').append(drive[1]);
-        }
-        rebuilt.append(letter).append(':').append(path);
-        container.setDrives(rebuilt.toString());
-        container.saveData();
+    private boolean supportsNativeArm64(Container container, ContentsManager contents) {
+        return WineInfo.NATIVE_ARM64_CONTAINER_VALUE.equals(container.getExtra(WineInfo.NATIVE_ARM64_CONTAINER_KEY))
+                && WineInfo.fromIdentifier(requireContext(), contents, container.getWineVersion()).supportsNativeArm64();
     }
 
-    private boolean ensureExternalStorageMapped(Container container, File file) {
-        File volumeRoot = getRemovableStorageRoot(file);
-        if (volumeRoot == null) return true;
-
-        String filePath = normalizeFilePath(file.getAbsolutePath());
-        String volumePath = normalizeFilePath(volumeRoot.getAbsolutePath());
-        String volumeName = volumeRoot.getName();
-        boolean[] used = new boolean[26];
-
-        for (String[] drive : container.drivesIterator()) {
-            if (drive == null || drive.length < 2 || drive[0] == null || drive[1] == null) continue;
-            String letter = drive[0].replace(":", "").trim().toUpperCase(Locale.ENGLISH);
-            if (letter.length() == 1) {
-                int index = letter.charAt(0) - 'A';
-                if (index >= 0 && index < used.length) used[index] = true;
-            }
-
-            String mappedPath = normalizeFilePath(drive[1]);
-            if (!mappedPath.isEmpty() && (filePath.equals(mappedPath) || filePath.startsWith(mappedPath + File.separator))) {
-                WineUtils.createDosdevicesSymlinks(container);
-                return true;
-            }
-
-            String legacyRoot = normalizeFilePath("/mnt/media_rw/" + volumeName);
-            if (mappedPath.equals(legacyRoot) || mappedPath.startsWith(legacyRoot + File.separator)) {
-                setDriveMapping(container, letter, volumePath);
-                WineUtils.createDosdevicesSymlinks(container);
-                return true;
-            }
+    /** ARM64 creation uses the same runtime/profile checks as Library > Add Game, including from a container browser. */
+    private boolean routeNativeAddGame(File file) {
+        if (!isNativeArm64Executable(file)) return false;
+        if (requireActivity() instanceof MainActivity) {
+            ((MainActivity) requireActivity()).onGamePicked(file);
+        } else {
+            Toast.makeText(requireContext(), "Add this executable from Library > Add Game and choose a Windows ARM64 native environment.",
+                    Toast.LENGTH_LONG).show();
         }
-
-        char driveLetter = 0;
-        for (char candidate = 'E'; candidate <= 'Y'; candidate++) {
-            int index = candidate - 'A';
-            if (!used[index]) {
-                driveLetter = candidate;
-                break;
-            }
-        }
-        if (driveLetter == 0) return false;
-
-        setDriveMapping(container, String.valueOf(driveLetter), volumePath);
-        WineUtils.createDosdevicesSymlinks(container);
         return true;
     }
 
@@ -808,7 +866,15 @@ public class FileManagerFragment extends Fragment {
 
     private void runFileDirectly(File file, Container container) {
         try {
-            if (!ensureExternalStorageMapped(container, file)) {
+            if (isNativeArm64Executable(file)) {
+                ContentsManager contents = new ContentsManager(requireContext());
+                contents.syncContents();
+                if (!supportsNativeArm64(container, contents)) {
+                    routeNativeAddGame(file);
+                    return;
+                }
+            }
+            if (!ShortcutWriter.ensureExternalStorageMapped(container, file)) {
                 Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
                 return;
             }
@@ -837,12 +903,13 @@ public class FileManagerFragment extends Fragment {
 
     private void createShortcutDirectly(File file, Container container) {
         try {
-            if (!ensureExternalStorageMapped(container, file)) {
+            if (routeNativeAddGame(file)) return;
+            if (!ShortcutWriter.ensureExternalStorageMapped(container, file)) {
                 Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
                 return;
             }
 
-            String displayName = getSmartDisplayName(file);
+            String displayName = ShortcutWriter.smartName(file);
             File shortcutsDir = container.getDesktopDir();
             if (!shortcutsDir.exists()) shortcutsDir.mkdirs();
             if (new File(shortcutsDir, displayName + ".desktop").exists()) {
@@ -888,50 +955,19 @@ public class FileManagerFragment extends Fragment {
     }
 
     private void writeShortcut(File file, Container container, String displayName) {
-        try {
-            String unixPath = file.getAbsolutePath();
-            String winePrefix = getContainerWineHome(container) + "/.wine";
-            File shortcutsDir = container.getDesktopDir();
-            File desktopFile = new File(shortcutsDir, displayName + ".desktop");
-
-            try (PrintWriter writer = new PrintWriter(new FileWriter(desktopFile))) {
-                writer.println("[Desktop Entry]");
-                writer.println("Name=" + displayName);
-                writer.println("Exec=env WINEPREFIX=\"" + winePrefix + "\" wine \"" + unixPath + "\"");
-                writer.println("Type=Application");
-                writer.println("Icon=" + displayName);
-                writer.println("container_id:" + container.id);
-            }
+        if (routeNativeAddGame(file)) return;
+        if (ShortcutWriter.write(requireContext(), file, container, displayName, null, null) != null) {
             Toast.makeText(getContext(), "Game added to Library!", Toast.LENGTH_SHORT).show();
-
-            File iconDir64 = container.getIconsDir(64);
-            if (!iconDir64.exists()) iconDir64.mkdirs();
-            File iconDest = new File(iconDir64, displayName + ".png");
-            boolean iconExtracted = ExeIconExtractor.extractIcon(file, iconDest);
-
-            File iconsDir = new File(Environment.getExternalStorageDirectory(), "Winlator/icons");
-            if (!iconsDir.exists()) iconsDir.mkdirs();
-            if (iconExtracted) {
-                File userIcon = new File(iconsDir, displayName + ".png");
-                if (!userIcon.exists()) {
-                    try {
-                        FileUtils.copy(iconDest, userIcon);
-                    } catch (Exception ignored) {}
-                }
-            }
-
-            File coversDir = new File(Environment.getExternalStorageDirectory(), "Winlator/covers");
-            if (!coversDir.exists()) coversDir.mkdirs();
-            File autoCover = new File(coversDir, displayName + ".png");
-            if (autoCover.exists()) autoCover.delete();
-        } catch (Exception e) {
-            e.printStackTrace();
         }
+        else Toast.makeText(getContext(), "Could not add the game", Toast.LENGTH_LONG).show();
     }
 
     private void copyToClipboard(File file, boolean isCut) {
         this.clipboardFile = file;
         this.isCutOperation = isCut;
+        if (getArguments() == null) setArguments(new Bundle());
+        requireArguments().putString("clipboard_path", file.getAbsolutePath());
+        requireArguments().putBoolean("clipboard_cut", isCut);
         if (fabPaste != null) fabPaste.setVisibility(View.VISIBLE);
         Toast.makeText(getContext(), (isCut ? "Cut: " : "Copied: ") + file.getName(), Toast.LENGTH_SHORT).show();
     }
@@ -944,6 +980,11 @@ public class FileManagerFragment extends Fragment {
 
         final File source = clipboardFile;
         File dest = new File(currentDir, source.getName());
+        if (samePath(source, dest) || (source.isDirectory() && isWithinRoot(dest, source))
+                || isWithinRoot(source, dest)) {
+            Toast.makeText(getContext(), "Choose a destination outside the source folder", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (dest.exists()) {
             AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
             builder.setTitle("File Conflict");
@@ -996,7 +1037,7 @@ public class FileManagerFragment extends Fragment {
                 if (isCutOperation && !isOperationCancelled) {
                     long srcSize = getFolderSize(source);
                     long dstSize = getFolderSize(dest);
-                    if (srcSize > 0 && srcSize == dstSize && source.canRead()) deleteRecursive(source);
+                    if (srcSize == dstSize && source.canRead()) deleteRecursive(source);
                     else throw new IOException("Safety Stop: Sizes mismatch (" + srcSize + " vs " + dstSize + ") or source unreadable.");
                 }
                 new Handler(Looper.getMainLooper()).post(() -> {
@@ -1025,6 +1066,7 @@ public class FileManagerFragment extends Fragment {
     private void finishPaste(boolean clearClipboard) {
         if (clearClipboard) {
             clipboardFile = null;
+            if (getArguments() != null) getArguments().remove("clipboard_path");
             if (fabPaste != null) fabPaste.setVisibility(View.GONE);
         }
         loadDirectory(currentDir);
@@ -1075,11 +1117,13 @@ public class FileManagerFragment extends Fragment {
         });
     }
 
-    private long getFolderSize(File file) {
+    private long getFolderSize(File file) throws IOException {
+        if (java.nio.file.Files.isSymbolicLink(file.toPath())) return 0;
         long size = 0;
         if (file.isDirectory()) {
             File[] files = file.listFiles();
-            if (files != null) for (File child : files) size += getFolderSize(child);
+            if (files == null) throw new IOException("Cannot read folder: " + file.getName());
+            for (File child : files) size += getFolderSize(child);
         } else {
             size = file.length();
         }
@@ -1088,13 +1132,16 @@ public class FileManagerFragment extends Fragment {
 
     private void copyRecursiveWithProgress(File src, File dst, long totalBytes, AtomicLong copiedBytes) throws IOException {
         if (isOperationCancelled) return;
+        if (java.nio.file.Files.isSymbolicLink(src.toPath())) {
+            java.nio.file.Files.copy(src.toPath(), dst.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+            return;
+        }
         if (src.isDirectory()) {
             if (!dst.exists() && !dst.mkdirs()) throw new IOException("Failed to create dir: " + dst.getName());
             String[] children = src.list();
-            if (children != null) {
-                for (String child : children) {
-                    copyRecursiveWithProgress(new File(src, child), new File(dst, child), totalBytes, copiedBytes);
-                }
+            if (children == null) throw new IOException("Cannot read folder: " + src.getName());
+            for (String child : children) {
+                copyRecursiveWithProgress(new File(src, child), new File(dst, child), totalBytes, copiedBytes);
             }
         } else {
             copyFileSafe(src, dst, totalBytes, copiedBytes);
@@ -1127,7 +1174,7 @@ public class FileManagerFragment extends Fragment {
     }
 
     private void deleteRecursive(File fileOrDirectory) {
-        if (fileOrDirectory.isDirectory()) {
+        if (!java.nio.file.Files.isSymbolicLink(fileOrDirectory.toPath()) && fileOrDirectory.isDirectory()) {
             File[] children = fileOrDirectory.listFiles();
             if (children != null) for (File child : children) deleteRecursive(child);
         }
@@ -1150,20 +1197,48 @@ public class FileManagerFragment extends Fragment {
         builder.show();
     }
 
+    private final java.util.HashMap<String, com.winlator.cmod.core.ExecutableKind> kinds = new java.util.HashMap<>();
+
+    /** What the file runs on, read once per file and modification time (the list sorts and binds it many times). */
+    private com.winlator.cmod.core.ExecutableKind kindOf(File f) {
+        String key = f.getPath() + "|" + f.lastModified();
+        com.winlator.cmod.core.ExecutableKind kind = kinds.get(key);
+        if (kind == null) {
+            kind = com.winlator.cmod.core.ExecutableKind.of(f);
+            kinds.put(key, kind);
+        }
+        return kind;
+    }
+
+    /** A Windows program, or a Linux one (x86-64, 32-bit x86, ARM64, a script). */
     private boolean isExecutable(File f) {
-        String name = f.getName().toLowerCase(Locale.ENGLISH);
-        return name.endsWith(".exe") || name.endsWith(".msi") || name.endsWith(".bat");
+        com.winlator.cmod.core.ExecutableKind kind = kindOf(f);
+        // Linux programs are only for "Add game"; the file manager of a Wine container knows Windows programs only.
+        return kind == com.winlator.cmod.core.ExecutableKind.WINDOWS || (kind != com.winlator.cmod.core.ExecutableKind.NONE && pickingGame());
     }
 
     private void showFileOptions(File file, View anchor) {
         PopupMenu popup = new PopupMenu(getContext(), anchor);
-        if (isExecutable(file)) {
-            popup.getMenu().add("Run / Open").setOnMenuItemClickListener(item -> {
-                performContainerAction(file, container -> runFileDirectly(file, container));
+        if (pickingGame() && file.isDirectory() && requireActivity() instanceof MainActivity) {
+            popup.getMenu().add("Add this game folder").setOnMenuItemClickListener(item -> {
+                ((MainActivity) requireActivity()).onGameFolderPicked(file);
                 return true;
             });
+        }
+        if (isExecutable(file)) {
+            boolean windows = kindOf(file) == com.winlator.cmod.core.ExecutableKind.WINDOWS;
+            if (!pickingGame() && windows) {
+                popup.getMenu().add("Run / Open").setOnMenuItemClickListener(item -> {
+                    performContainerAction(file, container -> runFileDirectly(file, container));
+                    return true;
+                });
+            }
             popup.getMenu().add("Add this game").setOnMenuItemClickListener(item -> {
-                performContainerAction(file, container -> createShortcutDirectly(file, container));
+                if (pickingGame() && requireActivity() instanceof MainActivity) {
+                    ((MainActivity) requireActivity()).onGamePicked(file);
+                } else if (!routeNativeAddGame(file)) {
+                    performContainerAction(file, container -> createShortcutDirectly(file, container));
+                }
                 return true;
             });
         }
@@ -1194,53 +1269,6 @@ public class FileManagerFragment extends Fragment {
         popup.show();
     }
 
-    private String getSmartDisplayName(File file) {
-        String filename = cleanGameName(file.getName());
-        String lowerName = filename.toLowerCase(Locale.ENGLISH);
-        List<String> genericNames = Arrays.asList(
-                "game", "launcher", "setup", "installer", "start", "run",
-                "speed", "update", "patch", "loader", "client", "app", "main", "boot", "play",
-                "application", "shipping", "x64", "x86", "win64", "win32", "binaries"
-        );
-        boolean isModOrGeneric = false;
-        if (lowerName.contains("mod") || lowerName.contains("fix") || lowerName.contains("crack") || lowerName.contains("patch")) {
-            isModOrGeneric = true;
-        }
-        if (!isModOrGeneric && filename.length() < 4) isModOrGeneric = true;
-        if (!isModOrGeneric) {
-            for (String gen : genericNames) {
-                if (lowerName.equals(gen) || lowerName.startsWith(gen + " ")) {
-                    isModOrGeneric = true;
-                    break;
-                }
-            }
-        }
-        if (isModOrGeneric) {
-            File parent = file.getParentFile();
-            if (parent != null) {
-                String parentName = cleanGameName(parent.getName());
-                List<String> genericFolders = Arrays.asList("bin", "bin32", "bin64", "system", "release", "retail", "win64");
-                if (genericFolders.contains(parentName.toLowerCase(Locale.ENGLISH))) {
-                    File grandParent = parent.getParentFile();
-                    if (grandParent != null) return cleanGameName(grandParent.getName());
-                }
-                return parentName;
-            }
-        }
-        return filename;
-    }
-
-    private String cleanGameName(String filename) {
-        String name = filename;
-        int pos = name.lastIndexOf('.');
-        if (pos > 0) name = name.substring(0, pos);
-        name = name.replace("_", " ").replace(".", " ").replace("-", " ");
-        name = name.replaceAll("(?i)\\b(v\\d+|repack|setup|installer|portable|goty|edition)\\b", "");
-        name = name.replaceAll("[^a-zA-Z0-9 ]", "");
-        name = name.replaceAll("\\s+", " ").trim();
-        return name;
-    }
-
     private File getFileIconCacheFile(File file) {
         File cacheDir = new File(requireContext().getCacheDir(), "file-manager-icons");
         if (!cacheDir.exists()) cacheDir.mkdirs();
@@ -1269,7 +1297,8 @@ public class FileManagerFragment extends Fragment {
             }
         }
 
-        iconView.setImageResource(R.drawable.icon_wine);
+        boolean linux = kindOf(file) != com.winlator.cmod.core.ExecutableKind.WINDOWS;
+        iconView.setImageResource(linux ? R.drawable.winz_ic_terminal : R.drawable.icon_wine);
         iconView.setImageTintList(ColorStateList.valueOf(WinlatorLegacyTheme.onSurfaceVariant(requireContext())));
         if (!file.getName().toLowerCase(Locale.ENGLISH).endsWith(".exe")) return;
 
@@ -1323,6 +1352,7 @@ public class FileManagerFragment extends Fragment {
             holder.btMenu.setVisibility(View.GONE);
 
             holder.itemView.setOnLongClickListener(v -> {
+                if (pickingFolder()) return false;
                 showFileOptions(file, holder.itemView);
                 return true;
             });
@@ -1335,7 +1365,7 @@ public class FileManagerFragment extends Fragment {
                 holder.tvDetails.setText(fileDetails(file));
                 if (isExecutable(file)) bindExecutableIcon(file, holder.ivIcon);
                 else setFallbackFileIcon(holder.ivIcon, android.R.drawable.ic_menu_agenda);
-                holder.itemView.setOnClickListener(v -> showFileOptions(file, holder.itemView));
+                holder.itemView.setOnClickListener(pickingFolder() ? null : v -> showFileOptions(file, holder.itemView));
             }
         }
 

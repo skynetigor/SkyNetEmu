@@ -21,10 +21,13 @@ import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.contentdialog.ContentDialog;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.ui.library.GameDetailCallbacks;
 import com.winlator.cmod.ui.library.GameDetailComposeHost;
 import com.winlator.cmod.ui.library.GameSavesComposeDialog;
+import com.winlator.cmod.ui.library.GameStorageComposeDialog;
+import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.ui.shortcut.ShortcutSettingsComposeDialog;
 
 import java.io.File;
@@ -32,6 +35,7 @@ import java.io.File;
 public class GameDetailFragment extends Fragment {
     private final String shortcutPath;
     private Shortcut shortcut;
+    private boolean launching;
 
     public GameDetailFragment() {
         this("");
@@ -39,6 +43,12 @@ public class GameDetailFragment extends Fragment {
 
     public GameDetailFragment(String shortcutPath) {
         this.shortcutPath = shortcutPath;
+    }
+
+    /** A copy or move changed where the game is: read the shortcut again so Play starts the new location. */
+    private void reloadShortcut() {
+        if (shortcut == null) return;
+        shortcut = new Shortcut(shortcut.container, shortcut.file);
     }
 
     @Nullable
@@ -101,6 +111,31 @@ public class GameDetailFragment extends Fragment {
                     }
 
                     @Override
+                    public void onStorage() {
+                        GameStorageComposeDialog.show(GameDetailFragment.this, shortcut, GameDetailFragment.this::reloadShortcut);
+                    }
+
+                    @Override
+                    public void onContainerSettings() {
+                        startActivity(new android.content.Intent(requireContext(), com.winlator.cmod.ui.settings.ContainersSettingsActivity.class)
+                                .putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_EDIT_CONTAINER, shortcut.container.id));
+                    }
+
+                    @NonNull
+                    @Override
+                    public String storageLabel() {
+                        try {
+                            Shortcut fresh = new Shortcut(shortcut.container, shortcut.file);
+                            GameFolder game = GameFolder.of(ImageFs.find(requireContext()), fresh.container, fresh.path);
+                            if (game == null) return "";
+                            return GameFolder.isInternal(requireContext(), game.folder) ? "Internal storage" : "Shared storage";
+                        }
+                        catch (Exception e) {
+                            return "";
+                        }
+                    }
+
+                    @Override
                     public void onFavorite(boolean favorite) {
                         shortcut.putExtra("favorite", favorite ? "1" : "0");
                         shortcut.saveData();
@@ -141,6 +176,8 @@ public class GameDetailFragment extends Fragment {
     }
 
     private void runShortcut() {
+        if (launching) return;
+        launching = true;
         Activity activity = requireActivity();
         if (!XrActivity.isEnabled(requireContext())) {
             Intent intent = new Intent(activity, XServerDisplayActivity.class);
@@ -156,8 +193,13 @@ public class GameDetailFragment extends Fragment {
     }
 
     private void runContainer() {
-        Activity activity = requireActivity();
-        if (!XrActivity.isEnabled(requireContext())) {
+        if (launching) return;
+        launching = true;
+        launchContainer(requireActivity(), shortcut);
+    }
+
+    public static void launchContainer(Activity activity, Shortcut shortcut) {
+        if (!XrActivity.isEnabled(activity)) {
             Intent intent = new Intent(activity, XServerDisplayActivity.class);
             intent.putExtra("container_id", shortcut.container.id);
             activity.startActivity(intent);
@@ -175,7 +217,7 @@ public class GameDetailFragment extends Fragment {
         MainActivity activity = (MainActivity) getActivity();
         activity.setDetailMode(true);
         if (isLandscape()) {
-            activity.setBottomNavigationVisible(false);
+            activity.setBottomNavigationVisible(true);
             activity.setMainToolbarVisible(false);
         }
     }
@@ -183,6 +225,7 @@ public class GameDetailFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
+        launching = false;
         applyDetailChrome();
     }
 

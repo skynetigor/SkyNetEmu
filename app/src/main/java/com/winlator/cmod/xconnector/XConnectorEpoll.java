@@ -135,7 +135,10 @@ public class XConnectorEpoll implements Runnable {
     }
 
     public void killConnection(Client client) {
-        client.connected = false;
+        synchronized (client) {
+            if (!client.connected) return;
+            client.connected = false;
+        }
         connectionHandler.handleConnectionShutdown(client);
         if (multithreadedClients) {
             if (Thread.currentThread() != client.pollThread) {

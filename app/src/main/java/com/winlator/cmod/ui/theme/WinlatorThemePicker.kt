@@ -176,7 +176,7 @@ fun WinlatorThemePreferenceCard(modifier: Modifier = Modifier) {
             ) {
                 Text("Appearance", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Choose the Winlator theme. Changes are applied immediately.",
+                    "Choose the SkyNetEmu theme. Changes are applied immediately.",
                     modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -201,27 +201,15 @@ internal data class ThemePreviewColors(
 
 internal fun winlatorThemePreview(theme: WinlatorThemeType): ThemePreviewColors = when (theme) {
     WinlatorThemeType.WHITE -> ThemePreviewColors(
-        background = Color(0xFFF5F6F8), surface = Color.White,
-        accent = Color(0xFF25272D), outline = Color(0xFFB9BBC2)
+        background = Color(0xFFF4F6FF), surface = Color.White,
+        accent = Color(0xFF3A1C8F), outline = Color(0xFFB4BAE0)
     )
     WinlatorThemeType.BLACK -> ThemePreviewColors(
-        background = Color(0xFF06070A), surface = Color(0xFF17181E),
-        accent = Color(0xFFF2F2F4), outline = Color(0xFF41434D)
+        background = Color(0xFF070B1E), surface = Color(0xFF151C3D),
+        accent = Color(0xFF5EE7FF), outline = Color(0xFF3C4A85)
     )
     WinlatorThemeType.AMOLED -> ThemePreviewColors(
-        background = Color.Black, surface = Color(0xFF080808),
-        accent = Color.White, outline = Color(0xFF2A2A2A)
-    )
-    WinlatorThemeType.BLUE -> ThemePreviewColors(
-        background = Color(0xFF050A12), surface = Color(0xFF101B2B),
-        accent = Color(0xFF82B8FF), outline = Color(0xFF355174)
-    )
-    WinlatorThemeType.RED -> ThemePreviewColors(
-        background = Color(0xFF0C0607), surface = Color(0xFF211113),
-        accent = Color(0xFFFF8A8F), outline = Color(0xFF6E353A)
-    )
-    WinlatorThemeType.PURPLE -> ThemePreviewColors(
-        background = Color(0xFF0E0A13), surface = Color(0xFF241C2D),
-        accent = Color(0xFFD0BCFF), outline = Color(0xFF675A78)
+        background = Color.Black, surface = Color(0xFF080C1A),
+        accent = Color(0xFFB07CFF), outline = Color(0xFF2A3566)
     )
 }

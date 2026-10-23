@@ -136,6 +136,7 @@ public class BigPictureActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         getSupportActionBar().hide();  // Hide the action bar for full-screen mode
         setContentView(R.layout.big_picture_activity);
+        com.winlator.cmod.ui.AppBottomNavigation.attach(this, R.id.bottom_nav_library);
 
 
 

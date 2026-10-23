@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.ArrayDeque;
+import android.os.ParcelFileDescriptor;
 
 public class XOutputStream {
     private static final byte[] ZERO = new byte[64];
@@ -13,6 +15,68 @@ public class XOutputStream {
     public final ClientSocket clientSocket;
     private final ReentrantLock lock = new ReentrantLock();
     private int ancillaryFd = -1;
+    private final ArrayDeque<Packet> pending = new ArrayDeque<>();
+    private boolean asynchronous;
+    private volatile boolean closed;
+    private ParcelFileDescriptor writerFd;
+    private ClientSocket writerSocket;
+    private int pendingBytes;
+    // A native-resolution GetImage reply on the foldable already exceeds 16 MiB.
+    private static final int MAX_PENDING_BYTES = 64 * 1024 * 1024;
+
+    private static final class Packet {
+        final ByteBuffer bytes;
+        final ParcelFileDescriptor fd;
+        Packet(ByteBuffer bytes, ParcelFileDescriptor fd) { this.bytes = bytes; this.fd = fd; }
+        void close() { if (fd != null) try { fd.close(); } catch (IOException ignored) {} }
+    }
+
+    /** Replies and events share this FIFO, so no socket I/O occurs under X-server or UI locks. */
+    public void enableAsync() {
+        if (clientSocket == null || asynchronous) return;
+        try {
+            // Keep the socket identity alive until the writer exits, even if the connector closes its original fd.
+            writerFd = ParcelFileDescriptor.fromFd(clientSocket.fd);
+            writerSocket = new ClientSocket(writerFd.getFd());
+        } catch (IOException e) { throw new IllegalStateException("Cannot duplicate X11 output socket", e); }
+        asynchronous = true;
+        Thread writer = new Thread(this::writePending, "X11-output-" + clientSocket.fd);
+        writer.setDaemon(true);
+        writer.start();
+    }
+
+    private void writePending() {
+        try {
+            while (true) {
+                Packet packet;
+                synchronized (pending) {
+                    while (pending.isEmpty() && !closed) pending.wait();
+                    if (closed) return;
+                    packet = pending.removeFirst();
+                }
+                boolean ok;
+                try { ok = writerSocket.sendPacket(packet.bytes, packet.bytes.limit(), packet.fd != null ? packet.fd.getFd() : -1); }
+                finally { packet.close(); }
+                synchronized (pending) { pendingBytes -= packet.bytes.limit(); }
+                if (!ok) return;
+            }
+        } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        finally {
+            close();
+            try { writerFd.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    public void close() {
+        synchronized (pending) {
+            if (closed) return;
+            closed = true;
+            for (Packet packet : pending) packet.close();
+            pending.clear();
+            pending.notifyAll();
+            if (writerSocket != null) writerSocket.abort();
+        }
+    }
 
     public XOutputStream(int initialCapacity) {
         this(null, initialCapacity);
@@ -57,8 +121,8 @@ public class XOutputStream {
     }
 
     public void writeFP3232(double value) {
-        int integral = (int) value;
-        int frac = (int) ((value - integral) * 0x100000000L);
+        int integral = (int) Math.floor(value);
+        int frac = (int) (long) ((value - integral) * 0x100000000L);
         writeInt(integral);
         writeInt(frac);
     }
@@ -90,10 +154,27 @@ public class XOutputStream {
     }
 
     private void flush() throws IOException {
+        if (clientSocket == null) return; // Memory stream, also used by protocol probes.
         if (buffer.position() != 0) {
             buffer.flip();
             if (com.winlator.cmod.xserver.XClientRequestHandler.trace) traceOutput();
-            if (ancillaryFd != -1) {
+            if (asynchronous) {
+                synchronized (pending) {
+                    if (closed || pendingBytes + buffer.remaining() > MAX_PENDING_BYTES) {
+                        close();
+                        buffer.clear();
+                        ancillaryFd = -1;
+                        throw new IOException("X11 output closed or pending queue exceeded " + MAX_PENDING_BYTES + " bytes");
+                    }
+                    ByteBuffer copy = ByteBuffer.allocateDirect(buffer.remaining());
+                    copy.put(buffer).flip();
+                    ParcelFileDescriptor fd = ancillaryFd == -1 ? null : ParcelFileDescriptor.fromFd(ancillaryFd);
+                    pending.addLast(new Packet(copy, fd));
+                    pendingBytes += copy.remaining();
+                    ancillaryFd = -1;
+                    pending.notifyAll();
+                }
+            } else if (ancillaryFd != -1) {
                 clientSocket.sendAncillaryMsg(buffer, ancillaryFd);
                 ancillaryFd = -1;
             } else {

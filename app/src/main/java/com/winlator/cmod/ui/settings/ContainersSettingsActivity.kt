@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
@@ -84,6 +85,7 @@ import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.PreloaderDialog
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.linux.LinuxRuntime
+import com.winlator.cmod.linux.LinuxDesktop
 import com.winlator.cmod.steam.SteamContainer
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
@@ -103,6 +105,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
     private val containersState = mutableStateOf<List<Container>>(emptyList())
     private val propertiesState = mutableStateOf<Container?>(null)
     private var showingEditor = false
+    private var editedFromGame = false
 
     private var pendingExportId = -1
     private val exportLauncher =
@@ -119,10 +122,13 @@ class ContainersSettingsActivity : AppCompatActivity() {
         applyAppFullscreen(this)
         root = FrameLayout(this).apply { id = View.generateViewId() }
         setContentView(root)
+        com.winlator.cmod.ui.AppBottomNavigation.attach(this, com.winlator.cmod.R.id.bottom_nav_settings)
 
         supportFragmentManager.addOnBackStackChangedListener {
             if (supportFragmentManager.backStackEntryCount == 0 && showingEditor) {
                 showingEditor = false
+                // Opened straight into the editor from a game: closing the editor returns to the game.
+                if (editedFromGame) { finish(); return@addOnBackStackChangedListener }
                 refresh()
                 showHome()
             }
@@ -132,6 +138,11 @@ class ContainersSettingsActivity : AppCompatActivity() {
             showHome()
             // Started from the first-run screen with a way of making a container already chosen.
             intent.getStringExtra(EXTRA_START)?.let { startContainer(it) }
+            val edit = intent.getIntExtra(EXTRA_EDIT_CONTAINER, -1)
+            if (edit > 0) {
+                editedFromGame = true
+                editContainer(edit)
+            }
         }
     }
 
@@ -139,7 +150,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
     fun startContainer(kind: String) {
         when (kind) {
             "windows" -> openFragment(ContainerCreateComposeFragment())
-            "linux" -> openFragment(LinuxContainerCreateFragment())
+            "linux" -> openFragment(LinuxContainerCreateFragment.forSteam())
             "steam" -> openFragment(LinuxContainerCreateFragment.forSteam())
             "game" -> openFragment(GameContainerFragment())
             "import" -> importContainer()
@@ -149,6 +160,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
     companion object {
         /** "linux", "game", "import" or "steam": the screen to open straight away. */
         const val EXTRA_START = "start"
+        /** The id of a container whose editor opens straight away (from a game's "Container settings"). */
+        const val EXTRA_EDIT_CONTAINER = "edit_container"
     }
 
     override fun onResume() {
@@ -173,6 +186,10 @@ class ContainersSettingsActivity : AppCompatActivity() {
                             propertiesState.value = ContainerManager(this@ContainersSettingsActivity).getContainerById(id)
                         },
                         onDismissProperties = { propertiesState.value = null },
+                        onFiles = { id ->
+                            startActivity(Intent(this@ContainersSettingsActivity, com.winlator.cmod.MainActivity::class.java)
+                                .putExtra(com.winlator.cmod.MainActivity.EXTRA_BROWSE_CONTAINER, id))
+                        },
                         onRun = ::runContainer,
                         onDuplicate = ::duplicateContainer,
                         onRemove = ::removeContainer,
@@ -231,9 +248,15 @@ class ContainersSettingsActivity : AppCompatActivity() {
     }
 
     private fun runContainer(id: Int) {
-        if (ContainerManager(this).getContainerById(id)?.isLinux == true) {
-            // A Linux container starts one of its programs, so ▶ opens the program list.
-            openFragment(LinuxProgramsFragment.forContainer(id))
+        val target = ContainerManager(this).getContainerById(id)
+        if (target?.isLinux == true) {
+            // With the desktop installed and switched on, ▶ opens it; otherwise a Linux container starts one of its programs, so ▶ opens the program list.
+            val runtime = LinuxRuntime.resolve(this, target)
+            if (LinuxDesktop.enabled(target) && LinuxDesktop.isInstalled(this, runtime)) {
+                startActivity(Intent(this, XServerDisplayActivity::class.java).putExtra("container_id", id))
+            } else {
+                openFragment(LinuxProgramsFragment.forContainer(id))
+            }
             return
         }
         if (!XrActivity.isEnabled(this)) {
@@ -403,6 +426,23 @@ class ContainersSettingsActivity : AppCompatActivity() {
 
     private fun showImportSummary(result: ContainerImporter.Result) {
         val ok = result.container != null
+        if (ok && result.container!!.isLinux) {
+            val shortcuts = ContainerManager(this).loadShortcuts().filter { it.container.isLinux }
+            if (shortcuts.isEmpty()) {
+                AppCompatAlertDialog.Builder(this).setTitle("Linux is ready")
+                    .setMessage("Linux games and Steam share one container. Add a game to create a shortcut with its own settings.")
+                    .setPositiveButton(android.R.string.ok, null).show()
+            } else {
+                AppCompatAlertDialog.Builder(this).setTitle("Apply Linux settings to shortcut")
+                    .setItems(shortcuts.map { it.name }.toTypedArray()) { _, index ->
+                        val shortcut = shortcuts[index]
+                        result.linuxSettings.forEach { (key, value) -> shortcut.putExtra(key, value) }
+                        shortcut.saveData()
+                        android.widget.Toast.makeText(this, "Settings applied to ${shortcut.name}", android.widget.Toast.LENGTH_SHORT).show()
+                    }.setNegativeButton(android.R.string.cancel, null).show()
+            }
+            return
+        }
         val title = if (ok) "Import complete" else "Import failed"
         val body = StringBuilder()
         if (ok) body.append("Created \"").append(result.container!!.name).append("\".")
@@ -435,6 +475,7 @@ private fun ContainersSettingsScreen(
     onAdd: () -> Unit,
     onEdit: (Int) -> Unit,
     onProperties: (Int) -> Unit,
+    onFiles: (Int) -> Unit,
     onDismissProperties: () -> Unit,
     onRun: (Int) -> Unit,
     onDuplicate: (Int) -> Unit,
@@ -475,7 +516,7 @@ private fun ContainersSettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(containers, key = { it.id }) { container ->
-                    SettingsContainerCard(container, onEdit, onProperties, onRun, onDuplicate, onRemove, onExport)
+                    SettingsContainerCard(container, onEdit, onProperties, onFiles, onRun, onDuplicate, onRemove, onExport)
                 }
             }
         }
@@ -491,6 +532,7 @@ private fun SettingsContainerCard(
     container: Container,
     onEdit: (Int) -> Unit,
     onProperties: (Int) -> Unit,
+    onFiles: (Int) -> Unit,
     onRun: (Int) -> Unit,
     onDuplicate: (Int) -> Unit,
     onRemove: (Int) -> Unit,
@@ -558,6 +600,12 @@ private fun SettingsContainerCard(
             ) {
                 ActionButton(Icons.Outlined.Edit, "Edit", Modifier.weight(1f)) { onEdit(container.id) }
                 ActionButton(Icons.Outlined.Info, "Properties", Modifier.weight(1f)) { onProperties(container.id) }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ActionButton(Icons.Outlined.FolderOpen, "Files", Modifier.weight(1f)) { onFiles(container.id) }
                 // The Steam container is the app's own: it is reset from its settings, and has nothing to duplicate, remove or export here.
                 if (SteamContainer.isManaged(container)) Spacer(Modifier.weight(1f))
                 else ContainerMoreButton(
@@ -604,6 +652,7 @@ private fun ContainerMoreButton(
     Box(modifier) {
         ActionButton(Icons.Outlined.MoreVert, "More", Modifier.fillMaxWidth()) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            com.winlator.cmod.ui.GamepadNavigation.Bind()
             DropdownMenuItem(
                 text = { Text("Duplicate") },
                 leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
@@ -669,7 +718,7 @@ private fun ContainerPropertiesDialog(container: Container, onDismiss: () -> Uni
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Outlined.Storage, null) },
-        title = { Text("Container properties") },
+        title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Container properties") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(

@@ -21,6 +21,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class WindowManager extends XResourceManager {
+    /**
+     * A desktop (a window manager runs) rather than a bare session: a request of the client that holds the redirect is carried
+     * out as it is, and a window that is configured without a change is not announced. A bare session keeps what it had.
+     */
+    public volatile boolean desktopSession;
     public enum FocusRevertTo {NONE, POINTER_ROOT, PARENT}
     public final Window rootWindow;
     private final SparseArray<Window> windows = new SparseArray<>();
@@ -110,9 +115,17 @@ public class WindowManager extends XResourceManager {
     }
 
     public void mapWindow(Window window) {
+        mapWindow(window, null);
+    }
+
+    /** @param requester the client that asked for the mapping, or null; a window manager's own request is not redirected to itself */
+    public void mapWindow(Window window, XClient requester) {
         if (!window.attributes.isMapped()) {
             Window parent = window.getParent();
-            if (!parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT) || window.attributes.isOverrideRedirect()) {
+            boolean redirected = desktopSession && requester != null
+                    ? parent.hasEventListenerForOthers(Event.SUBSTRUCTURE_REDIRECT, requester)
+                    : parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT);
+            if (!redirected || window.attributes.isOverrideRedirect()) {
                 window.attributes.setMapped(true);
                 window.sendEvent(Event.STRUCTURE_NOTIFY, new MapNotify(window, window));
                 parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new MapNotify(parent, window));
@@ -195,7 +208,11 @@ public class WindowManager extends XResourceManager {
 
         if (isInputOutput) {
             visual = visual == null ? parent.getContent().visual : visual;
-            if (depth != visual.depth) throw new BadMatch();
+            // The screen has one visual, of depth 32 (its alpha byte is not used). A client that wants a window without alpha asks
+            // for depth 24: Chromium's offscreen GLX window (Feral's Shadow of the Tomb Raider) gets BadMatch otherwise and its
+            // GPU process cannot start. The depth-24 pixmap format is already advertised; the window takes the 32-bit visual.
+            boolean noAlpha = depth == 24 && visual.depth == 32;
+            if (depth != visual.depth && !noAlpha) throw new BadMatch();
         }
 
         Drawable drawable = null;
@@ -268,6 +285,11 @@ public class WindowManager extends XResourceManager {
     }
 
     public void configureWindow(Window window, Bitmask valueMask, XInputStream inputStream) {
+        configureWindow(window, valueMask, inputStream, null);
+    }
+
+    /** @param requester the client that asked, or null; a window manager's own request is not redirected to itself */
+    public void configureWindow(Window window, Bitmask valueMask, XInputStream inputStream, XClient requester) {
         short x = window.getX();
         short y = window.getY();
         short width = window.getWidth();
@@ -304,13 +326,22 @@ public class WindowManager extends XResourceManager {
 
         Window parent = window.getParent();
         boolean overrideRedirect = window.attributes.isOverrideRedirect();
-        if (!parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT) || overrideRedirect) {
+        boolean redirected = desktopSession && requester != null
+                ? parent.hasEventListenerForOthers(Event.SUBSTRUCTURE_REDIRECT, requester)
+                : parent.hasEventListenerFor(Event.SUBSTRUCTURE_REDIRECT);
+        if (!redirected || overrideRedirect) {
+            boolean moved = x != window.getX() || y != window.getY() || width != window.getWidth() || height != window.getHeight()
+                    || borderWidth != window.getBorderWidth();
+            Window stackedBefore = window.previousSibling();
             changeWindowGeometry(window, x, y, width, height);
 
             window.setBorderWidth(borderWidth);
             if (stackMode != null) changeWindowZOrder(stackMode, window, sibling);
 
             Window previousSibling = window.previousSibling();
+            // A desktop's window manager reconfigures windows in answer to being told they changed: telling it about no change
+            // sends it round in circles.
+            if (desktopSession && !moved && previousSibling == stackedBefore) return;
             window.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(window, window, previousSibling, x, y, width, height, borderWidth, overrideRedirect));
             parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new ConfigureNotify(parent, window, previousSibling, x, y, width, height, borderWidth, overrideRedirect));
         }

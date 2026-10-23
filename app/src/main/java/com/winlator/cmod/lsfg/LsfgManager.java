@@ -79,7 +79,7 @@ public final class LsfgManager {
      * Linux containers: the layer is a glibc aarch64 build (tools/lsfg-linux), shipped as an asset and installed
      * under the app's files, which the proot session sees at the same path. Bump when the binary changes.
      */
-    private static final String LINUX_RUNTIME_VERSION = "lsfg-vk-android v1.0.4-android, linux-arm64 glibc build 2 (single device)";
+    private static final String LINUX_RUNTIME_VERSION = "lsfg-vk-android v1.0.4-android, linux-arm64 glibc build 3 (single device, no null-instance entry point lookup)";
     private static final String LINUX_ASSET_LIBRARY = "lsfg_vk/linux-arm64/liblsfg-vk.so";
     private static final String LINUX_LAYER_DIR = "linux-lsfg/layer";
 

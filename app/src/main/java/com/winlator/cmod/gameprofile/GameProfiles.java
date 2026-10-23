@@ -123,8 +123,9 @@ public final class GameProfiles {
             String dir = game != null && !game.installDir.isEmpty() ? game.installDir : profile.steamInstallDir;
             if (game != null) buildId = game.buildId;
             if (!dir.isEmpty() && !dir.contains("/") && !dir.contains("..")) {
-                rootGuest = STEAM_COMMON_GUEST + dir;
-                rootHost = new File(LinuxSteamGames.steamRoot(container), "steamapps/common/" + dir);
+                // A game installed in the shared library is at the same path for the host and the guest.
+                rootGuest = (game != null ? game.commonGuest() : STEAM_COMMON_GUEST) + dir;
+                rootHost = new File(game != null ? game.library : LinuxSteamGames.steamRoot(container), "steamapps/common/" + dir);
             }
         }
         else {
@@ -150,7 +151,7 @@ public final class GameProfiles {
             }
         }
 
-        GameProfile.Settings settings = profile.effective(version);
+        GameProfile.Settings settings = profile.effective(version, GameProfile.Platform.LINUX);
         if (noSteamExtra == null) noSteamExtra = "";
         boolean noSteam = noSteamExtra.equals("1")
                 || (noSteamExtra.isEmpty() && settings.noSteam != null && settings.noSteam.enabled);
@@ -158,13 +159,10 @@ public final class GameProfiles {
     }
 
     /**
-     * The size of the X screen a Linux shortcut starts with. A session that runs the Steam client (the client's shortcut, a
-     * game started through it) is always native: the game picks its own mode through RandR or the user sets it in Steam.
-     * Otherwise the shortcut's own size, then the profile's, then the container's.
+     * The size of the X screen a Linux shortcut starts with, including Steam: shortcut, profile, then shared defaults.
+     * The game may also select its own mode through RandR.
      */
     public static String screenSize(Context context, Container container, Shortcut shortcut, Effective effective) {
-        if (LinuxSession.isSteam(shortcut.path)) return "native";
-        if (shortcut.isSteamGame() && (effective == null || !effective.runsWithoutSteam())) return "native";
         String own = shortcut.getExtra("screenSize");
         if (!own.isEmpty()) return own;
         if (effective != null && !effective.resolution.isEmpty()) return effective.resolution;

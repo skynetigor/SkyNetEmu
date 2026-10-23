@@ -94,11 +94,14 @@ public final class LinuxRuntime {
      */
     public static String containerUsing(Context context, String id) {
         int installedCount = listInstalled(context).size();
-        for (Container container : new ContainerManager(context).getContainers()) {
+        ContainerManager manager = new ContainerManager(context);
+        for (Container container : manager.getContainers()) {
             if (!container.isLinux()) continue;
             String chosen = container.getLinuxRuntime();
             if (id.equals(chosen) || (chosen.isEmpty() && installedCount == 1)) return container.getName();
         }
+        for (com.winlator.cmod.container.Shortcut shortcut : manager.loadShortcuts())
+            if (shortcut.container.isLinux() && id.equals(shortcut.getExtra(LinuxShortcutDefaults.RUNTIME))) return shortcut.name;
         return null;
     }
 

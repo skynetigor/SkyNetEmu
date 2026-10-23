@@ -37,9 +37,14 @@ public class ExeIconExtractor {
     }
 
     public static void extractAsync(File exeFile, File destinationFile, boolean isCover, Runnable onComplete) {
+        extractAsync(exeFile, destinationFile, isCover, onComplete, null);
+    }
+
+    public static void extractAsync(File exeFile, File destinationFile, boolean isCover, Runnable onComplete, Runnable onFailure) {
         executor.submit(() -> {
             boolean ok = extractAndSave(exeFile, destinationFile, isCover);
             if (ok && onComplete != null) onComplete.run();
+            else if (!ok && onFailure != null) onFailure.run();
         });
     }
 

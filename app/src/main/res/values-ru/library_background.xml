@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_background_title">Фон библиотеки</string>
+    <string name="library_background_summary">Изображение, анимация, видео или цвет</string>
+    <string name="library_background_preview">Предпросмотр</string>
+    <string name="library_background_description">Изменения сохраняются сразу. Фон меняется только за играми; фильтры, заголовок и навигация сохраняют тему приложения. По умолчанию используется анимация SkyNetEmu для выбранной темы: Cosmic Gold, OLED Constellation или Pearl Aurora.</string>
+    <string name="library_background_add_media">Добавить изображение, анимацию или видео</string>
+    <string name="library_background_media_hint">Изображения, анимированные GIF/WebP, MP4 и WebM · до 100 МБ. Файл копируется в хранилище приложения, обрезается по центру и воспроизводится без звука. Анимация повторяется только пока открыт этот экран или библиотека.</string>
+    <string name="library_background_color">Использовать сплошной цвет</string>
+    <string name="library_background_color_swatch">Выбрать цвет %1$s</string>
+    <string name="library_background_red">Красный</string>
+    <string name="library_background_green">Зелёный</string>
+    <string name="library_background_blue">Синий</string>
+    <string name="library_background_darkness">Затемнение: %1$d%%</string>
+    <string name="library_background_blur">Размытие: %1$d</string>
+    <string name="library_background_reset">Вернуть фон темы</string>
+    <string name="library_background_importing">Импорт фона…</string>
+    <string name="library_background_import_error">Не удалось импортировать фон. Выберите доступное изображение, анимацию GIF/WebP или поддерживаемое видео MP4/WebM размером до 100 МБ. Предыдущий фон не изменён.</string>
+    <string name="library_background_load_error">Не удалось отобразить фон библиотеки. Выберите другой файл или сбросьте фон в Настройки → Оформление → Фон библиотеки.</string>
+    <string name="library_background_back">Вернуться в настройки</string>
+    <string name="library_background_demo_racing">Гонки</string>
+    <string name="library_background_demo_space">Космос</string>
+    <string name="library_background_demo_adventure">Приключения</string>
+    <string name="library_background_demo_puzzle">Головоломка</string>
+</resources>

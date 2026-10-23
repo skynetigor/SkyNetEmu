@@ -122,9 +122,12 @@ public final class LinuxEmulator {
 
     /** Name of a Linux container that is set to use this build, or null. */
     public static String containerUsing(Context context, String id) {
-        for (Container container : new ContainerManager(context).getContainers()) {
+        ContainerManager manager = new ContainerManager(context);
+        for (Container container : manager.getContainers()) {
             if (container.isLinux() && id.equals(container.getExtra(EXTRA_ID))) return container.getName();
         }
+        for (com.winlator.cmod.container.Shortcut shortcut : manager.loadShortcuts())
+            if (shortcut.container.isLinux() && id.equals(shortcut.getExtra(EXTRA_ID))) return shortcut.name;
         return null;
     }
 

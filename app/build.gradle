@@ -96,6 +96,18 @@ def currentBranch = providers.exec {
     workingDir = rootDir
     ignoreExitValue = true
 }.standardOutput.asText.map { it.trim() }
+// The commit the build is made from, so an installed build can be told apart ("c8f9078", "c8f9078-dirty" with local changes).
+def gitCommit = providers.exec {
+    commandLine 'git', 'rev-parse', '--short=7', 'HEAD'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+def gitDirty = providers.exec {
+    commandLine 'git', 'status', '--porcelain', '--untracked-files=no'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim().isEmpty() ? '' : '-dirty' }
+def buildCommit = gitCommit.zip(gitDirty) { c, d -> (c.isEmpty() ? 'unknown' : c) + d }
 def debugComponentsBranch = providers.provider {
     String branch = currentBranch.get()
     if (branch.isEmpty() || branch == 'HEAD') return 'main'
@@ -117,6 +129,7 @@ android {
     }
 
     defaultConfig {
+        testInstrumentationRunner "com.winlator.cmod.SharedLinuxInstrumentation"
         // Side-by-side install: keeps the upstream Ludashi build and its containers intact.
         // namespace stays com.winlator.cmod so relative manifest class names still resolve.
         applicationId "com.winlator.cmod.dev"
@@ -125,8 +138,8 @@ android {
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
 
-        versionCode 23
-        versionName "2.0.0"
+        versionCode providers.gradleProperty('buildVersionCode').getOrElse('27').toInteger()
+        versionName providers.gradleProperty('buildVersionName').getOrElse('2.0.1')
 
         // External native build from Winlator
         externalNativeBuild {
@@ -159,13 +172,26 @@ android {
     // Keep Winlator’s buildTypes
     buildTypes {
         debug {
+            versionNameSuffix "-pre.3"
             buildConfigField 'String', 'COMPONENTS_BRANCH', "\"${debugComponentsBranch.get()}\""
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'true'
             minifyEnabled false
             // A separate app next to the release build: its own package, so no data or signature is shared.
+            manifestPlaceholders = [appLabel: "SkyNetEmuDebug"]
+        }
+        prerelease {
+            initWith debug
+            matchingFallbacks = ['release']
+            signingConfig signingConfigs.debug
+            versionNameSuffix providers.gradleProperty('prereleaseSuffix').getOrElse('-pre.3')
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
             manifestPlaceholders = [appLabel: "SkyNetEmu"]
         }
         release {
+            // "2.0.0-stable+c8f9078": the version the app shows (Settings, About) and the apk's file name carry the name and the commit.
+            versionNameSuffix "-stable+${buildCommit.get()}"
             buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
             minifyEnabled false
             signingConfig signingConfigs.debug
             crunchPngs false
@@ -232,7 +258,15 @@ dependencies {
 }
 
 androidComponents {
+    // Debug installs use a separate package so a release build can stay installed.
+    // -PdebugAppId=<id> selects another one, for example an existing test package
+    // that already holds installed components and game data.
+    def debugAppId = providers.gradleProperty("debugAppId").getOrElse("com.winlator.cmod.dev2")
     onVariants(selector().withBuildType("debug")) { variant ->
-        variant.applicationId.set("com.winlator.cmod.dev2")
+        variant.applicationId.set(debugAppId)
+    }
+    def prereleaseAppId = providers.gradleProperty("prereleaseAppId").getOrElse("com.winlator.cmod.dev2")
+    onVariants(selector().withBuildType("prerelease")) { variant ->
+        variant.applicationId.set(prereleaseAppId)
     }
 }

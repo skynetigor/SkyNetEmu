@@ -21,19 +21,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The app's one Steam container. The user does not create it: it appears when the components Steam needs (the Linux runtime,
- * Box64 for the games' x86-64 code, a Turnip driver) are installed, built from a configuration the app defines
- * ({@link Defaults}, the "steam" block of the registry's linux.json). It is marked with the container extra
- * {@link #EXTRA_MANAGED}, can be configured but not removed, renamed or duplicated from the container list, and owns the Steam
- * shortcut in the library and the shortcuts of the games installed in its Steam.
+ * Steam and all Linux games use the app's one protected Linux container. Existing Steam homes are preferred during
+ * migration to preserve login and installed games. Its defaults come from the "steam" block of linux.json;
+ * each shortcut owns its launch settings. The class name and managed marker are retained for compatibility.
  */
 public final class SteamContainer {
     private static final String TAG = "SteamContainer";
     /** Container extra: {@link #MANAGED_STEAM} for the app's Steam container. */
     public static final String EXTRA_MANAGED = "linuxManaged";
     public static final String MANAGED_STEAM = "steam";
-    public static final String NAME = "Steam";
-    private static final Object LOCK = new Object();
+    public static final String NAME = "Linux";
+    private static final Object LOCK = ContainerManager.LINUX_LOCK;
 
     /** What a new Steam container is made of. */
     public static final class Defaults {
@@ -42,14 +40,23 @@ public final class SteamContainer {
         public final String emulator;
         public final String emulatorPreset;
         public final String driver;
+        /** Exact GPU mapping: an unrelated installed driver must not stand in for it. */
+        public final boolean gpuDriverMapped;
         public final String glDriver;
         public final String vulkanPresent;
+        /** FEX and the x86-64 root filesystem that run a game's 32-bit code (Box64 cannot): ids of the catalog. */
+        public final String fex;
+        public final String rootfs;
 
-        Defaults(String runtime, String emulator, String emulatorPreset, String driver, String glDriver, String vulkanPresent) {
+        Defaults(String runtime, String emulator, String emulatorPreset, String driver, String glDriver, String vulkanPresent,
+                 String fex, String rootfs, boolean gpuDriverMapped) {
+            this.fex = fex;
+            this.rootfs = rootfs;
             this.runtime = runtime;
             this.emulator = emulator;
             this.emulatorPreset = emulatorPreset;
             this.driver = driver;
+            this.gpuDriverMapped = gpuDriverMapped;
             this.glDriver = glDriver;
             this.vulkanPresent = vulkanPresent;
         }
@@ -76,32 +83,54 @@ public final class SteamContainer {
     private SteamContainer() {}
 
     public static boolean isManaged(Container container) {
-        return container != null && container.isLinux() && MANAGED_STEAM.equals(container.getExtra(EXTRA_MANAGED));
+        return container != null && container.isLinux();
     }
 
     public static Container find(ContainerManager manager) {
-        for (Container container : manager.getContainers()) if (isManaged(container)) return container;
-        return null;
+        return com.winlator.cmod.linux.SharedLinuxContainers.find(manager);
     }
 
     /** The configuration of a new Steam container: the registry's "steam" block, or the built-in one when it cannot be read. */
     public static Defaults defaults(Context context, boolean allowNetwork) {
-        Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native");
+        Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4-r2", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native",
+                "fex-2610", "rootfs-ubuntu-24-04-2026-08-11", false);
         String text = RegistryCache.get(context, "linux.json", RegistryCache.TTL_INDEX, allowNetwork);
         if (text == null) return builtIn;
         try {
             JSONObject steam = new JSONObject(text).optJSONObject("steam");
             if (steam == null) return builtIn;
+            String globalDriver = id(steam, "driver", builtIn.driver);
+            String mappedDriver = driverForGpu(text, com.winlator.cmod.core.GPUInformation.getRenderer(null, context), globalDriver);
             return new Defaults(
                     id(steam, "runtime", builtIn.runtime), id(steam, "emulator", builtIn.emulator),
-                    steam.optString("emulatorPreset", builtIn.emulatorPreset), id(steam, "driver", builtIn.driver),
+                    steam.optString("emulatorPreset", builtIn.emulatorPreset), mappedDriver,
                     steam.optString("glDriver", builtIn.glDriver).equals("software") ? "software" : "zink",
-                    steam.optString("vulkanPresent", builtIn.vulkanPresent).equals("sw") ? "sw" : "native");
+                    steam.optString("vulkanPresent", builtIn.vulkanPresent).equals("sw") ? "sw" : "native",
+                    id(steam, "fex", builtIn.fex), id(steam, "rootfs", builtIn.rootfs), !mappedDriver.equals(globalDriver));
         }
         catch (JSONException e) {
             Log.w(TAG, "Bad steam block in linux.json", e);
             return builtIn;
         }
+    }
+
+    /** Exact-model Linux driver defaults from the catalog; never guesses a neighboring Adreno model. */
+    public static String driverForGpu(String catalog, String renderer, String fallback) {
+        try {
+            JSONObject root = new JSONObject(catalog);
+            JSONObject steam = root.optJSONObject("steam");
+            JSONObject mappings = steam == null ? null : steam.optJSONObject("driverByGpu");
+            if (mappings == null) return fallback;
+            String model = com.winlator.cmod.contents.RendererDriverCatalog.adrenoModel(renderer);
+            String selected = mappings.optString(model, "");
+            if (!selected.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) return fallback;
+            org.json.JSONArray drivers = root.optJSONArray("drivers");
+            for (int i = 0; drivers != null && i < drivers.length(); i++) {
+                JSONObject driver = drivers.optJSONObject(i);
+                if (driver != null && selected.equals(driver.optString("id"))) return selected;
+            }
+        } catch (Exception ignored) {}
+        return fallback;
     }
 
     private static String id(JSONObject object, String key, String fallback) {
@@ -118,7 +147,12 @@ public final class SteamContainer {
     }
 
     private static boolean driverReady(Context context, Defaults defaults) {
-        return LinuxDriverManager.isInstalled(context, defaults.driver) || !LinuxDriverManager.list(context).isEmpty();
+        return LinuxDriverManager.isInstalled(context, defaults.driver) || (!defaults.gpuDriverMapped && !LinuxDriverManager.list(context).isEmpty());
+    }
+
+    /** FEX and an x86-64 root filesystem are installed: what a 32-bit game (Tomb Raider, 2013) runs on. */
+    public static boolean thirtyTwoBitReady(Context context) {
+        return com.winlator.cmod.linux.FexComponents.complete(context);
     }
 
     /** Everything Steam needs is installed (cheap: looks at the disk only). */
@@ -147,9 +181,13 @@ public final class SteamContainer {
         }
         if (!driverReady(context, defaults)) {
             LinuxRuntimeCatalog.Entry entry = pick(LinuxRuntimeCatalog.fetchDrivers(), defaults.driver);
-            if (entry == null) return failed("The Turnip driver is not in the catalog. Check the connection.");
+            if (entry == null || (defaults.gpuDriverMapped && !defaults.driver.equals(entry.id))) return failed("The GPU-matched Turnip driver is not in the catalog. Check the connection.");
             install.add(entry);
         }
+        // 32-bit games need FEX and a root filesystem with the 32-bit libraries. A catalog that cannot be read does not stop Steam,
+        // only these two are left out (the 64-bit games do not need them).
+        List<LinuxRuntimeCatalog.Entry> fex = com.winlator.cmod.linux.FexComponents.missing(context, defaults.fex, defaults.rootfs);
+        if (fex != null) install.addAll(fex);
         long download = 0, largest = 0;
         for (LinuxRuntimeCatalog.Entry entry : install) {
             download += entry.size;
@@ -170,9 +208,13 @@ public final class SteamContainer {
     }
 
     private static List<LinuxRuntimeCatalog.Entry> boxOnly(List<LinuxRuntimeCatalog.Entry> entries) {
+        return onlyEmulator(entries, LinuxEmulator.BOX64);
+    }
+
+    private static List<LinuxRuntimeCatalog.Entry> onlyEmulator(List<LinuxRuntimeCatalog.Entry> entries, String emulator) {
         List<LinuxRuntimeCatalog.Entry> result = new ArrayList<>();
         if (entries == null) return result;
-        for (LinuxRuntimeCatalog.Entry entry : entries) if (LinuxEmulator.BOX64.equals(entry.emulator)) result.add(entry);
+        for (LinuxRuntimeCatalog.Entry entry : entries) if (emulator.equals(entry.emulator)) result.add(entry);
         return result;
     }
 
@@ -191,7 +233,7 @@ public final class SteamContainer {
                 steam = create(context, manager, defaults);
                 if (steam == null) return null;
             }
-            ContainerManager.syncSteamShortcut(steam, LinuxRuntime.resolve(context, steam) != null);
+            ContainerManager.syncSteamShortcut(context, steam, LinuxRuntime.resolve(context, steam) != null);
             return steam;
         }
     }
@@ -203,7 +245,7 @@ public final class SteamContainer {
         List<LinuxEmulator.Installed> boxes = LinuxEmulator.list(context, LinuxEmulator.BOX64);
         String box64 = LinuxEmulator.isInstalled(context, defaults.emulator) ? defaults.emulator : boxes.isEmpty() ? "" : boxes.get(0).id;
         List<LinuxDriverManager.Installed> drivers = LinuxDriverManager.list(context);
-        String driver = LinuxDriverManager.isInstalled(context, defaults.driver) ? defaults.driver : drivers.isEmpty() ? "" : drivers.get(0).id;
+        String driver = LinuxDriverManager.isInstalled(context, defaults.driver) || defaults.gpuDriverMapped ? defaults.driver : drivers.isEmpty() ? "" : drivers.get(0).id;
         if (runtime.isEmpty() || box64.isEmpty()) return null;
         try {
             JSONObject data = new JSONObject();
@@ -224,6 +266,9 @@ public final class SteamContainer {
             container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, "1");
             container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, "1");
             container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, "1");
+            // Native size: a game's own window (Tomb Raider's 1280x720) is smaller than the screen, so it is fitted and scaled to it.
+            container.setFullscreenStretched(true);
+            container.putExtra("scaleGameWindow", "1");
             container.saveData();
             Log.i(TAG, "Created the Steam container " + container.id);
             return container;
@@ -234,11 +279,10 @@ public final class SteamContainer {
         }
     }
 
-    /** Removes the Steam container with everything in it (the login, the downloaded games) and makes a new one from the defaults. */
+    /** Compatibility entry point: the shared Linux container cannot be reset or deleted. */
     public static Container reset(Context context, ContainerManager manager) {
         synchronized (LOCK) {
-            Container steam = find(manager);
-            if (steam != null) manager.removeManagedContainer(steam);
+            // The shared Linux container owns every Linux game and cannot be deleted or reset.
             return ensure(context, manager);
         }
     }

@@ -84,6 +84,7 @@ public class ExternalControllerBindingsActivity extends AppCompatActivity {
                         }
                     }
                 }));
+        com.winlator.cmod.ui.AppBottomNavigation.attach(this, R.id.bottom_nav_controls);
     }
 
     private void refreshBindings() {

@@ -63,6 +63,7 @@ import java.io.File;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
+    public static final String EXTRA_BROWSE_CONTAINER = "browse_container_id";
     public static final @IntRange(from = 1, to = 19) byte CONTAINER_PATTERN_COMPRESSION_LEVEL = 9;
     public static final int PERMISSION_WRITE_EXTERNAL_STORAGE_REQUEST_CODE = 500;
     public static final int PERMISSION_POST_NOTIFICATIONS_REQUEST_CODE = 501;
@@ -101,6 +102,13 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // Coming back to the app asks the registry again (files downloaded in the last 30 s are not downloaded twice).
+        com.winlator.cmod.contents.RegistryCache.refreshInBackground(this);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         ContentsManager.migrateRemoteProfilesUrl(sharedPreferences);
@@ -130,13 +138,16 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             return;
         }
 
+        // Installs set up before telemetry existed are asked once, after the screen is up.
+        getWindow().getDecorView().post(() -> com.winlator.cmod.telemetry.TelemetryScreen.askOnce(this));
+
         notificationService = new Intent(this, NotificationService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED))
             createNotificationChannel();
 
         boolean isBigPictureModeEnabled = sharedPreferences.getBoolean("enable_big_picture_mode", false);
 
-        if (isBigPictureModeEnabled) {
+        if (isBigPictureModeEnabled && !getIntent().hasExtra("selected_menu_item_id")) {
             Intent intent = new Intent(MainActivity.this, BigPictureActivity.class);
             startActivity(intent);
         }
@@ -154,7 +165,6 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             if (syncingBottomNavigation) return true;
             int target;
             if (item.getItemId() == R.id.bottom_nav_library) target = R.id.main_menu_shortcuts;
-            else if (item.getItemId() == R.id.bottom_nav_containers) target = R.id.main_menu_containers;
             else if (item.getItemId() == R.id.bottom_nav_controls) target = R.id.main_menu_input_controls;
             else if (item.getItemId() == R.id.bottom_nav_settings) target = R.id.main_menu_settings;
             else return false;
@@ -169,6 +179,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
 
         mainToolbar = findViewById(R.id.Toolbar);
+        getSupportFragmentManager().registerFragmentLifecycleCallbacks(new FragmentManager.FragmentLifecycleCallbacks() {
+            @Override
+            public void onFragmentResumed(@NonNull FragmentManager fm, @NonNull Fragment fragment) {
+                refreshMainNavigation();
+            }
+        }, false);
         setSupportActionBar((androidx.appcompat.widget.Toolbar) mainToolbar);
         ActionBar actionBar = getSupportActionBar();
         if (actionBar != null) {
@@ -210,6 +226,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             onNavigationItemSelected(navigationView.getMenu().findItem(menuItemId));
             navigationView.setCheckedItem(menuItemId);
             selectBottomDestination(menuItemId);
+            com.winlator.cmod.container.Container browseContainer = containerManager.getContainerById(intent.getIntExtra(EXTRA_BROWSE_CONTAINER, -1));
+            if (browseContainer != null) {
+                show(FileManagerFragment.forContainerFiles(browseContainer), false);
+                navigationView.setCheckedItem(R.id.main_menu_file_manager);
+                selectBottomDestination(R.id.main_menu_file_manager);
+            }
 
             if (!ImageFsInstaller.installIfNeeded(this, () -> requestAppPermissions())) {
                 if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
@@ -351,6 +373,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         if (menuItem.getItemId() == android.R.id.home) {
             Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
             if (current instanceof GameDetailFragment
+                    || ((current instanceof SettingsFragment || current instanceof ContainersFragment
+                        || current instanceof InputControlsFragment)
+                        && getSupportFragmentManager().getBackStackEntryCount() > 0)
                     || current instanceof ContainerOverviewFragment
                     || current instanceof ContainerDetailFragment
                     || current instanceof ContainerSectionFragment) {
@@ -373,9 +398,18 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     @Override
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        if (item.getItemId() == R.id.main_menu_shortcuts) {
+            for (int index = 0; index < fragmentManager.getBackStackEntryCount(); index++) {
+                if ("library_destination".equals(fragmentManager.getBackStackEntryAt(index).getName())) {
+                    fragmentManager.popBackStack("library_destination", FragmentManager.POP_BACK_STACK_INCLUSIVE);
+                    selectBottomDestination(item.getItemId());
+                    return true;
+                }
+            }
+        }
         setDetailMode(false);
         selectBottomDestination(item.getItemId());
-        FragmentManager fragmentManager = getSupportFragmentManager();
         if (fragmentManager.getBackStackEntryCount() > 0) {
             fragmentManager.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
         }
@@ -408,7 +442,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         if (bottomNavigation == null) return;
         int bottomId = 0;
         if (menuItemId == R.id.main_menu_shortcuts) bottomId = R.id.bottom_nav_library;
-        else if (menuItemId == R.id.main_menu_containers) bottomId = R.id.bottom_nav_containers;
+        else if (menuItemId == R.id.main_menu_containers || menuItemId == R.id.main_menu_file_manager) bottomId = R.id.bottom_nav_settings;
         else if (menuItemId == R.id.main_menu_input_controls) bottomId = R.id.bottom_nav_controls;
         else if (menuItemId == R.id.main_menu_settings) bottomId = R.id.bottom_nav_settings;
         if (bottomId != 0 && bottomNavigation.getSelectedItemId() != bottomId) {
@@ -424,15 +458,58 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     public void setBottomNavigationVisible(boolean visible) {
         if (bottomNavigation == null) return;
-        bottomNavigation.setVisibility((visible && !isLandscapeOrientation()) ? View.VISIBLE : View.GONE);
+        bottomNavigation.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    public void refreshMainNavigation() {
+        setBottomNavigationVisible(true);
+        setMainToolbarVisible(true);
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        if (current instanceof ShortcutsFragment || current instanceof GameDetailFragment
+                || current instanceof com.winlator.cmod.ui.addgame.AddGameFragment) {
+            selectBottomDestination(R.id.main_menu_shortcuts);
+        } else if (current instanceof InputControlsFragment) {
+            selectBottomDestination(R.id.main_menu_input_controls);
+        } else if (current instanceof SettingsFragment
+                || current instanceof com.winlator.cmod.ui.settings.LibraryBackgroundFragment || current instanceof ContainersFragment
+                || current instanceof ContainerOverviewFragment || current instanceof ContainerDetailFragment
+                || current instanceof ContainerSectionFragment) {
+            selectBottomDestination(R.id.main_menu_settings);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        int destination = intent.getIntExtra("selected_menu_item_id", 0);
+        if (destination != 0) navigateToMainDestination(destination);
     }
 
     public void setMainToolbarVisible(boolean visible) {
         if (mainToolbar == null) return;
-        mainToolbar.setVisibility((visible && !isLandscapeOrientation()) ? View.VISIBLE : View.GONE);
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        mainToolbar.setVisibility((visible && !isLandscapeOrientation()
+                && !(current instanceof ShortcutsFragment)
+                && !(current instanceof com.winlator.cmod.ui.settings.LibraryBackgroundFragment)) ? View.VISIBLE : View.GONE);
     }
 
     public void navigateToMainDestination(int menuItemId) {
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.FLFragmentContainer);
+        if (current instanceof ShortcutsFragment) {
+            Fragment destination = null;
+            if (menuItemId == R.id.main_menu_settings) destination = new SettingsFragment();
+            else if (menuItemId == R.id.main_menu_containers) destination = new ContainersFragment();
+            else if (menuItemId == R.id.main_menu_input_controls) destination = InputControlsFragment.newInstance(selectedProfileId);
+            if (destination != null) {
+                getSupportFragmentManager().beginTransaction()
+                        .replace(R.id.FLFragmentContainer, destination)
+                        .addToBackStack("library_destination")
+                        .commit();
+                selectBottomDestination(menuItemId);
+                return;
+            }
+        }
         if (navigationView == null) return;
         MenuItem destination = navigationView.getMenu().findItem(menuItemId);
         if (destination == null) return;
@@ -457,7 +534,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     }
 
     public void setDetailMode(boolean detail) {
-        setBottomNavigationVisible(!detail);
+        setBottomNavigationVisible(true);
         ActionBar actionBar = getSupportActionBar();
         if (actionBar != null) {
             actionBar.setDisplayHomeAsUpEnabled(detail);
@@ -465,32 +542,109 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
     }
 
-    /** The container comes first: its type decides what can be added (a .exe for Wine, a Linux program otherwise). */
+    /** The container comes first: its type decides what can be added (a .exe for Wine, a Linux program otherwise). A single container is used straight away. */
     public void chooseContainerForNewShortcut() {
         java.util.ArrayList<com.winlator.cmod.container.Container> containers = new ContainerManager(this).getContainers();
         if (containers == null || containers.isEmpty()) {
             android.widget.Toast.makeText(this, "Create a container first!", android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
+        if (containers.size() == 1) {
+            openAddShortcutFor(containers.get(0));
+            return;
+        }
+        boolean mixed = false;
+        for (com.winlator.cmod.container.Container container : containers) {
+            if (container.isLinux() != containers.get(0).isLinux()) mixed = true;
+        }
         String[] names = new String[containers.size()];
         for (int i = 0; i < names.length; i++) {
             com.winlator.cmod.container.Container container = containers.get(i);
-            names[i] = container.getName() + (container.isLinux() ? "  (Linux)" : "  (Windows)");
+            names[i] = container.getName() + (mixed ? (container.isLinux() ? "  (Linux)" : "  (Windows)") : "");
         }
         new android.app.AlertDialog.Builder(this)
                 .setTitle("Add shortcut to")
-                .setItems(names, (dialog, which) -> {
-                    com.winlator.cmod.container.Container container = containers.get(which);
-                    Fragment target = container.isLinux()
-                            ? com.winlator.cmod.ui.container.LinuxProgramsFragment.forContainer(container.id, true)
-                            : FileManagerFragment.forContainer(container.id);
+                .setItems(names, (dialog, which) -> openAddShortcutFor(containers.get(which)))
+                .show();
+    }
+
+    private void openAddShortcutFor(com.winlator.cmod.container.Container container) {
+        Fragment target = container.isLinux()
+                ? com.winlator.cmod.ui.container.LinuxProgramsFragment.forContainer(container.id, true)
+                : FileManagerFragment.forContainer(container.id);
+        getSupportFragmentManager().beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, target)
+                .commit();
+    }
+
+    /** "Add game": the user picks the exe first; the container is made for the game afterwards. */
+    public void addGame() {
+        com.winlator.cmod.telemetry.Telemetry.event("skynet.funnel", "add_game_started");
+        getSupportFragmentManager().beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame())
+                .commit();
+    }
+
+    /**
+     * The file manager of {@link #addGame} was given a game's folder: the registry game that has a program in it is found and
+     * its program is the one added. A folder that holds the program of a game for both Windows and Linux asks which one. A folder
+     * no game is recognised in opens the file manager in it, to pick the program.
+     */
+    public void onGameFolderPicked(java.io.File folder) {
+        final android.content.Context appContext = getApplicationContext();
+        new Thread(() -> {
+            com.winlator.cmod.gameprofile.GameMatcher.Result windows = com.winlator.cmod.gameprofile.GameMatcher.matchFolder(
+                    appContext, folder, com.winlator.cmod.gameprofile.GameProfile.Platform.WINDOWS, true);
+            com.winlator.cmod.gameprofile.GameMatcher.Result linux = com.winlator.cmod.gameprofile.GameMatcher.matchFolder(
+                    appContext, folder, com.winlator.cmod.gameprofile.GameProfile.Platform.LINUX, true);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (windows == null && linux == null) {
+                    android.widget.Toast.makeText(this, "No known game in this folder. Pick the game's program.", android.widget.Toast.LENGTH_LONG).show();
+                    getSupportFragmentManager().popBackStack();
                     getSupportFragmentManager().beginTransaction()
                             .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
                             .addToBackStack(null)
-                            .replace(R.id.FLFragmentContainer, target)
+                            .replace(R.id.FLFragmentContainer, FileManagerFragment.forNewGame(folder))
                             .commit();
-                })
-                .show();
+                }
+                else if (windows != null && linux != null) {
+                    new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle(windows.game.name)
+                            .setMessage("The folder has the Windows and the Linux version of the game. Which one is it added as?")
+                            .setPositiveButton("Linux", (d, w) -> onGamePicked(linux.executable))
+                            .setNegativeButton("Windows", (d, w) -> onGamePicked(windows.executable))
+                            .show();
+                }
+                else onGamePicked((windows != null ? windows : linux).executable);
+            });
+        }, "GameFolderMatch").start();
+    }
+
+    /** The file manager of {@link #addGame} found the exe: the file manager is left and the screen for choosing how to run it opens. */
+    public void onGamePicked(java.io.File exe) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, com.winlator.cmod.ui.addgame.AddGameFragment.Companion.newInstance(exe.getAbsolutePath()))
+                .commit();
+    }
+
+    /** The shortcut is written: the add-game screen is left and the game's own screen opens. */
+    public void gameAdded(String shortcutPath) {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        fragmentManager.popBackStack();
+        fragmentManager.beginTransaction()
+                .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down, R.anim.slide_in_down, R.anim.slide_out_up)
+                .addToBackStack(null)
+                .replace(R.id.FLFragmentContainer, new GameDetailFragment(shortcutPath))
+                .commit();
     }
 
     private void show(Fragment fragment, boolean reverse) {

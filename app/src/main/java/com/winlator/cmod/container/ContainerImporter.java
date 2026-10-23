@@ -47,6 +47,7 @@ public final class ContainerImporter {
     public static final class Result {
         public final Container container;      // null on failure
         public final List<String> warnings;
+        public java.util.Map<String, String> linuxSettings = java.util.Collections.emptyMap();
 
         Result(Container container, List<String> warnings) {
             this.container = container;
@@ -147,15 +148,30 @@ public final class ContainerImporter {
             return importLinux(context, manager, data, warnings, progress, linuxPlan);
 
         // Wine/Proton is critical: it must exist before the prefix is built.
+        JSONObject extraData = data.optJSONObject("extraData");
+        boolean nativeArm64 = extraData != null && WineInfo.NATIVE_ARM64_CONTAINER_VALUE.equals(
+                extraData.optString(WineInfo.NATIVE_ARM64_CONTAINER_KEY));
         String wineVersion = data.optString("wineVersion", "");
-        if (!ensureWine(context, contents, wineVersion, hints, progress, warnings)) {
+        boolean wineReady = ensureWine(context, contents, wineVersion, hints, progress, warnings, nativeArm64);
+        if (nativeArm64 && wineReady)
+            wineReady = WineInfo.fromIdentifier(context, contents, wineVersion).supportsNativeArm64();
+        if (!wineReady) {
+            if (nativeArm64) {
+                warnings.add(wineVersion.isEmpty() ? "This native ARM64 profile does not name a Wine/Proton runtime. Choose the ARM64 native preset."
+                        : "Native ARM64 runtime '" + wineVersion + "' is unavailable or incompatible. Install this exact runtime in Settings > Components, then retry.");
+                return new Result(null, warnings);
+            }
             String fallback = firstInstalledWine(context, contents);
             if (fallback == null) {
                 warnings.add("No Wine/Proton runtime available; cannot create the container.");
                 return new Result(null, warnings);
             }
-            warnings.add("Wine/Proton '" + wineVersion + "' was unavailable; using '" + fallback + "' instead.");
+            warnings.add("Wine/Proton '" + wineVersion + "' was unavailable or incompatible; using '" + fallback + "' instead.");
             try { data.put("wineVersion", fallback); } catch (Exception ignored) {}
+        }
+        if (nativeArm64 && !"wined3d".equals(data.optString("dxwrapper", ""))) {
+            warnings.add("Native Windows ARM64 profiles currently require Wine's built-in graphics libraries (wined3d). ARM64 DXVK/VKD3D packages are not available.");
+            return new Result(null, warnings);
         }
 
         // Graphics driver: an AdrenoTools/Turnip id that isn't on this device makes the launcher's
@@ -170,39 +186,41 @@ public final class ContainerImporter {
 
         // Optional runtimes: applied when the container runs; the run-time path falls back to the
         // bundled asset, so pre-install when we can and otherwise leave a version that resolves.
-        String dxwrapperConfig = data.optString("dxwrapperConfig", "");
-        String dxvk = ContainerProfile.readConfigValue(dxwrapperConfig, "version", ',');
-        if (!ensureContent(context, contents, ContentProfile.ContentType.CONTENT_TYPE_DXVK, dxvk, hints, progress, warnings)) {
-            dxwrapperConfig = setConfigValue(dxwrapperConfig, "version", DefaultVersion.DXVK, ',');
-            warnings.add("DXVK " + dxvk + " unavailable; using bundled " + DefaultVersion.DXVK + ".");
-        }
-        String vkd3d = ContainerProfile.readConfigValue(dxwrapperConfig, "vkd3dVersion", ',');
-        if (!ensureContent(context, contents, ContentProfile.ContentType.CONTENT_TYPE_VKD3D, vkd3d, hints, progress, warnings)) {
-            dxwrapperConfig = setConfigValue(dxwrapperConfig, "vkd3dVersion", DefaultVersion.VKD3D, ',');
-            warnings.add("VKD3D " + vkd3d + " unavailable; using " + DefaultVersion.VKD3D + ".");
-        }
-        try { data.put("dxwrapperConfig", dxwrapperConfig); } catch (Exception ignored) {}
+        if (!nativeArm64) {
+            String dxwrapperConfig = data.optString("dxwrapperConfig", "");
+            String dxvk = ContainerProfile.readConfigValue(dxwrapperConfig, "version", ',');
+            if (!ensureContent(context, contents, ContentProfile.ContentType.CONTENT_TYPE_DXVK, dxvk, hints, progress, warnings)) {
+                dxwrapperConfig = setConfigValue(dxwrapperConfig, "version", DefaultVersion.DXVK, ',');
+                warnings.add("DXVK " + dxvk + " unavailable; using bundled " + DefaultVersion.DXVK + ".");
+            }
+            String vkd3d = ContainerProfile.readConfigValue(dxwrapperConfig, "vkd3dVersion", ',');
+            if (!ensureContent(context, contents, ContentProfile.ContentType.CONTENT_TYPE_VKD3D, vkd3d, hints, progress, warnings)) {
+                dxwrapperConfig = setConfigValue(dxwrapperConfig, "vkd3dVersion", DefaultVersion.VKD3D, ',');
+                warnings.add("VKD3D " + vkd3d + " unavailable; using " + DefaultVersion.VKD3D + ".");
+            }
+            try { data.put("dxwrapperConfig", dxwrapperConfig); } catch (Exception ignored) {}
 
-        // Emulators are launch-critical: the guest command is literally the box64 binary. Only keep
-        // the referenced version if it is genuinely present (already installed or bundled) — do NOT
-        // trust a fresh catalog install, which can register a profile even when the download was bad
-        // and then fail to apply at launch, leaving usr/bin/box64 missing. Otherwise use the bundled
-        // default so the container always has a working emulator.
-        boolean isArm64ec = data.optString("wineVersion", "").toLowerCase(java.util.Locale.ENGLISH).contains("arm64ec");
-        ContentProfile.ContentType box64Type = isArm64ec
-                ? ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
-                : ContentProfile.ContentType.CONTENT_TYPE_BOX64;
-        String box64Version = data.optString("box64Version", "");
-        if (!box64Version.isEmpty() && !emulatorPresent(context, contents, box64Type, box64Version)) {
-            try { data.put("box64Version", DefaultVersion.BOX64); } catch (Exception ignored) {}
-            warnings.add("Box64 " + box64Version + " not available here; using bundled " + DefaultVersion.BOX64 + ".");
-        }
+            // Emulators are launch-critical: the guest command is literally the box64 binary. Only keep
+            // the referenced version if it is genuinely present (already installed or bundled) — do NOT
+            // trust a fresh catalog install, which can register a profile even when the download was bad
+            // and then fail to apply at launch, leaving usr/bin/box64 missing. Otherwise use the bundled
+            // default so the container always has a working emulator.
+            boolean isArm64ec = data.optString("wineVersion", "").toLowerCase(java.util.Locale.ENGLISH).contains("arm64ec");
+            ContentProfile.ContentType box64Type = isArm64ec
+                    ? ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
+                    : ContentProfile.ContentType.CONTENT_TYPE_BOX64;
+            String box64Version = data.optString("box64Version", "");
+            if (!box64Version.isEmpty() && !emulatorPresent(context, contents, box64Type, box64Version)) {
+                try { data.put("box64Version", DefaultVersion.BOX64); } catch (Exception ignored) {}
+                warnings.add("Box64 " + box64Version + " not available here; using bundled " + DefaultVersion.BOX64 + ".");
+            }
 
-        String fexcoreVersion = data.optString("fexcoreVersion", "");
-        if (!fexcoreVersion.isEmpty()
-                && !emulatorPresent(context, contents, ContentProfile.ContentType.CONTENT_TYPE_FEXCORE, fexcoreVersion)) {
-            try { data.put("fexcoreVersion", DefaultVersion.FEXCORE); } catch (Exception ignored) {}
-            warnings.add("FEXCore " + fexcoreVersion + " not available here; using bundled " + DefaultVersion.FEXCORE + ".");
+            String fexcoreVersion = data.optString("fexcoreVersion", "");
+            if (!fexcoreVersion.isEmpty()
+                    && !emulatorPresent(context, contents, ContentProfile.ContentType.CONTENT_TYPE_FEXCORE, fexcoreVersion)) {
+                try { data.put("fexcoreVersion", DefaultVersion.FEXCORE); } catch (Exception ignored) {}
+                warnings.add("FEXCore " + fexcoreVersion + " not available here; using bundled " + DefaultVersion.FEXCORE + ".");
+            }
         }
 
         if ((data.optString("extraData", "").contains("lsfg") || data.toString().contains("lsfgMultiplier"))
@@ -220,9 +238,9 @@ public final class ContainerImporter {
     // ---- Wine/Proton -------------------------------------------------------
 
     private static boolean ensureWine(Context context, ContentsManager contents, String version,
-                                      JSONArray hints, Progress progress, List<String> warnings) {
+                                      JSONArray hints, Progress progress, List<String> warnings, boolean requireInstalledRuntime) {
         if (version == null || version.isEmpty()) return false;
-        if (wineAvailable(context, contents, version)) return true;
+        if (wineAvailable(context, contents, version, requireInstalledRuntime)) return true;
 
         ProtonPackageManager.PackageInfo pkg = ProtonPackageManager.getPackage(version);
         if (pkg != null) {
@@ -249,8 +267,8 @@ public final class ContainerImporter {
         return false;
     }
 
-    private static boolean wineAvailable(Context context, ContentsManager contents, String version) {
-        if (version.equals(WineInfo.MAIN_WINE_VERSION.identifier())) return true;
+    private static boolean wineAvailable(Context context, ContentsManager contents, String version, boolean requireInstalledRuntime) {
+        if (!requireInstalledRuntime && version.equals(WineInfo.MAIN_WINE_VERSION.identifier())) return true;
         if (ProtonPackageManager.isInstalled(context, version)) return true;
         for (ContentProfile.ContentType type : new ContentProfile.ContentType[]{
                 ContentProfile.ContentType.CONTENT_TYPE_WINE, ContentProfile.ContentType.CONTENT_TYPE_PROTON}) {
@@ -620,7 +638,9 @@ public final class ContainerImporter {
                 warnings.add("Container creation failed.");
                 return new Result(null, warnings);
             }
-            return new Result(created, warnings);
+            Result result = new Result(created, warnings);
+            result.linuxSettings = com.winlator.cmod.linux.LinuxShortcutDefaults.fromData(context, manager, data);
+            return result;
         } catch (Exception e) {
             Log.e(TAG, "Linux container import failed", e);
             warnings.add("Container creation failed: " + e.getMessage());

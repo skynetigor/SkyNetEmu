@@ -99,7 +99,8 @@ fun serializeEnvironmentVariables(rows: List<EditableEnvVariable>): String = row
 fun EnvironmentVariablesEditor(
     value: String,
     onChanged: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showManagedWarning: Boolean = true
 ) {
     val rows = remember(value) {
         mutableStateListOf<EditableEnvVariable>().apply { addAll(parseEnvironmentVariables(value)) }
@@ -115,7 +116,7 @@ fun EnvironmentVariablesEditor(
         }
 
         if (bulkMode) {
-            BulkEnvironmentEditor(value = value, onApply = onChanged)
+            BulkEnvironmentEditor(value = value, onApply = onChanged, showManagedWarning = showManagedWarning)
         } else if (rows.isEmpty()) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -175,13 +176,15 @@ fun EnvironmentVariablesEditor(
 }
 
 @Composable
-private fun BulkEnvironmentEditor(value: String, onApply: (String) -> Unit) {
+private fun BulkEnvironmentEditor(value: String, onApply: (String) -> Unit, showManagedWarning: Boolean) {
     // Shown one per line for readability; the stored form stays space-separated.
     val pretty = remember(value) { parseEnvironmentVariables(value).joinToString("\n") { "${it.name}=${it.value}" } }
     var draft by remember(value) { mutableStateOf(pretty) }
     val parsed = remember(draft) { parseEnvironmentVariables(draft) }
     val invalid = remember(draft) { invalidEnvironmentTokens(draft) }
-    val managed = remember(parsed) { parsed.map { it.name }.filter { it in SHORTCUT_MANAGED_KEYS } }
+    val managed = remember(parsed, showManagedWarning) {
+        if (showManagedWarning) parsed.map { it.name }.filter { it in SHORTCUT_MANAGED_KEYS } else emptyList()
+    }
     val normalized = remember(parsed) { serializeEnvironmentVariables(parsed) }
     // Reformatting alone is revertable but not worth applying.
     val edited = draft != pretty
@@ -302,7 +305,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                 }) { Text("Done") }
             },
             dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Select values") },
+            title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Select values") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(options) { option ->
@@ -356,7 +359,7 @@ private fun AddEnvironmentVariableDialog(
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text("Add environment variable") },
+        title = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text("Add environment variable") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SettingChoice("Variable", selected, options) { picked ->

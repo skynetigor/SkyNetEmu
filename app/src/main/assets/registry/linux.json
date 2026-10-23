@@ -3,14 +3,34 @@
   "note": "Catalog of Linux-container packages for Winlator skyNET: x86 emulators and Vulkan (Turnip) drivers built for the Linux runtime (glibc aarch64). The Wine components stay in contents.json.",
   "emulators": [
     {
-      "id": "box64-0.4.4",
+      "id": "box64-0.4.4-r4",
       "name": "Box64",
       "emulator": "box64",
-      "version": "0.4.4",
+      "version": "0.4.4-r4",
       "channel": "prerelease",
-      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4/box64-0.4.4-linux-aarch64.tar.zst",
-      "sha256": "e2a21c070df993b2910a1a89914ccc5eb365b21329c5c8383a8c99c82e87acbd",
-      "size": 16226615
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4-r4/box64-0.4.4-r4-linux-aarch64.tar.zst",
+      "sha256": "1214364a7c640c2213d778fb560e359ba55f9ca228d2a7205040d34ea07c000f",
+      "size": 16243258
+    },
+    {
+      "id": "box64-0.4.4-r3",
+      "name": "Box64",
+      "emulator": "box64",
+      "version": "0.4.4-r3",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4-r3/box64-0.4.4-r3-linux-aarch64.tar.zst",
+      "sha256": "07324ec4c0c077f2e65dc7d0121aaf9580aa1371ddf1736bcffa373b0c8eef7e",
+      "size": 7433637
+    },
+    {
+      "id": "box64-0.4.4-r2",
+      "name": "Box64",
+      "emulator": "box64",
+      "version": "0.4.4-r2",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4-r2/box64-0.4.4-r2-linux-aarch64.tar.zst",
+      "sha256": "dc6929188d85b374383a9623a5972df8eeb3b150d2732f3680f9d4aa16cf53e5",
+      "size": 16228960
     },
     {
       "id": "fex-2610",
@@ -24,6 +44,31 @@
     }
   ],
   "drivers": [
+    {
+      "id": "turnip-gen8-v30-linux-aarch64",
+      "name": "Turnip Gen8 V30 Linux (A8xx, experimental)",
+      "version": "26.2.0-devel-r1",
+      "channel": "prerelease",
+      "source": "skynetigor/winlator-skynet-components",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-turnip-gen8-v30-r1/turnip-gen8-v30-linux-aarch64.zip",
+      "sha256": "15d147ebcd88d48447f396adaf776de53312d21b125d04fe044b073e6d9b4cc9",
+      "size": 3107900
+    },
+    {
+      "id": "turnip-mesa-26.2.2-linux-aarch64",
+      "name": "Mesa Turnip 26.2.2 Linux (A6xx/A7xx, experimental)",
+      "version": "26.2.2-r1",
+      "channel": "prerelease",
+      "source": "skynetigor/winlator-skynet-components",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-turnip-mesa-26.2.2-r1/turnip-mesa-26.2.2-linux-aarch64.zip",
+      "sha256": "a557a787788e756b9d3d5e24d747fb1cd1b981dca01bf402b277a217a222f738",
+      "size": 3229260,
+      "gpus": [
+        "735"
+      ],
+      "testedGpus": [],
+      "notes": "Mesa 26.2.2 source and packaged library include FD735; POCO F6 hardware validation pending. Linux/glibc KGSL driver; Android renderer is a separate package."
+    },
     {
       "id": "turnip-v26.3.0-20261011-710-720-test-linux",
       "name": "Mesa Turnip v26.3.0-20261011-710-720-Test-Linux",
@@ -59,10 +104,13 @@
   ],
   "steam": {
     "runtime": "bannerlator-r9",
-    "emulator": "box64-0.4.4",
+    "emulator": "box64-0.4.4-r4",
     "emulatorPreset": "PERFORMANCE",
     "driver": "turnip-v26.3.0-20261011-a8xx-linux",
     "glDriver": "zink",
-    "vulkanPresent": "native"
+    "vulkanPresent": "native",
+    "driverByGpu": {
+      "735": "turnip-mesa-26.2.2-linux-aarch64"
+    }
   }
 }

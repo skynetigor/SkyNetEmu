@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.ConnectivityManager;
-import android.os.Process;
 import android.util.Log;
 
 import androidx.preference.PreferenceManager;
@@ -19,9 +18,11 @@ import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Callback;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.ProcessHelper;
+import com.winlator.cmod.core.ProgramOutput;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.fexcore.FEXCoreManager;
@@ -47,18 +48,34 @@ import java.util.ArrayList;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
-    private static int pid = -1;
+    private String[] nativeArm64Arguments;
+    public void setNativeArm64Arguments(String[] arguments) { nativeArm64Arguments = arguments.clone(); }
+    private volatile int pid = -1;
+    private com.winlator.cmod.core.ContainerProcess process;
+    public int getPid() { return pid; }
     private String[] bindingPaths;
     private EnvVars envVars;
     private WineInfo wineInfo;
     private String box64Preset = Box64Preset.COMPATIBILITY;
     private String fexcorePreset = FEXCorePreset.INTERMEDIATE;
     private Callback<Integer> terminationCallback;
-    private static final Object lock = new Object();
+    private final Object lock = new Object();
     private final ContentsManager contentsManager;
     private final ContentProfile wineProfile;
     private Container container;
     private final Shortcut shortcut;
+    private final ProgramOutput output = new ProgramOutput();
+    private final java.util.concurrent.atomic.AtomicBoolean terminationDelivered = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean stopping;
+    private long startedAt;
+
+    public ProgramOutput getOutput() { return output; }
+    public long secondsRunning() { return (System.nanoTime() - startedAt) / 1_000_000_000L; }
+
+    private void onProcessExit(int status) {
+        if (!stopping && terminationDelivered.compareAndSet(false, true) && terminationCallback != null)
+            terminationCallback.call(status);
+    }
 
     public void setWineInfo(WineInfo wineInfo) {
         this.wineInfo = wineInfo;
@@ -200,13 +217,29 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void start() {
-        synchronized (lock) {
-            if (wineInfo.isArm64EC())
-                extractEmulatorsDlls();
-            else
-                extractBox64Files();
-            checkDependencies();
-            pid = execGuestProgram();
+        stopping = false;
+        terminationDelivered.set(false);
+        output.clear();
+        startedAt = System.nanoTime();
+        try {
+            int launchedPid;
+            synchronized (lock) {
+                if (nativeArm64Arguments == null) {
+                    if (wineInfo.isArm64EC()) extractEmulatorsDlls();
+                    else extractBox64Files();
+                }
+                checkDependencies();
+                launchedPid = execGuestProgram();
+                pid = launchedPid;
+            }
+            if (launchedPid == -1 && !terminationDelivered.get()) {
+                output.failedToStart("The launcher process could not be created. Check the runtime and emulator installation.");
+                onProcessExit(-1);
+            }
+        } catch (RuntimeException error) {
+            output.failedToStart(error.getClass().getSimpleName() + ": " + error.getMessage());
+            Log.e("GuestProgramLauncher", "Unable to start Wine/Proton", error);
+            onProcessExit(-1);
         }
     }
 
@@ -240,11 +273,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void stop() {
+        stopping = true;
         synchronized (lock) {
-            if (pid != -1) {
-                Process.killProcess(pid);
-                pid = -1;
-            }
+            if (process != null) process.requestStop();
+            pid = -1;
         }
     }
 
@@ -330,12 +362,14 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         EnvVars execEnvVars = new EnvVars();
 
-        addBox64EnvVars(execEnvVars, enableBox64Logs);
-        execEnvVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        if (nativeArm64Arguments == null) {
+            addBox64EnvVars(execEnvVars, enableBox64Logs);
+            execEnvVars.putAll(FEXCorePresetManager.getEnvVars(context, fexcorePreset));
+        }
 
         String renderer = GPUInformation.getRenderer(null, null);
 
-        if (renderer.contains("Mali")) 
+        if (nativeArm64Arguments == null && renderer.contains("Mali"))
             execEnvVars.put("BOX64_MMAP32", "0");
 
         if (execEnvVars.get("BOX64_MMAP32").equals("1") && !wineInfo.isArm64EC()) {
@@ -393,6 +427,63 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         if ((new File(imageFs.getLibDir(), "libandroid-sysvshm.so")).exists()){
             ld_preload = imageFs.getLibDir() + "/libandroid-sysvshm.so";
+        }
+
+        // Metadata shim (libfscache.so): SKY_FSCACHE=1 (set from the container's "File system cache" switch, see
+        // XServerDisplayActivity.applyFileCache) caches the file-system questions Wine asks about the game's folder (see
+        // winlator/fscache.c); SKY_FSCACHE_STATS=1 counts them and writes a summary to Winlator/logs. Put before libfakeinput so that it sees the calls first. Roots, the shared change
+        // counters and the log folder are set here; a variable the user sets wins, because the container variables are
+        // applied afterwards.
+        boolean fsCache = this.envVars != null && "1".equals(this.envVars.get("SKY_FSCACHE"));
+        boolean fsStats = this.envVars != null && "1".equals(this.envVars.get("SKY_FSCACHE_STATS"));
+        if (fsCache || fsStats) {
+            File fscacheSrc = new File(environment.getContext().getApplicationInfo().nativeLibraryDir, "libfscache.so");
+            File fscacheDest = new File(imageFs.getLibDir(), "libfscache.so");
+            try {
+                if (fscacheSrc.exists()) FileUtils.copy(fscacheSrc, fscacheDest);
+            } catch (Exception e) {
+                Log.e("GuestLauncher", "Failed to copy libfscache.so: " + e.getMessage());
+            }
+            if (fscacheDest.exists()) {
+                ld_preload = mergePreloadValue(ld_preload, fscacheDest.getAbsolutePath());
+                String roots = fsCache ? GameFolder.cacheRoots(imageFs, container, shortcut == null ? null : shortcut.path) : "";
+                if (roots.isEmpty() && !fsCache) {
+                    StringBuilder all = new StringBuilder(imageFs.getRootDir().getPath() + "/home/games");
+                    if (bindingPaths != null) for (String path : bindingPaths) all.append(':').append(path);
+                    roots = all.toString();
+                }
+                execEnvVars.put("SKY_FSCACHE_ROOTS", roots);
+                if (fsCache) {
+                    // Change counters shared by every Wine process (see fscache.c: shm_t); zeroed at each start.
+                    File shm = new File(imageFs.getTmpDir(), "sky_fscache.shm");
+                    try (java.io.RandomAccessFile f = new java.io.RandomAccessFile(shm, "rw")) {
+                        f.setLength(0);
+                        f.setLength(80 * 1024);
+                        execEnvVars.put("SKY_FSCACHE_SHM", shm.getAbsolutePath());
+                    } catch (IOException e) {
+                        Log.e("GuestLauncher", "Cannot create " + shm + ": " + e.getMessage());
+                    }
+                }
+                if (fsCache && "1".equals(this.envVars.get("SKY_FSCACHE_COPY"))) {
+                    // Copies of the game's small read-only files on internal storage (see fscache.c). Kept between sessions;
+                    // cleared when it has grown past the cap.
+                    File copyDir = new File(environment.getContext().getFilesDir(), "fscache");
+                    copyDir.mkdirs();
+                    long used = 0;
+                    File[] files = copyDir.listFiles();
+                    if (files != null) for (File f : files) used += f.length();
+                    if (used > 8L * 1024 * 1024 * 1024) FileUtils.clear(copyDir);
+                    execEnvVars.put("SKY_FSCACHE_DIR", copyDir.getAbsolutePath());
+                }
+                if (fsStats) {
+                    File logDir = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/logs");
+                    logDir.mkdirs();
+                    execEnvVars.put("SKY_FSCACHE_LOG_DIR", logDir.getAbsolutePath());
+                }
+                Log.d("GuestLauncher", "fscache roots: " + roots);
+            } else {
+                Log.e("GuestLauncher", "libfscache.so not found: " + fscacheSrc.getAbsolutePath());
+            }
         }
 
         File fakeinputDest = new File(imageFs.getLibDir(), "libfakeinput.so");
@@ -461,6 +552,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             execEnvVars.putAll(this.envVars);
         }
 
+        // Run after user environment merging so unrelated preloads are preserved
+        // and SKY_PE_IMAGE_CACHE=0 remains an effective per-shortcut escape hatch.
+        com.winlator.cmod.core.WinePeImageCache.prepare(context, execEnvVars, nativeArm64Arguments != null);
+
         boolean useDisplayX = shortcut != null
                 ? shortcut.getUseDisplayX()
                 : container != null && container.getUseDisplayX();
@@ -495,7 +590,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             }
         }
 
-        LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
+        // The bundled LSFG injection DLL is x64; native Vulkan needs no PE graphics wrapper.
+        if (nativeArm64Arguments == null) LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
 
         String emulator = container.getEmulator();
         if (shortcut != null)
@@ -503,7 +599,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         String command = "";
         String overriddenCommand = execEnvVars.get("GUEST_PROGRAM_LAUNCHER_COMMAND");
-        if (!overriddenCommand.isEmpty()) {
+        if (nativeArm64Arguments != null) {
+            // Native games use the Android ARM64 Wine loader and matching helper. No translator is provisioned.
+            execEnvVars.remove("HODLL");
+            execEnvVars.remove("WINE_NO_DUPLICATE_EXPLORER");
+            execEnvVars.remove("GUEST_PROGRAM_LAUNCHER_COMMAND");
+        } else if (!overriddenCommand.isEmpty()) {
             String[] parts = overriddenCommand.split(";");
             for (String part : parts)
                 command += part + " ";
@@ -525,14 +626,21 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             FileUtils.chmod(box64File, 0755);
         }
 
-        return ProcessHelper.exec(command, execEnvVars.toStringArray(), rootDir, (status) -> {
+        String[] argv;
+        if (nativeArm64Arguments != null) {
+            argv = nativeArm64Arguments.clone();
+            argv[0] = winePath + "/wine";
+            Log.i("WindowsLaunch", "Native ARM64: " + java.util.Arrays.toString(argv));
+        } else argv = ProcessHelper.splitCommand(command);
+        process = environment.startProcess(argv, execEnvVars.toStringArray(), rootDir, (status) -> {
             synchronized (lock) {
                 pid = -1;
             }
 
-            if (terminationCallback != null)
-                terminationCallback.call(status);
-        });
+            Log.i("GuestProgramLauncher", "Wine/Proton launcher exited with status " + status);
+            onProcessExit(status);
+        }, output::append);
+        return process.getPid();
     }
 
     private void addBox64EnvVars(EnvVars envVars, boolean enableLogs) {
@@ -551,13 +659,13 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     public void suspendProcess() {
         synchronized (lock) {
-            if (pid != -1) ProcessHelper.suspendProcess(pid);
+            if (process != null) process.setSuspended(true);
         }
     }
 
     public void resumeProcess() {
         synchronized (lock) {
-            if (pid != -1) ProcessHelper.resumeProcess(pid);
+            if (process != null) process.setSuspended(false);
         }
     }
 }

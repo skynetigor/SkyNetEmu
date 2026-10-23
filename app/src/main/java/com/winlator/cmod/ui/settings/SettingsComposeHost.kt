@@ -32,8 +32,10 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Refresh
@@ -120,7 +122,8 @@ data class SettingsModel(
     val steamSummary: String,
     val steamReady: Boolean,
     /** Where the game profiles of the registry came from, for the "Game profiles" group. */
-    val gameProfilesSummary: String
+    val gameProfilesSummary: String,
+    val telemetry: Boolean
 )
 
 @Stable
@@ -137,6 +140,8 @@ interface SettingsCallbacks {
     fun onCustomApiKeyChanged(value: String)
     fun onContentsUrlChanged(value: String)
     fun onWineDebugChannelsChanged(value: String)
+    fun onTelemetryChanged(on: Boolean)
+    fun onShowTelemetryData()
     fun onReinstallImageFs()
     fun onPresetAction(kind: String, id: String, action: String)
     fun onOpenSteam()
@@ -172,7 +177,7 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
 
     DisposableEffect(activity, landscape) {
         if (landscape) {
-            activity?.setBottomNavigationVisible(false)
+            activity?.setBottomNavigationVisible(true)
             activity?.setMainToolbarVisible(false)
         }
         onDispose {
@@ -186,15 +191,24 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
     // The groups, as in the container editor: listed beside the page of the chosen one when the room allows it, otherwise
     // stacked as sections that open and close. The settings are written as they are changed, so there is no footer.
     val categories = listOf(
+        EditorCategory("performance_tuning", "Performance tuning", "Global defaults for games", false) {
+            PerformanceTuningGlobalCard()
+        },
         EditorCategory("appearance", "Appearance", "Theme and colours", false) {
             WinlatorThemePreferenceCard()
+            NavigationRow(Icons.Outlined.Wallpaper, stringResource(R.string.library_background_title),
+                stringResource(R.string.library_background_summary)) {
+                activity?.supportFragmentManager?.beginTransaction()
+                    ?.replace(R.id.FLFragmentContainer, LibraryBackgroundFragment())
+                    ?.addToBackStack("library_background")?.commit()
+            }
         },
         EditorCategory("environments", "Environments", "Containers, Steam and components", !model.steamReady) {
-            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
+            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows and Linux environments") {
                 context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
             }
             NavigationRow(
-                Icons.Outlined.Memory, "Steam",
+                Icons.Outlined.SportsEsports, "Steam",
                 if (model.steamReady) model.steamSummary else "Not set up yet: ${model.steamSummary}",
                 callbacks::onOpenSteam
             )
@@ -323,6 +337,13 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                 ToggleRow(stringResource(R.string.remove_loading_bar_when_booting_games), model.removeLoadingBar) { callbacks.onBooleanChanged("remove_loading_bar_when_booting_games", it) }
             }
             EditableValueCard("Downloadable Contents URL", model.contentsUrl, callbacks::onContentsUrlChanged)
+        },
+        EditorCategory("privacy", "Privacy", if (model.telemetry) "Anonymous usage data is shared" else "Off", false) {
+            GroupCard {
+                ToggleRow("Share anonymous usage data", model.telemetry) { callbacks.onTelemetryChanged(it) }
+                GroupDivider()
+                NavigationRow(Icons.Outlined.Info, "What is sent", null, callbacks::onShowTelemetryData)
+            }
         },
         EditorCategory("system", "System", "ImageFS and about", false) {
             NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null, callbacks::onReinstallImageFs)

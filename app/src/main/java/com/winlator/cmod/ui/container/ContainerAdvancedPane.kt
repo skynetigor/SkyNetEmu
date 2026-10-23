@@ -45,6 +45,7 @@ internal fun ContainerAdvancedPane(containerId: Int) {
     var xinput by remember { mutableStateOf((container.getInputType() and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0) }
     var dinput by remember { mutableStateOf((container.getInputType() and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0) }
     var syncCpu by remember { mutableStateOf(container.isSyncCpuTopology()) }
+    var fileCache by remember { mutableStateOf(container.getExtra("fileCache") == "1") }
     val cpuCount = remember { Runtime.getRuntime().availableProcessors().coerceAtLeast(1) }
     val cpu64 = remember {
         mutableStateListOf<Boolean>().apply { addAll(cpuSelection(container.getCPUList(true), cpuCount)) }
@@ -131,20 +132,35 @@ internal fun ContainerAdvancedPane(containerId: Int) {
                 }
             }
 
-            else -> SettingsCard {
-                SettingToggle("Sync CPU Topology", syncCpu) {
-                    syncCpu = it
-                    saveCpu()
+            else -> {
+                SettingsCard {
+                    SettingToggle("Sync CPU Topology", syncCpu) {
+                        syncCpu = it
+                        saveCpu()
+                    }
+                    SettingsDivider()
+                    CpuSelectorRow("Processor Affinity", cpu64) { index, checked ->
+                        cpu64[index] = checked
+                        saveCpu()
+                    }
+                    SettingsDivider()
+                    CpuSelectorRow("Processor Affinity (32-bit apps)", cpu32) { index, checked ->
+                        cpu32[index] = checked
+                        saveCpu()
+                    }
                 }
-                SettingsDivider()
-                CpuSelectorRow("Processor Affinity", cpu64) { index, checked ->
-                    cpu64[index] = checked
-                    saveCpu()
-                }
-                SettingsDivider()
-                CpuSelectorRow("Processor Affinity (32-bit apps)", cpu32) { index, checked ->
-                    cpu32[index] = checked
-                    saveCpu()
+                SettingsCard {
+                    SettingToggle(
+                        "File system cache (experimental)",
+                        fileCache,
+                        description = "Speeds up games kept on shared storage by answering repeated file-system questions from " +
+                            "memory. It may show stale data if the game's files are changed outside the game. Applies at the " +
+                            "next start. A shortcut can override it."
+                    ) {
+                        fileCache = it
+                        container.putExtra("fileCache", if (it) "1" else "0")
+                        container.saveData()
+                    }
                 }
             }
         }

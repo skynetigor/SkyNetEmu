@@ -1,7 +1,6 @@
 package com.winlator.cmod.xenvironment.components;
 
 import android.content.Context;
-import android.os.Process;
 
 import com.winlator.cmod.core.AppUtils;
 import com.winlator.cmod.core.FileUtils;
@@ -40,8 +39,8 @@ public class PulseAudioComponent extends EnvironmentComponent {
 
     private final UnixSocketConfig socketConfig;
     private final boolean gameNative;
-    private static int pid = -1;
-    private static final Object lock = new Object();
+    private com.winlator.cmod.core.ContainerProcess process;
+    private final Object lock = new Object();
 
     public PulseAudioComponent(UnixSocketConfig socketConfig) {
         this(socketConfig, false);
@@ -56,17 +55,14 @@ public class PulseAudioComponent extends EnvironmentComponent {
     public void start() {
         synchronized (lock) {
             stop();
-            pid = execPulseAudio();
+            execPulseAudio();
         }
     }
 
     @Override
     public void stop() {
         synchronized (lock) {
-            if (pid != -1) {
-                Process.killProcess(pid);
-                pid = -1;
-            }
+            if (process != null) process.requestStop();
         }
     }
 
@@ -89,7 +85,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
         }
     }
 
-    private int execPulseAudio() {
+    private void execPulseAudio() {
         Context context = environment.getContext();
         String runtimeName = gameNative ? "pulseaudio-gn" : "pulseaudio";
         String assetName = gameNative
@@ -155,6 +151,7 @@ public class PulseAudioComponent extends EnvironmentComponent {
         command += " --use-pid-file=false";
         command += " --exit-idle-time=-1";
 
-        return ProcessHelper.exec(command, envVars.toArray(new String[0]), workingDir);
+        process = environment.startProcess(ProcessHelper.splitCommand(command),
+                envVars.toArray(new String[0]), workingDir, null, null);
     }
 }

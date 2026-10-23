@@ -25,7 +25,7 @@ static void *vulkan_handle = NULL;
 
 
 static char *get_native_library_dir(JNIEnv *env, jobject context) {
-    char *native_libdir;
+    char *native_libdir = NULL;
 
     if (context != NULL) {
         jclass class_ = (*env)->FindClass(env,"com/winlator/cmod/core/AppUtils");
@@ -42,12 +42,18 @@ static char *get_native_library_dir(JNIEnv *env, jobject context) {
 }
 
 static char *get_driver_path(JNIEnv *env, jobject context, const char *driver_name) {
-    char *driver_path;
+    char *driver_path = NULL;
     char *absolute_path;
 
-    jclass contextWrapperClass = (*env)->FindClass(env, "android/content/ContextWrapper");
-    jmethodID  getFilesDir = (*env)->GetMethodID(env, contextWrapperClass, "getFilesDir", "()Ljava/io/File;");
+    if (!context) return NULL;
+    // ContextImpl (including an instrumentation target context) is not a ContextWrapper. Resolve the virtual method
+    // on Context so the method ID is valid for every Context implementation passed by the Java API.
+    jclass contextClass = (*env)->FindClass(env, "android/content/Context");
+    if (!contextClass) return NULL;
+    jmethodID getFilesDir = (*env)->GetMethodID(env, contextClass, "getFilesDir", "()Ljava/io/File;");
+    if (!getFilesDir) return NULL;
     jobject  filesDirObj = (*env)->CallObjectMethod(env, context, getFilesDir);
+    if (!filesDirObj || (*env)->ExceptionCheck(env)) return NULL;
     jclass fileClass = (*env)->GetObjectClass(env, filesDirObj);
     jmethodID getAbsolutePath = (*env)->GetMethodID(env, fileClass, "getAbsolutePath", "()Ljava/lang/String;");
     jstring absolutePath = (jstring)(*env)->CallObjectMethod(env,filesDirObj,
@@ -63,7 +69,7 @@ static char *get_driver_path(JNIEnv *env, jobject context, const char *driver_na
 }
 
 static char *get_library_name(JNIEnv *env, jobject context, const char *driver_name) {
-    char *library_name;
+    char *library_name = NULL;
 
     jclass adrenotoolsManager = (*env)->FindClass(env, "com/winlator/cmod/contents/AdrenotoolsManager");
     jmethodID constructor = (*env)->GetMethodID(env, adrenotoolsManager, "<init>", "(Landroid/content/Context;)V");
@@ -106,9 +112,10 @@ static void init_original_vulkan() {
 }
 
 static void init_vulkan(JNIEnv  *env, jobject context, const char *driver_name) {
-    char *tmpdir;
-    char *library_name;
-    char *native_library_dir;
+    char *tmpdir = NULL;
+    char *library_name = NULL;
+    char *native_library_dir = NULL;
+    vulkan_handle = NULL;
     preload_vendor_icd_deps();
 
     const char *driver_path = get_driver_path(env, context, driver_name);
@@ -117,10 +124,13 @@ static void init_vulkan(JNIEnv  *env, jobject context, const char *driver_name) 
         library_name = get_library_name(env, context, driver_name);
         native_library_dir = get_native_library_dir(env, context);
         asprintf(&tmpdir, "%s%s", driver_path, "temp");
-        mkdir(tmpdir, S_IRWXU | S_IRWXG);
+        if (tmpdir) mkdir(tmpdir, S_IRWXU | S_IRWXG);
     }
 
-    vulkan_handle = adrenotools_open_libvulkan(RTLD_LOCAL | RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, tmpdir, native_library_dir, driver_path, library_name, NULL, NULL);
+    if (tmpdir && native_library_dir && library_name && library_name[0])
+        vulkan_handle = adrenotools_open_libvulkan(RTLD_LOCAL | RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, tmpdir, native_library_dir, driver_path, library_name, NULL, NULL);
+    free(tmpdir);
+    free((void *)driver_path);
 }
 
 static VkResult create_instance(jstring driverName, JNIEnv *env, jobject context) {

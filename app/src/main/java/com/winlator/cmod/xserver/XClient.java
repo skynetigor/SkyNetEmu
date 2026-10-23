@@ -13,7 +13,7 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
     public final XServer xServer;
     private boolean authenticated = false;
     public final Integer resourceIDBase;
-    private short sequenceNumber = 0;
+    private volatile short sequenceNumber = 0;
     private int requestLength;
     private byte requestData;
     private int initialLength;
@@ -26,6 +26,8 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
         this.xServer = xServer;
         this.inputStream = inputStream;
         this.outputStream = outputStream;
+        if (xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) != null)
+            outputStream.enableAsync();
 
         try (XLock lock = xServer.lockAll()) {
             resourceIDBase = xServer.resourceIDs.get();
@@ -75,7 +77,9 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
     }
 
     public void freeResources() {
+        outputStream.close();
         try (XLock lock = xServer.lockAll()) {
+            xServer.grabManager.removeGrabsOf(this);
             while (!resources.isEmpty()) {
                 XResource resource = resources.remove(resources.size()-1);
                 if (resource instanceof Window) {

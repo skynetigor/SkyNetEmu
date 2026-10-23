@@ -107,6 +107,8 @@ object PresetEditorComposeDialog {
         }
         dialog.setOnShowListener {
             dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            val controllerInput = dialog.window?.let(com.winlator.cmod.ui.GamepadNavigation::install)
+            dialog.setOnDismissListener { controllerInput?.close() }
         }
         return dialog
     }
@@ -218,6 +220,7 @@ private fun PresetEditorScreen(
                 sheetState = sheetState,
                 containerColor = MaterialTheme.colorScheme.surface
             ) {
+                com.winlator.cmod.ui.GamepadNavigation.Bind()
                 Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 20.dp)) {
                     Text(
                         variable.name,
@@ -258,7 +261,7 @@ private fun PresetEditorScreen(
             confirmButton = {
                 TextButton(onClick = { helpText = null }) { Text("OK") }
             },
-            text = { Text(message) }
+            text = { com.winlator.cmod.ui.GamepadNavigation.Bind(); Text(message) }
         )
     }
 }
