@@ -71,7 +71,7 @@ public final class ContainerConfigCatalog {
         // A new app may ship a config before the online registry has caught up, just as game
         // profiles do. A matching or newer remote revision remains authoritative.
         String bundled = RegistryCache.bundledCopy(context, INDEX);
-        if (bundled != null && (text == null || revision(bundled) > revision(text))) text = bundled;
+        text = preferBundled(text, bundled);
         if (text == null) return configs;
         try {
             JSONArray array = new JSONObject(text).optJSONArray("containers");
@@ -101,7 +101,13 @@ public final class ContainerConfigCatalog {
 
     /** The text of a config's .wcfg, or null when it cannot be had. */
     public static String profileText(Context context, Config config, boolean allowNetwork) {
-        return RegistryCache.get(context, config.file, RegistryCache.TTL_GAME, allowNetwork);
+        return preferBundled(
+                RegistryCache.get(context, config.file, RegistryCache.TTL_GAME, allowNetwork),
+                RegistryCache.bundledCopy(context, config.file));
+    }
+
+    private static String preferBundled(String text, String bundled) {
+        return bundled != null && (text == null || revision(bundled) > revision(text)) ? bundled : text;
     }
 
     private static int revision(String text) {

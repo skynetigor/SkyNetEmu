@@ -1,6 +1,7 @@
 {
   "format": "winlator-skynet-container",
   "version": 1,
+  "revision": 1,
   "exportedBy": "Winlator skyNET 1.1",
   "exportedAt": "2026-10-15T12:00:00Z",
   "components": [],

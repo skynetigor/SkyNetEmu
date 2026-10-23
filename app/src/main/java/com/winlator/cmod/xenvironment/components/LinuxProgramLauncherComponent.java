@@ -23,8 +23,6 @@ import java.util.Map;
 /** Starts a Linux session (proot plus the guest program) and takes the whole process tree down on stop. */
 public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private static final String TAG = "LinuxProgramLauncher";
-    private static final int SIGSTOP = 19;
-    private static final int SIGCONT = 18;
 
     private final Container container;
     private final LinuxRuntime.Installed runtime;
@@ -246,20 +244,15 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     }
 
     public void suspendProcess() {
-        signalTree(SIGSTOP);
+        synchronized (lock) {
+            if (process != null) process.setSuspended(true);
+        }
     }
 
     public void resumeProcess() {
-        signalTree(SIGCONT);
-    }
-
-    private void signalTree(int signal) {
-        int root;
         synchronized (lock) {
-            root = pid;
+            if (process != null) process.setSuspended(false);
         }
-        if (root == -1) return;
-        for (int p : processTree(root)) Process.sendSignal(p, signal);
     }
 
     /** The root process and every descendant, read from /proc (the app can see its own uid's processes). */

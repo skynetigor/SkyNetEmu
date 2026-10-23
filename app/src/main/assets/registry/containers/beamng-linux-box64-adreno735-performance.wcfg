@@ -1,6 +1,7 @@
 {
   "format": "winlator-skynet-container",
   "version": 1,
+  "revision": 1,
   "exportedBy": "SkyNetEmu 2.0.1",
   "components": [],
   "container": {

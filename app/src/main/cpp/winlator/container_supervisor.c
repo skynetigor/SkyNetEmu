@@ -15,10 +15,15 @@
 #include <unistd.h>
 
 static volatile sig_atomic_t stopping;
+static volatile sig_atomic_t suspended;
 
 static void stop_requested(int signal_number) {
     (void)signal_number;
     stopping = 1;
+}
+
+static void suspension_requested(int signal_number) {
+    suspended = signal_number == SIGUSR1;
 }
 
 static long long milliseconds(void) {
@@ -174,6 +179,11 @@ int main(int argc, char **argv) {
         perror("ContainerSupervisor signals");
         return 125;
     }
+    action.sa_handler = suspension_requested;
+    if (sigaction(SIGUSR1, &action, NULL) || sigaction(SIGUSR2, &action, NULL)) {
+        perror("ContainerSupervisor suspension signals");
+        return 125;
+    }
     /* The Android owner may disappear with its output pipe before cleanup finishes. */
     signal(SIGPIPE, SIG_IGN);
     pid_t root = fork();
@@ -186,13 +196,19 @@ int main(int argc, char **argv) {
         signal(SIGINT, SIG_DFL);
         signal(SIGHUP, SIG_DFL);
         signal(SIGPIPE, SIG_DFL);
+        signal(SIGUSR1, SIG_DFL);
+        signal(SIGUSR2, SIG_DFL);
         restore_loader_environment();
         execvp(argv[2], argv + 2);
         perror("ContainerSupervisor exec");
         _exit(127);
     }
+    printf("\n%s:ready\n", argv[1]);
+    fflush(stdout);
     long long deadline = 0;
     int warned = 0;
+    int was_suspended = 0;
+    long long next_suspend = 0;
     for (;;) {
         int status;
         pid_t reaped;
@@ -209,6 +225,19 @@ int main(int argc, char **argv) {
             stopping = 1;
         }
         if (getppid() != owner) stopping = 1;
+        if (!stopping) {
+            if (suspended) {
+                long long now = milliseconds();
+                if (!was_suspended || now >= next_suspend) {
+                    signal_descendants(SIGSTOP);
+                    next_suspend = now + 200;
+                }
+                was_suspended = 1;
+            } else if (was_suspended) {
+                signal_descendants(SIGCONT);
+                was_suspended = 0;
+            }
+        }
         if (stopping) {
             long long now = milliseconds();
             if (!deadline) deadline = now + 1500;

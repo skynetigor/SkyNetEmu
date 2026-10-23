@@ -1,6 +1,7 @@
 package com.winlator.cmod.core;
 
 import android.util.Log;
+import android.system.OsConstants;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -20,6 +21,8 @@ public final class ContainerProcess {
     private final AtomicBoolean stopping = new AtomicBoolean();
     private final AtomicBoolean delivered = new AtomicBoolean();
     private final int pid;
+    private boolean ready;
+    private boolean suspended;
 
     public ContainerProcess(File executable, String[] command, String[] envp, File workingDir,
                             Callback<Integer> terminated, Callback<String> output) throws IOException {
@@ -43,7 +46,9 @@ public final class ContainerProcess {
             try (BufferedReader stream = new BufferedReader(new InputStreamReader(supervisor.getInputStream()))) {
                 String line;
                 while ((line = stream.readLine()) != null) {
-                    if (line.startsWith(token + ":")) {
+                    if (line.equals(token + ":ready")) {
+                        onReady();
+                    } else if (line.startsWith(token + ":")) {
                         int status = Integer.parseInt(line.substring(token.length() + 1));
                         deliver(terminated, status);
                     } else {
@@ -92,6 +97,17 @@ public final class ContainerProcess {
     }
 
     public int getPid() { return pid; }
+
+    private synchronized void onReady() {
+        ready = true;
+        if (suspended && !stopping.get()) android.os.Process.sendSignal(pid, OsConstants.SIGUSR1);
+    }
+
+    public synchronized void setSuspended(boolean suspended) {
+        this.suspended = suspended;
+        if (ready && !stopping.get())
+            android.os.Process.sendSignal(pid, suspended ? OsConstants.SIGUSR1 : OsConstants.SIGUSR2);
+    }
 
     public void requestStop() {
         if (stopping.compareAndSet(false, true)) supervisor.destroy();
