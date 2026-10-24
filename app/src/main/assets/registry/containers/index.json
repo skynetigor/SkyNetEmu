@@ -191,7 +191,27 @@
         "Zink"
       ],
       "testedOn": []
+    },
+    {
+      "id": "beamng-linux-box64-adreno730-performance",
+      "name": "Linux, Adreno 730 / Snapdragon 8 Gen 1",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-adreno730-performance.wcfg",
+      "description": "BeamNG Linux profile with Box64 Performance, the A6xx/A7xx Mesa Turnip v27.0.0-20261024-r6 Linux driver and Android Turnip v26.3.0-R6 selected through Renderer Auto. GPU support is present in the driver package; testing on an Adreno 730 device is pending.",
+      "socs": [
+        "snapdragon-8-gen-1"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "Adreno 730",
+        "Snapdragon 8 Gen 1",
+        "Box64",
+        "Turnip",
+        "Zink"
+      ],
+      "testedOn": []
     }
   ],
-  "revision": 5
+  "revision": 6
 }

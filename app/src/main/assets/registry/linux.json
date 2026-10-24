@@ -70,6 +70,21 @@
       "notes": "Mesa 26.2.2 source and packaged library include FD735; POCO F6 hardware validation pending. Linux/glibc KGSL driver; Android renderer is a separate package."
     },
     {
+      "id": "turnip-v27.0.0-20261024-r6-linux",
+      "name": "Mesa Turnip v27.0.0-20261024-r6 Linux (A6xx/A7xx)",
+      "version": "27.0.0-20261024-r6",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/The412Banner/Banners-Turnip/releases/download/v27.0.0-20261024-r6/Turnip-v27.0.0-20261024-r6-Linux.zip",
+      "sha256": "596d9f131943addfd383267f9da13ebc7d420f2a2371bd0764b1fe1f3ae9f55b",
+      "size": 3222924,
+      "gpus": [
+        "730"
+      ],
+      "testedGpus": [],
+      "notes": "Linux/glibc KGSL build; upstream metadata targets A6xx/A7xx and the library contains FD730. Candidate for Snapdragon 8 Gen 1 / Adreno 730; device rendering is untested."
+    },
+    {
       "id": "turnip-v26.3.0-20261011-710-720-test-linux",
       "name": "Mesa Turnip v26.3.0-20261011-710-720-Test-Linux",
       "version": "26.3.0-20261011",
@@ -110,7 +125,8 @@
     "glDriver": "zink",
     "vulkanPresent": "native",
     "driverByGpu": {
-      "735": "turnip-mesa-26.2.2-linux-aarch64"
+      "735": "turnip-mesa-26.2.2-linux-aarch64",
+      "730": "turnip-v27.0.0-20261024-r6-linux"
     }
   }
 }
