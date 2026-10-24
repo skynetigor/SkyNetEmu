@@ -57,7 +57,7 @@ public abstract class CPUStatus {
             }
         } catch (Exception ignored) {
         }
-        return getClockFreqLoadPercent();
+        return -1;
     }
 
     public static int getClockFreqLoadPercent() {
