@@ -8,8 +8,7 @@ import java.util.Collections;
 import java.util.Locale;
 
 public abstract class CPUStatus {
-    private static long previousCpuTotal = -1L;
-    private static long previousCpuIdle = -1L;
+    private static final CpuUsageSampler usageSampler = new CpuUsageSampler();
     private static volatile String[] cpuTempPaths;
 
     public static short[] getCurrentClockSpeeds() {
@@ -27,37 +26,9 @@ public abstract class CPUStatus {
         return (short) (maxFreq / 1000);
     }
 
-    public static synchronized int getCpuUsagePercent() {
-        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
-            String line = reader.readLine();
-            if (line != null) {
-                String[] parts = line.trim().split("\\s+");
-                if (parts.length >= 5 && "cpu".equals(parts[0])) {
-                    long total = 0L;
-                    long idle = 0L;
-                    for (int i = 1; i < parts.length; i++) {
-                        long value = Long.parseLong(parts[i]);
-                        total += value;
-                        if (i == 4 || i == 5) idle += value;
-                    }
-
-                    long oldTotal = previousCpuTotal;
-                    long oldIdle = previousCpuIdle;
-                    previousCpuTotal = total;
-                    previousCpuIdle = idle;
-
-                    if (oldTotal >= 0L && oldIdle >= 0L) {
-                        long deltaTotal = total - oldTotal;
-                        long deltaIdle = idle - oldIdle;
-                        if (deltaTotal > 0L) {
-                            return clampPercent((int) (((deltaTotal - Math.max(0L, deltaIdle)) * 100L) / deltaTotal));
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return -1;
+    /** Whole-device CPU utilization since the previous call; -1 when unknown. */
+    public static int getCpuUsagePercent() {
+        return usageSampler.sample();
     }
 
     public static int getClockFreqLoadPercent() {

@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.LongSupplier;
 
 /** Numeric-only, bounded device readings. Never reads game files or enumerates other processes.
  * Missing/denied readings are -1, never fabricated zeroes. Called only on the telemetry worker. */
@@ -13,9 +14,17 @@ final class DevicePerformanceSnapshot {
     private final File root;
     private final long[] previousTotal = new long[MAX_CPUS];
     private final long[] previousIdle = new long[MAX_CPUS];
+    private final long[] previousIdleMicros = new long[MAX_CPUS];
+    private final long[] previousIdleNanos = new long[MAX_CPUS];
+    private final LongSupplier clock;
 
     DevicePerformanceSnapshot() { this(new File("/")); }
-    DevicePerformanceSnapshot(File root) { this.root = root; }
+    DevicePerformanceSnapshot(File root) { this(root, System::nanoTime); }
+    DevicePerformanceSnapshot(File root, LongSupplier clock) {
+        this.root = root;
+        this.clock = clock;
+        java.util.Arrays.fill(previousIdleMicros, -1);
+    }
 
     String capture() {
         StringBuilder out = new StringBuilder("v=1");
@@ -35,10 +44,12 @@ final class DevicePerformanceSnapshot {
             add(out, kind + "_psi_full_us", pressureTotal(pressure, "full"));
         }
         String stat = read("proc/stat");
+        long now = clock.getAsLong();
         for (int cpu = 0; cpu < MAX_CPUS; cpu++) {
             String prefix = "sys/devices/system/cpu/cpu" + cpu + "/";
             if (!new File(root, prefix).isDirectory()) continue;
-            add(out, "cpu" + cpu + "_pct", cpuPercent(stat, cpu));
+            // Android apps cannot read /proc/stat; per-core cpuidle residency is the fallback.
+            add(out, "cpu" + cpu + "_pct", stat.isEmpty() ? idlePercent(prefix, cpu, now) : cpuPercent(stat, cpu));
             add(out, "cpu" + cpu + "_khz", number(prefix + "cpufreq/scaling_cur_freq"));
             add(out, "cpu" + cpu + "_cap_khz", number(prefix + "cpufreq/scaling_max_freq"));
             add(out, "cpu" + cpu + "_max_khz", number(prefix + "cpufreq/cpuinfo_max_freq"));
@@ -68,6 +79,23 @@ final class DevicePerformanceSnapshot {
             } catch (RuntimeException ignored) { return -1; }
         }
         return -1;
+    }
+
+    private int idlePercent(String prefix, int cpu, long now) {
+        File[] states = new File(root, prefix + "cpuidle").listFiles((dir, name) -> name.startsWith("state"));
+        long idle = states != null && states.length > 0 ? 0 : -1;
+        for (int i = 0; states != null && i < states.length && idle >= 0; i++) {
+            long value = number(prefix + "cpuidle/" + states[i].getName() + "/time");
+            idle = value >= 0 ? idle + value : -1;
+        }
+        boolean online = !"0".equals(read(prefix + "online").trim());
+        long oldIdle = previousIdleMicros[cpu], oldNanos = previousIdleNanos[cpu];
+        previousIdleMicros[cpu] = online ? idle : -1;
+        previousIdleNanos[cpu] = now;
+        if (!online || idle < 0 || oldIdle < 0 || idle < oldIdle || now <= oldNanos) return -1;
+        // Sleep is accounted when the core wakes, so a window can exceed 100% idle; clamp to 0%.
+        double idleShare = Math.min(1.0, (idle - oldIdle) * 1000.0 / (now - oldNanos));
+        return (int) Math.round(100.0 * (1.0 - idleShare));
     }
 
     static long pressureTotal(String text, String category) {

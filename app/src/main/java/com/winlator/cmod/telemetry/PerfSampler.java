@@ -11,6 +11,7 @@ import android.os.PowerManager;
 import android.os.Process;
 
 import com.winlator.cmod.core.CPUStatus;
+import com.winlator.cmod.core.CpuUsageSampler;
 import com.winlator.cmod.core.GpuLoad;
 
 import java.io.BufferedReader;
@@ -29,7 +30,7 @@ final class PerfSampler {
     private HandlerThread thread;
     private Handler handler;
     private boolean gpuDetected;
-    private long lastCpuTotal = -1, lastCpuIdle = -1;
+    private final CpuUsageSampler cpuSampler = new CpuUsageSampler();
     private final DevicePerformanceSnapshot deviceSnapshot = new DevicePerformanceSnapshot();
     private int latestCpu = -1, latestGpu = -1, latestCpuTemp = -1, latestBatteryTemp = -1;
     private int latestThermal = -1, latestCharging = -1, latestPowerSave = -1;
@@ -96,7 +97,7 @@ final class PerfSampler {
         latestCpuTemp = temp;
         if (temp > cpuTempMaxC) cpuTempMaxC = temp;
 
-        int usage = cpuUsage();
+        int usage = cpuSampler.sample();
         latestCpu = usage;
         if (usage >= 0) {
             cpuUsageSum += usage;
@@ -143,29 +144,6 @@ final class PerfSampler {
                 latestThermal = power.getCurrentThermalStatus();
                 thermalMax = Math.max(thermalMax, latestThermal);
             }
-        }
-    }
-
-    /** CPU use since the previous call, from /proc/stat; kept here so the HUD's own reading is not disturbed. -1 for the first call. */
-    private int cpuUsage() {
-        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
-            String line = reader.readLine();
-            if (line == null || !line.startsWith("cpu ")) return -1;
-            String[] parts = line.trim().split("\\s+");
-            long total = 0;
-            for (int i = 1; i < parts.length && i <= 8; i++) total += Long.parseLong(parts[i]);
-            long idle = Long.parseLong(parts[4]) + (parts.length > 5 ? Long.parseLong(parts[5]) : 0);
-            int result = -1;
-            if (lastCpuTotal >= 0 && total > lastCpuTotal) {
-                result = (int) (100L * ((total - lastCpuTotal) - (idle - lastCpuIdle)) / (total - lastCpuTotal));
-                result = Math.max(0, Math.min(100, result));
-            }
-            lastCpuTotal = total;
-            lastCpuIdle = idle;
-            return result;
-        }
-        catch (Exception e) {
-            return -1;
         }
     }
 
