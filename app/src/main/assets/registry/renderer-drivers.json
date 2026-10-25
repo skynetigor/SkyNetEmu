@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 5,
+  "revision": 6,
   "drivers": [
     {
       "id": "Turnip Gen8 V30",
@@ -38,7 +38,8 @@
       "id": "Turnip v26.2.0-R8",
       "platform": "android",
       "gpus": [
-        "735"
+        "735",
+        "740"
       ],
       "minApi": 29,
       "maxApi": 37,
@@ -47,7 +48,7 @@
       "url": "https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/download/v26.2.0-R8/Turnip_v26.2.0-R8.zip",
       "sha256": "862484520a1cff946c96a7b323058aae6be3088ca8cd98df3723c9162b539c79",
       "testedGpus": [],
-      "notes": "Standard Android A6xx/A7xx package; binary contains FD735. POCO F6 SM8635 / Android 14 mapping. Hardware rendering and DMA-BUF import still require validation on Adreno 735."
+      "notes": "Standard Android A6xx/A7xx package; binary contains FD735, FD740 and FD740v3 and advertises DMA-BUF import. Exact 735/740 mappings; other variants require explicit entries. Hardware rendering and DMA-BUF import still require device validation on both models."
     },
     {
       "id": "Turnip v26.3.0-R6",

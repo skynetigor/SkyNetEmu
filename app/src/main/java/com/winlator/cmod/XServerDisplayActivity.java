@@ -1326,10 +1326,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (!hasFocus && inputControlsView != null) inputControlsView.cancelNativeInput();
         if (!hasFocus && touchpadView != null) touchpadView.cancelNativeTouches();
 
-        if (hasFocus && cursorLock)
-            touchpadView.requestPointerCapture();
-        else if (!hasFocus)
-            touchpadView.releasePointerCapture();
+        if (touchpadView != null) {
+            if (hasFocus && cursorLock)
+                touchpadView.requestPointerCapture();
+            else if (!hasFocus)
+                touchpadView.releasePointerCapture();
+        }
     }
 
     private void setupWineSystemFiles() {

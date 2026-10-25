@@ -100,7 +100,9 @@ public final class SteamContainer {
             JSONObject steam = new JSONObject(text).optJSONObject("steam");
             if (steam == null) return builtIn;
             String globalDriver = id(steam, "driver", builtIn.driver);
-            String mappedDriver = driverForGpu(text, com.winlator.cmod.core.GPUInformation.getRenderer(null, context), globalDriver);
+            String renderer = com.winlator.cmod.core.GPUInformation.getRenderer(null, context);
+            String bundledDriver = driverForGpu(RegistryCache.bundledCopy(context, "linux.json"), renderer, globalDriver);
+            String mappedDriver = driverForGpu(text, renderer, bundledDriver);
             return new Defaults(
                     id(steam, "runtime", builtIn.runtime), id(steam, "emulator", builtIn.emulator),
                     steam.optString("emulatorPreset", builtIn.emulatorPreset), mappedDriver,
