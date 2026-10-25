@@ -849,6 +849,8 @@ public final class LinuxSession {
                 env.put("SKY_RESOURCE_DIR", programGuestPath.substring(0, programGuestPath.lastIndexOf('/')));
             }
             env.put("BOX64_DYNAREC", "1");
+            // Box64 prints its native and emulated backtraces only for an unhandled crash or abort; launch telemetry keeps them.
+            env.put("BOX64_SHOWBT", "1");
             // The Box64 log switch in Settings (on by default in a debug build) reaches Linux sessions too.
             if (androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
                     .getBoolean("enable_box64_logs", com.winlator.cmod.core.AppUtils.isDebugBuild(context))) {

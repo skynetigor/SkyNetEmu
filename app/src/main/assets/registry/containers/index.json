@@ -115,8 +115,11 @@
       "name": "Linux, Box64 Performance",
       "platform": "linux",
       "file": "containers/beamng-linux-box64-performance.wcfg",
-      "description": "The Linux build of BeamNG.drive run through Box64 0.4.4 with the Performance preset, on the Linux runtime with Turnip 26.3 and Zink. The program can stay on shared storage (no copy).",
-      "socs": [],
+      "description": "The Linux build of BeamNG.drive run through Box64 0.4.4 with the Performance preset, on the Linux runtime with Turnip 26.3 for Adreno 8xx and Zink. The program can stay on shared storage (no copy).",
+      "socs": [
+        "snapdragon-8-elite",
+        "snapdragon-8-elite-gen-5"
+      ],
       "channel": "stable",
       "tags": [
         "Linux",
@@ -211,7 +214,27 @@
         "Zink"
       ],
       "testedOn": []
+    },
+    {
+      "id": "beamng-linux-box64-adreno740-performance",
+      "name": "Linux, Adreno 740 / Snapdragon 8 Gen 2",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-adreno740-performance.wcfg",
+      "description": "BeamNG Linux profile with Box64 Performance, Mesa Turnip 26.2.2 for Adreno 740 (the Linux driver mapped to this GPU), Zink and native Vulkan output. Android renderer Auto selects Turnip 26.2.0-R8. Both packages contain FD740; testing on an Adreno 740 device is pending.",
+      "socs": [
+        "snapdragon-8-gen-2"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "Adreno 740",
+        "Snapdragon 8 Gen 2",
+        "Box64",
+        "Turnip",
+        "Zink"
+      ],
+      "testedOn": []
     }
   ],
-  "revision": 6
+  "revision": 7
 }
