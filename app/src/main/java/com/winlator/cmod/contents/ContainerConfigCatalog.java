@@ -4,6 +4,7 @@ import android.content.Context;
 import android.util.Log;
 
 import com.winlator.cmod.gameprofile.GameProfile;
+import com.winlator.cmod.core.DeviceInfo;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -34,6 +35,8 @@ public final class ContainerConfigCatalog {
         public final String description;
         /** Processor families (socs.json) it was made for; empty for any. */
         public final List<String> socs;
+        /** Optional GPU renderer restrictions, in addition to the processor family. */
+        public final List<String> gpus;
         /** "stable" or "prerelease". */
         public final String channel;
         public final List<String> tags;
@@ -43,7 +46,7 @@ public final class ContainerConfigCatalog {
         /** Optional Windows guest architecture. Empty on older indexes; ARM64 means native ARM64 games. */
         public final String windowsArchitecture;
 
-        Config(String id, String name, String file, String description, List<String> socs, String channel, List<String> tags, List<String> testedOn,
+        Config(String id, String name, String file, String description, List<String> socs, List<String> gpus, String channel, List<String> tags, List<String> testedOn,
                GameProfile.Platform platform, String windowsArchitecture) {
             this.platform = platform;
             this.windowsArchitecture = windowsArchitecture;
@@ -52,6 +55,7 @@ public final class ContainerConfigCatalog {
             this.file = file;
             this.description = description;
             this.socs = socs;
+            this.gpus = gpus;
             this.channel = channel;
             this.tags = tags;
             this.testedOn = testedOn;
@@ -59,6 +63,11 @@ public final class ContainerConfigCatalog {
 
         public boolean suits(String socFamily) {
             return socs.isEmpty() || (socFamily != null && socs.contains(socFamily));
+        }
+
+        public boolean suits(DeviceInfo.Soc soc, String renderer) {
+            return suits(soc.family) && (socs.isEmpty() || soc.matchesGpu(renderer))
+                    && (gpus.isEmpty() || gpus.stream().anyMatch(gpu -> DeviceInfo.sameGpu(gpu, renderer)));
         }
     }
 
@@ -83,7 +92,7 @@ public final class ContainerConfigCatalog {
                 // Only containers/<name>.wcfg: nothing the index says can name another file.
                 if (!id.matches("[A-Za-z0-9][A-Za-z0-9._-]*") || !file.matches("containers/[A-Za-z0-9][A-Za-z0-9._-]*\\.wcfg")) continue;
                 String channel = "prerelease".equals(c.optString("channel")) ? "prerelease" : "stable";
-                configs.put(id, new Config(id, c.optString("name", id), file, c.optString("description", ""), strings(c.optJSONArray("socs")),
+                configs.put(id, new Config(id, c.optString("name", id), file, c.optString("description", ""), strings(c.optJSONArray("socs")), strings(c.optJSONArray("gpus")),
                         channel, strings(c.optJSONArray("tags")), strings(c.optJSONArray("testedOn")),
                         "linux".equals(c.optString("platform")) ? GameProfile.Platform.LINUX : GameProfile.Platform.WINDOWS,
                         c.optString("windowsArchitecture", "").trim().toLowerCase(Locale.ROOT)));

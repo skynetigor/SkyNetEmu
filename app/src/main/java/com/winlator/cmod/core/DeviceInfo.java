@@ -11,6 +11,10 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Which processor the device has, as a family of the registry's socs.json ("snapdragon-8-elite-gen-5"): the registry's choice of
@@ -27,11 +31,17 @@ public final class DeviceInfo {
         public final String name;
         /** "SM8850", or "" when the device does not say. */
         public final String model;
+        public final List<String> gpus;
 
-        Soc(String family, String name, String model) {
+        Soc(String family, String name, String model, List<String> gpus) {
             this.family = family;
             this.name = name;
             this.model = model;
+            this.gpus = Collections.unmodifiableList(new ArrayList<>(gpus));
+        }
+
+        public boolean matchesGpu(String renderer) {
+            return gpus.stream().anyMatch(gpu -> sameGpu(gpu, renderer));
         }
 
         public String label() {
@@ -56,7 +66,12 @@ public final class DeviceInfo {
                 JSONArray models = soc == null ? null : soc.optJSONArray("models");
                 for (int j = 0; models != null && j < models.length(); j++) {
                     if (models.optString(j).equalsIgnoreCase(model)) {
-                        found = new Soc(soc.optString("family"), soc.optString("name", model), model);
+                        List<String> gpus = new ArrayList<>();
+                        JSONArray gpuNames = soc.optJSONArray("gpus");
+                        for (int k = 0; gpuNames != null && k < gpuNames.length(); k++) {
+                            gpus.add(gpuNames.optString(k));
+                        }
+                        found = new Soc(soc.optString("family"), soc.optString("name", model), model, gpus);
                         break;
                     }
                 }
@@ -65,8 +80,15 @@ public final class DeviceInfo {
         catch (org.json.JSONException e) {
             Log.w(TAG, "Bad socs.json", e);
         }
-        cached = found != null ? found : new Soc(null, model.isEmpty() ? Build.HARDWARE : model, model);
+        cached = found != null ? found : new Soc(null, model.isEmpty() ? Build.HARDWARE : model, model, Collections.emptyList());
         return cached;
+    }
+
+    public static boolean sameGpu(String expected, String actual) {
+        if (expected == null || actual == null) return false;
+        String left = expected.toLowerCase(Locale.ROOT).replace("(tm)", "").replaceAll("\\s+", "");
+        String right = actual.toLowerCase(Locale.ROOT).replace("(tm)", "").replaceAll("\\s+", "");
+        return !left.isEmpty() && left.equals(right);
     }
 
     private static String model() {

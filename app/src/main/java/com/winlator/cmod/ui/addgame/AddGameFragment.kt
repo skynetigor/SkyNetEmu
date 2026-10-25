@@ -161,9 +161,11 @@ class AddGameFragment : Fragment() {
             val found = GameMatcher.match(context, exe.absolutePath, platform, true)
             Telemetry.event("skynet.funnel", if (found == null) "game_unrecognised" else "game_recognised",
                 "skynet.game.id", found?.game?.id, "skynet.game.version", found?.version?.id)
+            val soc = DeviceInfo.soc(context)
+            val renderer = com.winlator.cmod.core.GPUInformation.getRenderer(null, context)
             // Only the configs made for the file's platform: a Windows exe never gets a Linux container, nor the other way round.
             val all = ContainerConfigCatalog.all(context, true).filterValues { config ->
-                config.platform == platform && when {
+                config.suits(soc, renderer) && config.platform == platform && when {
                     kind.isLinux -> true
                     config.windowsArchitecture.isNotEmpty() -> (config.windowsArchitecture == "arm64") == nativeArm64
                     // Older indexes have no architecture field. Inspect only a cached/bundled profile;
@@ -174,7 +176,6 @@ class AddGameFragment : Fragment() {
                     }.getOrDefault(!nativeArm64)
                 }
             }
-            val soc = DeviceInfo.soc(context)
             val manager = ContainerManager(context)
             val model = buildModel(found, all, soc, manager)
             match = found

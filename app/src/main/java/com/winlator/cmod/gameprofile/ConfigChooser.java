@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * Picks the container config for a game version on this device. In order:
  * the version's choice for the processor family; its preferred config when that suits the family (or is made for any);
- * the first listed config made for the family; the preferred config anyway, flagged as not tested on this processor.
+ * the first listed compatible config. Incompatible configs are never a fallback.
  */
 public final class ConfigChooser {
     public static final class Choice {
@@ -34,21 +34,22 @@ public final class ConfigChooser {
         if (version == null || version.containers.isEmpty()) return null;
         Map<String, ContainerConfigCatalog.Config> configs = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, ContainerConfigCatalog.Config> entry : all.entrySet()) {
-            if (entry.getValue().platform == platform) configs.put(entry.getKey(), entry.getValue());
+            if (entry.getValue().platform == platform && entry.getValue().suits(socFamily))
+                configs.put(entry.getKey(), entry.getValue());
         }
         String bySoc = socFamily == null ? null : version.preferredBySoc.get(socFamily);
-        if (bySoc != null && configs.containsKey(bySoc)) return new Choice(bySoc, true);
+        if (bySoc != null && version.containers.contains(bySoc) && configs.containsKey(bySoc)) return new Choice(bySoc, true);
         String preferred = version.preferredContainer != null && configs.containsKey(version.preferredContainer)
                 ? version.preferredContainer : null;
         if (preferred != null && configs.get(preferred).suits(socFamily)) return new Choice(preferred, true);
         // The version's preferred config belongs to the other platform: here the first listed config that suits wins, one made for any family too.
-        boolean preferredElsewhere = version.preferredContainer != null && all.containsKey(version.preferredContainer) && preferred == null;
+        boolean preferredElsewhere = version.preferredContainer != null && all.containsKey(version.preferredContainer)
+                && all.get(version.preferredContainer).platform != platform;
         for (String id : version.containers) {
             ContainerConfigCatalog.Config config = configs.get(id);
             if (config != null && (preferredElsewhere || !config.socs.isEmpty()) && config.suits(socFamily)) return new Choice(id, true);
         }
-        if (preferred != null) return new Choice(preferred, false);
-        for (String id : version.containers) if (configs.containsKey(id)) return new Choice(id, false);
+        for (String id : version.containers) if (configs.containsKey(id)) return new Choice(id, true);
         return null;
     }
 }
