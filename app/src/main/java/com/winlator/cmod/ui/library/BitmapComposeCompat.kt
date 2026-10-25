@@ -177,7 +177,9 @@ internal fun LibraryRoot(
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     LibraryBackground(background, Modifier.matchParentSize())
                     val cell = if (grid) 172.dp else size.cell.dp
-                    val columns = UiNavigationPolicy.libraryColumns(maxWidth.value, cell.value)
+                    val sidePadding = if (wide) UiNavigationPolicy.LIBRARY_GRID_PADDING
+                        else UiNavigationPolicy.LIBRARY_PORTRAIT_GRID_PADDING
+                    val columns = UiNavigationPolicy.libraryColumns(maxWidth.value, cell.value, sidePadding)
                     val stateKey = "library_${filter.name}_$grid"
                     val gridState = key(stateKey) {
                         rememberLazyGridState(sessionState.getInt("${stateKey}_index"), sessionState.getInt("${stateKey}_offset"))
@@ -234,7 +236,8 @@ internal fun LibraryRoot(
                     } else {
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(columns), state = gridState,
-                            modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp),
+                            modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = sidePadding.dp,
+                                vertical = UiNavigationPolicy.LIBRARY_GRID_PADDING.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {

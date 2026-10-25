@@ -10,8 +10,16 @@ public final class UiNavigationPolicy {
         return widthDp >= 600;
     }
 
+    public static final float LIBRARY_GRID_PADDING = 12;
+    /** Portrait grid inset; matches the Library header and filter tabs. */
+    public static final float LIBRARY_PORTRAIT_GRID_PADDING = 8;
+
     public static int libraryColumns(float widthDp, float cellDp) {
-        return Math.max(1, (int) ((widthDp - 24 + 10) / (cellDp + 10)));
+        return libraryColumns(widthDp, cellDp, LIBRARY_GRID_PADDING);
+    }
+
+    public static int libraryColumns(float widthDp, float cellDp, float horizontalPaddingDp) {
+        return Math.max(1, (int) ((widthDp - 2 * horizontalPaddingDp + 10) / (cellDp + 10)));
     }
 
     public static int confirmOrBack(int keyCode) {
