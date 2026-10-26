@@ -1,0 +1,289 @@
+import java.net.URL
+import java.security.MessageDigest
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        // Adjust Gradle plugin versions if needed
+        classpath 'com.android.tools.build:gradle:8.8.0'
+    }
+
+}
+
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+tasks.register("downloadImageFS") {
+    def assetDir = new File(project.rootDir, ["app","src","main","assets"].join(File.separator))
+    File imageFS = new File(assetDir, "imagefs.tar.zst")
+    int parts = 2
+
+    doLast {
+        if (!imageFS.exists()) {
+            println("ImageFS was not present, downloading...\n")
+            FileOutputStream outputStream = new FileOutputStream(imageFS)
+            for (int i = 0; i < parts; i++) {
+                File partFile = new File(assetDir, String.format("imagefs.tar.zst.%02d", i))
+                String partURL = String.format("https://raw.githubusercontent.com/Other-backup/winlator-imagefs-v2/main/imagefs.tar.zst.%02d", i)
+                new URL(partURL).withInputStream { p ->
+                    partFile.withOutputStream { it << p }
+                    outputStream << partFile.bytes
+                }
+                partFile.delete()
+            }
+            outputStream.close()
+        }
+    }
+}
+
+tasks.register("downloadProton") {
+    def assetDir = new File(project.rootDir, ["app","src","main","assets"].join(File.separator))
+    File protonARM64EC = new File(assetDir, "proton-9.0-arm64ec.tar.zst")
+    File staleProtonARM64EC = new File(assetDir, "proton-10.0-5-arm64ec.tar.zst")
+    String protonURL = "https://github.com/Other-backup/winlator-imagefs-v2/releases/download/c/proton-9.0-arm64ec.tar.zst"
+    String protonSHA256 = "5f9375640479a5b2c4c3998fda689bb5085febc8fcdb7b6998c79d925392991a"
+    long protonSize = 73570637L
+
+    def fileSHA256 = { File file ->
+        MessageDigest digest = MessageDigest.getInstance("SHA-256")
+        file.withInputStream { input ->
+            byte[] buffer = new byte[64 * 1024]
+            int read
+            while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read)
+        }
+        digest.digest().collect { String.format("%02x", ((int) it) & 0xff) }.join()
+    }
+
+    doLast {
+        if (staleProtonARM64EC.exists()) staleProtonARM64EC.delete()
+
+        boolean valid = protonARM64EC.isFile()
+                && protonARM64EC.length() == protonSize
+                && fileSHA256(protonARM64EC).equalsIgnoreCase(protonSHA256)
+        if (!valid) {
+            if (protonARM64EC.exists()) protonARM64EC.delete()
+            println("Proton 9 ARM64EC was not present or failed validation, downloading...\n")
+            new URL(protonURL).withInputStream { input ->
+                protonARM64EC.withOutputStream { output -> output << input }
+            }
+            valid = protonARM64EC.isFile()
+                    && protonARM64EC.length() == protonSize
+                    && fileSHA256(protonARM64EC).equalsIgnoreCase(protonSHA256)
+            if (!valid) {
+                protonARM64EC.delete()
+                throw new GradleException("Downloaded Proton 9 ARM64EC archive failed size/SHA-256 validation")
+            }
+        }
+    }
+}
+
+tasks.register("prepareKotlinBuildScriptModel"){}
+downloadProton.dependsOn(downloadImageFS)
+preBuild.dependsOn(downloadProton)
+
+// The debug build reads its registry (contents.json, linux.json) from the branch of winlator-skynet-components that is
+// named like the branch this checkout is on, when that repository has one; otherwise from main. A release build always
+// reads main.
+def currentBranch = providers.exec {
+    commandLine 'git', 'rev-parse', '--abbrev-ref', 'HEAD'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+// The commit the build is made from, so an installed build can be told apart ("c8f9078", "c8f9078-dirty" with local changes).
+def gitCommit = providers.exec {
+    commandLine 'git', 'rev-parse', '--short=7', 'HEAD'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+def gitDirty = providers.exec {
+    commandLine 'git', 'status', '--porcelain', '--untracked-files=no'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim().isEmpty() ? '' : '-dirty' }
+def buildCommit = gitCommit.zip(gitDirty) { c, d -> (c.isEmpty() ? 'unknown' : c) + d }
+def debugComponentsBranch = providers.provider {
+    String branch = currentBranch.get()
+    if (branch.isEmpty() || branch == 'HEAD') return 'main'
+    String listed = providers.exec {
+        commandLine 'git', 'ls-remote', '--heads', 'https://github.com/skynetigor/winlator-skynet-components.git', branch
+        ignoreExitValue = true
+    }.standardOutput.asText.get()
+    return listed.trim().isEmpty() ? 'main' : branch
+}
+
+android {
+    namespace 'com.winlator.cmod'
+    // Keep compileSdk from your current config. If you want to match Termux-X11, you could set to 34.
+    compileSdk 35
+    buildToolsVersion "35.0.0"
+
+    lint {
+        disable 'ExpiredTargetSdkVersion'
+    }
+
+    defaultConfig {
+        testInstrumentationRunner "com.winlator.cmod.SharedLinuxInstrumentation"
+        // Side-by-side install: keeps the upstream Ludashi build and its containers intact.
+        // namespace stays com.winlator.cmod so relative manifest class names still resolve.
+        applicationId "com.winlator.cmod.dev"
+        manifestPlaceholders = [appLabel: "SkyNetEmu"]
+        minSdkVersion 28
+        // We’re preserving Winlator’s request to keep targetSdkVersion at 28
+        targetSdkVersion 28
+
+        versionCode providers.gradleProperty('buildVersionCode').getOrElse('27').toInteger()
+        versionName providers.gradleProperty('buildVersionName').getOrElse('2.0.1')
+
+        // External native build from Winlator
+        externalNativeBuild {
+            cmake {
+                cppFlags ''
+            }
+        }
+
+        // You originally only did arm64-v8a. If you want multi-ABI splits, see below.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    // Java versions: Winlator uses Java 17, Termux-X11 used 1.9
+    // Using 17 is typically fine (covers 1.9 features).
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+        freeCompilerArgs += ['-opt-in=androidx.compose.material3.ExperimentalMaterial3Api']
+    }
+
+    // The debug build is a separate app (com.winlator.cmod.dev2) next to the release build.
+    // A suffix cannot do this: it always adds a dot, and a package segment cannot start with a digit.
+
+    signingConfigs {
+        // Production key: supplied with -PskynetemuReleaseStoreFile/-StorePassword/-KeyAlias/-KeyPassword (never committed).
+        if (providers.gradleProperty('skynetemuReleaseStoreFile').isPresent()) {
+            production {
+                storeFile file(providers.gradleProperty('skynetemuReleaseStoreFile').get())
+                storePassword providers.gradleProperty('skynetemuReleaseStorePassword').get()
+                keyAlias providers.gradleProperty('skynetemuReleaseKeyAlias').get()
+                keyPassword providers.gradleProperty('skynetemuReleaseKeyPassword').get()
+            }
+        }
+    }
+
+    // Keep Winlator’s buildTypes
+    buildTypes {
+        debug {
+            versionNameSuffix "-pre.3"
+            buildConfigField 'String', 'COMPONENTS_BRANCH', "\"${debugComponentsBranch.get()}\""
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'true'
+            minifyEnabled false
+            // A separate app next to the release build: its own package, so no data or signature is shared.
+            manifestPlaceholders = [appLabel: "SkyNetEmuDebug"]
+        }
+        prerelease {
+            initWith debug
+            matchingFallbacks = ['release']
+            signingConfig signingConfigs.debug
+            versionNameSuffix providers.gradleProperty('prereleaseSuffix').getOrElse('-pre.3')
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
+            manifestPlaceholders = [appLabel: "SkyNetEmu"]
+        }
+        release {
+            // "2.0.0-stable+c8f9078": the version the app shows (Settings, About) and the apk's file name carry the name and the commit.
+            versionNameSuffix "-stable+${buildCommit.get()}"
+            buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
+            buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
+            minifyEnabled false
+            signingConfig signingConfigs.findByName('production') ?: signingConfigs.debug
+            crunchPngs false
+        }
+    }
+
+    ndkVersion '29.0.14206865'
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+        }
+    }
+
+    // If you want to be sure modern JNI packaging is used:
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            pickFirsts += ["assets/dexopt/baseline.prof", "assets/dexopt/baseline.profm"]
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+        prefab = true
+        compose = true
+    }
+}
+
+dependencies {
+    implementation platform('androidx.compose:compose-bom:2025.08.00')
+    implementation 'androidx.activity:activity-compose:1.10.1'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+
+    // Winlator’s dependencies
+    implementation 'androidx.appcompat:appcompat:1.4.0'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'com.google.android.material:material:1.4.0'
+    implementation 'com.github.luben:zstd-jni:1.5.2-3@aar'
+    implementation 'org.tukaani:xz:1.7'
+    implementation 'org.apache.commons:commons-compress:1.20'
+    implementation 'androidx.activity:activity-ktx:1.4.0'
+    implementation 'androidx.fragment:fragment-ktx:1.4.0'
+    implementation files('libs/MidiSynth/MidiSynth.jar')
+    implementation 'androidx.recyclerview:recyclerview:1.2.0'
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.9.3'
+    implementation 'com.google.code.gson:gson:2.8.8'
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    implementation 'org.bouncycastle:bcprov-jdk15on:1.68'
+    implementation 'org.openjsse:openjsse:1.1.7'
+    implementation 'androidx.core:core:1.0.1'
+    implementation 'com.github.bumptech.glide:glide:4.11.0'
+    implementation 'com.kohlschutter.junixsocket:junixsocket-common:2.6.0'
+    implementation 'com.kohlschutter.junixsocket:junixsocket-native-common:2.6.0'
+    annotationProcessor 'com.github.bumptech.glide:compiler:4.11.0'
+}
+
+androidComponents {
+    // Debug installs use a separate package so a release build can stay installed.
+    // -PdebugAppId=<id> selects another one, for example an existing test package
+    // that already holds installed components and game data.
+    def debugAppId = providers.gradleProperty("debugAppId").getOrElse("com.winlator.cmod.dev2")
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.applicationId.set(debugAppId)
+    }
+    // Production vanilla app: its own package, separate data from the prerelease builds.
+    def releaseAppId = providers.gradleProperty("releaseAppId").getOrElse("com.skynetemu.dev")
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.applicationId.set(releaseAppId)
+    }
+    def prereleaseAppId = providers.gradleProperty("prereleaseAppId").getOrElse("com.winlator.cmod.dev2")
+    onVariants(selector().withBuildType("prerelease")) { variant ->
+        variant.applicationId.set(prereleaseAppId)
+    }
+}

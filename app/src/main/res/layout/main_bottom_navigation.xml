@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.winlator.cmod.ui.WinZBottomNavigationView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/BottomNavigation"
+    android:layout_width="match_parent"
+    android:layout_height="64dp"
+    android:background="@drawable/ui_bottom_nav_shell"
+    android:foreground="@drawable/ui_bottom_nav_divider"
+    app:elevation="0dp"
+    app:itemBackground="@drawable/ui_bottom_nav_item_background"
+    app:itemIconSize="23dp"
+    app:itemIconTint="@color/ui_bottom_navigation_item"
+    app:itemRippleColor="#22FFFFFF"
+    app:itemTextColor="@color/ui_bottom_navigation_item"
+    app:labelVisibilityMode="labeled"
+    app:menu="@menu/enhanced_bottom_navigation" />

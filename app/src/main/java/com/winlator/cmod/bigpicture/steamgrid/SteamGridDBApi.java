@@ -1,0 +1,35 @@
+package com.winlator.cmod.bigpicture.steamgrid;
+
+import retrofit2.Call;
+import retrofit2.http.GET;
+import retrofit2.http.Header;
+import retrofit2.http.Path;
+import retrofit2.http.Query;
+
+public interface SteamGridDBApi {
+    @GET("icons/game/{gameId}")
+    Call<SteamGridGridsResponse> getIconsByGameId(
+            @Header("Authorization") String authToken,
+            @Path("gameId") int gameId,
+            @Query("types") String types
+    );
+
+    @GET("search/autocomplete/{term}")
+    Call<SteamGridSearchResponse> searchGame(
+            @Header("Authorization") String authHeader,
+            @Path("term") String searchTerm
+    );
+
+    @GET("grids/game/{gameId}")
+    Call<SteamGridGridsResponse> getGridsByGameId(
+            @Header("Authorization") String authToken,
+            @Path("gameId") int gameId,
+            @Query("styles") String styles,           // Example: "alternate"
+            @Query("dimensions") String dimensions,   // Example: "600x900"
+            @Query("types") String types              // Example: "static"
+    );
+
+
+
+
+}

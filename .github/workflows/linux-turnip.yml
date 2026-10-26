@@ -1,0 +1,42 @@
+name: Linux Turnip
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: Pinned driver recipe
+        type: choice
+        options: [gen8-v30, mesa-26.2.2, all]
+        default: gen8-v30
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare toolchain
+        run: docker build -t skynet-turnip-builder:v1 tools/linux-turnip
+      - name: Build selected recipes
+        env:
+          RECIPE: ${{ inputs.recipe }}
+        run: |
+          mkdir -p build/linux-turnip
+          recipes=("$RECIPE")
+          if [ "$RECIPE" = all ]; then recipes=(gen8-v30 mesa-26.2.2); fi
+          for recipe in "${recipes[@]}"; do
+            docker run --rm \
+              --mount type=bind,source="$PWD/tools/linux-turnip",target=/recipe,readonly \
+              --mount type=bind,source="$PWD/build/linux-turnip",target=/work \
+              skynet-turnip-builder:v1 python3 /recipe/build.py "$recipe"
+          done
+      - name: Verify package integrity and importer format
+        run: python3 tools/linux-turnip/verify.py build/linux-turnip/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turnip-linux-aarch64
+          path: build/linux-turnip/out/*
+          if-no-files-found: error

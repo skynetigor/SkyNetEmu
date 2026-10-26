@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="input_mode">Finger input mode</string>
+    <string name="input_mode_touchscreen">Touchscreen</string>
+    <string name="input_mode_native">Touchscreen: native multitouch</string>
+    <string name="input_mode_touchpad">Touchpad</string>
+    <string name="input_mode_mouse">Touch mouse</string>
+    <string-array name="input_modes">
+        <item>@string/input_mode_touchscreen</item>
+        <item>@string/input_mode_touchpad</item>
+        <item>@string/input_mode_mouse</item>
+    </string-array>
+    <string-array name="linux_input_modes">
+        <item>@string/input_mode_native</item>
+        <item>@string/input_mode_touchpad</item>
+        <item>@string/input_mode_mouse</item>
+    </string-array>
+</resources>

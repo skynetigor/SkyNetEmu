@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "containers": [
+    {
+      "id": "proton9-x64-box64-turnip-gen8",
+      "name": "Snapdragon 8 Gen 3",
+      "file": "containers/proton9-x64-box64-turnip-gen8.wcfg",
+      "description": "Proton 9.0 x86_64, Box64 0.4.4, DXVK 2.7.1 gplasync, Turnip Gen8 V36.",
+      "socs": [
+        "snapdragon-8-gen-3"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Snapdragon 8 Gen 3",
+        "Turnip",
+        "Box64"
+      ]
+    },
+    {
+      "id": "proton9-x64-box64-zink-turnip263",
+      "name": "Zink + Turnip 26.3, 50 fps cap",
+      "file": "containers/proton9-x64-box64-zink-turnip263.wcfg",
+      "description": "Proton 9.0 x86_64, Box64 0.4.2, DXVK 2.6-2 gplasync, Zink with Turnip 26.3.0-R4 (OneUI). 50 fps cap, FPS counter on.",
+      "socs": [],
+      "channel": "stable",
+      "tags": [
+        "Zink",
+        "Turnip",
+        "Box64",
+        "50 fps"
+      ]
+    },
+    {
+      "id": "proton11-x64-box64-turnip-stable",
+      "name": "Galaxy Z Fold8 Ultra, stable",
+      "file": "containers/proton11-x64-box64-turnip-stable.wcfg",
+      "description": "The most stable setup tried on a Galaxy Z Fold8 Ultra (12 GB / 512 GB): West Coast and Italy load well. Proton 11.0-2 x86_64, Box64 0.4.4, DXVK 2.6-2 gplasync, Turnip Gen8 V36, CPU cores 4-7.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Stable",
+        "Galaxy Z Fold8 Ultra",
+        "Snapdragon 8 Elite Gen 5",
+        "12 GB RAM",
+        "Proton 11",
+        "Box64",
+        "Turnip"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
+      "id": "cachyos-x64-box64-dd-turnip",
+      "name": "CachyOS Wine + DD-Turnip, DXVK 3.1.1",
+      "file": "containers/cachyos-x64-box64-dd-turnip.wcfg",
+      "description": "Runs well on a Galaxy Z Fold8 Ultra. CachyOS Wine 11.0 rebuilt for Android (downloaded automatically), DD-Turnip v0.1.1 with 4096 MB reported memory and a GTX 1060 name, DXVK 3.1.1, Box64 0.4.4, alsa audio, 1280x720.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "CachyOS Wine",
+        "DD-Turnip",
+        "DXVK 3.1.1",
+        "Box64",
+        "Galaxy Z Fold8 Ultra"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
+      "id": "cachyos-arm64ec-box64-dd-turnip",
+      "name": "CachyOS Wine ARM64EC + DD-Turnip, DXVK 3.1.1",
+      "file": "containers/cachyos-arm64ec-box64-dd-turnip.wcfg",
+      "description": "Experimental, not tested on a device yet. CachyOS Wine 11.0 ARM64EC build for Android (downloaded automatically), DD-Turnip v0.1.1 with 2048 MB reported memory and a GTX 1060 name, DXVK 3.1.1 gplasync ARM64EC, Box64 0.4.4, all 8 CPU cores, alsa audio, 1280x720. BeamNG 0.39 picks the D3D12 backend by default; this config has no VKD3D, so add -gfx dx11 to the game arguments or install VKD3D-Proton.",
+      "socs": [],
+      "channel": "prerelease",
+      "tags": [
+        "Experimental",
+        "CachyOS Wine",
+        "ARM64EC",
+        "DD-Turnip",
+        "DXVK 3.1.1",
+        "Box64"
+      ]
+    },
+    {
+      "id": "tomb-raider-2013-linux-fex-performance",
+      "name": "Linux, FEX Performance + TSO",
+      "platform": "linux",
+      "file": "containers/tomb-raider-2013-linux-fex-performance.wcfg",
+      "description": "Tomb Raider (2013), native 32-bit Steam build 9573671. FEX 2610 Performance with TSO enabled, Ubuntu 24.04 rootfs, 32-bit OpenGL thunk, NVIDIA vendor override, Zink and Turnip 26.3 for Adreno 8xx. Startup and an in-game scene checked on SM-F976B; long-session stability is untested. Keep the game in the container's internal storage.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "32-bit",
+        "TSO",
+        "Zink",
+        "Turnip"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
+      "id": "beamng-linux-box64-performance",
+      "name": "Linux, Box64 Performance",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-performance.wcfg",
+      "description": "The Linux build of BeamNG.drive run through Box64 0.4.4 with the Performance preset, on the Linux runtime with Turnip 26.3 for Adreno 8xx and Zink. The program can stay on shared storage (no copy).",
+      "socs": [
+        "snapdragon-8-elite",
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "Box64",
+        "Performance",
+        "Turnip",
+        "Zink"
+      ]
+    },
+    {
+      "id": "beamng-040-linux-box64-r3",
+      "name": "BeamNG 0.40 \u2014 Linux, Box64",
+      "platform": "linux",
+      "file": "containers/beamng-040-linux-box64-r3.wcfg",
+      "description": "Native Linux BeamNG 0.40 with Box64 0.4.4-r4 (shared read-only ELF segments, thread cleanup fix) and Performance preset, Turnip 26.3 for Adreno 8xx, Zink, native Vulkan output, and a 2048 MB GPU memory budget. Touchpad input; frame generation off. Map loading verified on Snapdragon 8 Elite Gen 5; broader stability is experimental.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "BeamNG 0.40",
+        "Box64",
+        "Performance",
+        "Turnip",
+        "Zink",
+        "2048 MB GPU"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
+      "id": "beamng-040-windows-arm64-proton9-dd-turnip-device",
+      "name": "BeamNG 0.40 \u2014 Windows ARM64 native (experimental)",
+      "platform": "windows",
+      "file": "containers/beamng-040-windows-arm64-proton9-dd-turnip-device.wcfg",
+      "description": "Experimental Windows ARM64 build with Proton 9 ARM64EC and DD-Turnip v0.1.1, native Vulkan, the current device GPU identity, Wine built-in libraries, ALSA audio and a 1280x720 desktop. Proton 9 previously loaded GridMapv2 on Snapdragon 8 Elite Gen 5. Standard Proton 11 and CachyOS 11 failed during Vulkan device creation on that device; retain Proton 9 for now.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Windows ARM64",
+        "Native",
+        "Vulkan",
+        "Proton 9",
+        "DD-Turnip",
+        "Experimental"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ],
+      "windowsArchitecture": "arm64"
+    },
+    {
+      "id": "beamng-linux-box64-adreno735-performance",
+      "name": "Linux, Adreno 735 / POCO F6",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-adreno735-performance.wcfg",
+      "description": "Linux BeamNG with Box64 Performance, Mesa Turnip 26.2.2 for Adreno 735, Zink and native Vulkan output. Android renderer Auto selects Turnip 26.2.0-R8. Source/binary GPU support verified; device gameplay remains unverified.",
+      "socs": [
+        "snapdragon-8s-gen-3"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "Adreno 735",
+        "POCO F6",
+        "Box64",
+        "Turnip",
+        "Zink"
+      ],
+      "testedOn": []
+    },
+    {
+      "id": "beamng-linux-box64-adreno730-performance",
+      "name": "Linux, Adreno 730 / Snapdragon 8 Gen 1",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-adreno730-performance.wcfg",
+      "description": "BeamNG Linux profile with Box64 Performance, the A6xx/A7xx Mesa Turnip v27.0.0-20261024-r6 Linux driver and Android Turnip v26.3.0-R6 selected through Renderer Auto. GPU support is present in the driver package; testing on an Adreno 730 device is pending.",
+      "socs": [
+        "snapdragon-8-gen-1"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "Adreno 730",
+        "Snapdragon 8 Gen 1",
+        "Box64",
+        "Turnip",
+        "Zink"
+      ],
+      "testedOn": []
+    },
+    {
+      "id": "beamng-linux-box64-adreno740-performance",
+      "name": "Linux, Adreno 740 / Snapdragon 8 Gen 2",
+      "platform": "linux",
+      "file": "containers/beamng-linux-box64-adreno740-performance.wcfg",
+      "description": "BeamNG Linux profile with Box64 Performance, Mesa Turnip 26.2.2 for Adreno 740 (the Linux driver mapped to this GPU), Zink and native Vulkan output. Android renderer Auto selects Turnip 26.2.0-R8. Both packages contain FD740; testing on an Adreno 740 device is pending.",
+      "socs": [
+        "snapdragon-8-gen-2"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "Adreno 740",
+        "Snapdragon 8 Gen 2",
+        "Box64",
+        "Turnip",
+        "Zink"
+      ],
+      "testedOn": []
+    }
+  ],
+  "revision": 7
+}

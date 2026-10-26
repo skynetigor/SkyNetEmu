@@ -1,0 +1,2 @@
+
+tools/linux-box64-glibc/patches/*.patch -whitespace

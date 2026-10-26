@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "note": "Catalog of Linux-container packages for Winlator skyNET: x86 emulators and Vulkan (Turnip) drivers built for the Linux runtime (glibc aarch64). The Wine components stay in contents.json.",
+  "emulators": [
+    {
+      "id": "box64-0.4.4-r4",
+      "name": "Box64",
+      "emulator": "box64",
+      "version": "0.4.4-r4",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4-r4/box64-0.4.4-r4-linux-aarch64.tar.zst",
+      "sha256": "1214364a7c640c2213d778fb560e359ba55f9ca228d2a7205040d34ea07c000f",
+      "size": 16243258
+    },
+    {
+      "id": "box64-0.4.4-r3",
+      "name": "Box64",
+      "emulator": "box64",
+      "version": "0.4.4-r3",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4-r3/box64-0.4.4-r3-linux-aarch64.tar.zst",
+      "sha256": "07324ec4c0c077f2e65dc7d0121aaf9580aa1371ddf1736bcffa373b0c8eef7e",
+      "size": 7433637
+    },
+    {
+      "id": "box64-0.4.4-r2",
+      "name": "Box64",
+      "emulator": "box64",
+      "version": "0.4.4-r2",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4-r2/box64-0.4.4-r2-linux-aarch64.tar.zst",
+      "sha256": "dc6929188d85b374383a9623a5972df8eeb3b150d2732f3680f9d4aa16cf53e5",
+      "size": 16228960
+    },
+    {
+      "id": "fex-2610",
+      "name": "FEX",
+      "emulator": "fex",
+      "version": "2610",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-fex-2610/fex-2610-linux-aarch64.tar.zst",
+      "sha256": "a5633ead7d57f327176de618d3cdf622e9a68302bd934051760a4f61114c38c4",
+      "size": 2144270
+    }
+  ],
+  "drivers": [
+    {
+      "id": "turnip-gen8-v30-linux-aarch64",
+      "name": "Turnip Gen8 V30 Linux (A8xx, experimental)",
+      "version": "26.2.0-devel-r1",
+      "channel": "prerelease",
+      "source": "skynetigor/winlator-skynet-components",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-turnip-gen8-v30-r1/turnip-gen8-v30-linux-aarch64.zip",
+      "sha256": "15d147ebcd88d48447f396adaf776de53312d21b125d04fe044b073e6d9b4cc9",
+      "size": 3107900
+    },
+    {
+      "id": "turnip-mesa-26.2.2-linux-aarch64",
+      "name": "Mesa Turnip 26.2.2 Linux (A6xx/A7xx, experimental)",
+      "version": "26.2.2-r1",
+      "channel": "prerelease",
+      "source": "skynetigor/winlator-skynet-components",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-turnip-mesa-26.2.2-r1/turnip-mesa-26.2.2-linux-aarch64.zip",
+      "sha256": "a557a787788e756b9d3d5e24d747fb1cd1b981dca01bf402b277a217a222f738",
+      "size": 3229260,
+      "gpus": [
+        "735",
+        "740"
+      ],
+      "testedGpus": [],
+      "notes": "Mesa 26.2.2 packaged library includes FD735 and FD740; exact 735/740 defaults, hardware validation pending. Linux/glibc KGSL driver; Android renderer is a separate package."
+    },
+    {
+      "id": "turnip-v27.0.0-20261024-r6-linux",
+      "name": "Mesa Turnip v27.0.0-20261024-r6 Linux (A6xx/A7xx)",
+      "version": "27.0.0-20261024-r6",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/The412Banner/Banners-Turnip/releases/download/v27.0.0-20261024-r6/Turnip-v27.0.0-20261024-r6-Linux.zip",
+      "sha256": "596d9f131943addfd383267f9da13ebc7d420f2a2371bd0764b1fe1f3ae9f55b",
+      "size": 3222924,
+      "gpus": [
+        "730"
+      ],
+      "testedGpus": [],
+      "notes": "Linux/glibc KGSL build; upstream metadata targets A6xx/A7xx and the library contains FD730. Candidate for Snapdragon 8 Gen 1 / Adreno 730; device rendering is untested."
+    },
+    {
+      "id": "turnip-v26.3.0-20261011-710-720-test-linux",
+      "name": "Mesa Turnip v26.3.0-20261011-710-720-Test-Linux",
+      "version": "26.3.0-20261011",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/The412Banner/Banners-Turnip/releases/download/v26.3.0-20261011/Turnip-v26.3.0-20261011-710-720-Test-Linux.zip",
+      "sha256": "1b47f400f2e50dab31bb7ae9c2a827e7d3f0ecb388036cdaf936e06208e10965",
+      "size": 3218619
+    },
+    {
+      "id": "turnip-v26.3.0-20261011-a8xx-linux",
+      "name": "Mesa Turnip v26.3.0-20261011-A8xx-Linux",
+      "version": "26.3.0-20261011",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/The412Banner/Banners-Turnip/releases/download/v26.3.0-20261011/Turnip-v26.3.0-20261011-A8xx-Linux.zip",
+      "sha256": "6128900326618a13a5905200568717b2e413f93d7ca38f7ff3d0e40e407c0ac6",
+      "size": 3266459
+    },
+    {
+      "id": "turnip-v27.0.0-20261025-r5-a8xx-linux",
+      "name": "Mesa Turnip v27.0.0-20261025-r5-A8xx-Linux",
+      "version": "27.0.0-20261025-r5",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-turnip-v27.0.0-20261025-r5-a8xx/Turnip-v27.0.0-20261025-r5-A8xx-Linux.zip",
+      "sha256": "5a08baa24642c6cfe13c882851e448b21ba82eca06e235b4237e1a29207fb735",
+      "size": 3273244,
+      "testedGpus": [
+        "840"
+      ],
+      "notes": "Linux/glibc KGSL A8xx build (Adreno 810-840) from Mesa main ab1502f with the gen8 and WinNative A8xx patches. Adreno 840: BeamNG 0.40 runs (GPU faults recover, no lock screen) but slower than 26.3.0."
+    }
+  ],
+  "rootfs": [
+    {
+      "id": "rootfs-ubuntu-24-04-2026-08-11",
+      "name": "Ubuntu 24.04 x86-64 root filesystem",
+      "version": "2026-08-11",
+      "channel": "prerelease",
+      "source": "https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-rootfs-ubuntu-24-04-2026-08-11/rootfs-ubuntu-24-04-2026-08-11.tar.zst",
+      "sha256": "4853f496688c4fd9885c79cb26628ec278e6a62325cac822061e8835d6aa83b5",
+      "size": 437391543
+    }
+  ],
+  "steam": {
+    "runtime": "bannerlator-r9",
+    "emulator": "box64-0.4.4-r4",
+    "emulatorPreset": "PERFORMANCE",
+    "driver": "turnip-v26.3.0-20261011-a8xx-linux",
+    "glDriver": "zink",
+    "vulkanPresent": "native",
+    "driverByGpu": {
+      "735": "turnip-mesa-26.2.2-linux-aarch64",
+      "740": "turnip-mesa-26.2.2-linux-aarch64",
+      "730": "turnip-v27.0.0-20261024-r6-linux"
+    }
+  }
+}

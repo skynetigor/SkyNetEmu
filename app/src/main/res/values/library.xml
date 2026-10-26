@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_filter_test_apps">Test apps</string>
+    <string name="library_view">View</string>
+    <string name="library_view_cards">Cards</string>
+    <string name="library_view_small_icons">Small icons</string>
+    <string name="library_view_medium_icons">Medium icons</string>
+    <string name="library_view_large_icons">Large icons</string>
+    <string name="library_view_details">View details</string>
+    <string name="library_configure">Configure</string>
+    <string name="library_enter_container">Enter container</string>
+    <string name="library_saves">Saves</string>
+    <string name="library_storage">Storage</string>
+    <string name="library_container_settings">Container settings</string>
+    <string name="library_play">Play</string>
+    <string name="library_open">Open</string>
+    <string name="library_favorite">Favorite</string>
+    <string name="library_unfavorite">Unfavorite</string>
+    <string name="library_remove">Remove</string>
+    <string name="library_lock_orientation">Lock screen orientation</string>
+    <string name="library_vertical_mode">Vertical mode</string>
+    <string name="library_horizontal_mode">Horizontal mode</string>
+    <string name="library_controller_hints">D-pad / stick: Move · A / Cross: Open · X / Square: Actions · B / Circle: Back</string>
+</resources>
