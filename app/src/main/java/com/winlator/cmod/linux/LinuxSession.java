@@ -909,7 +909,7 @@ public final class LinuxSession {
         // Bionic reconstructs the environment with its own loader ABI in LinuxBionicSession.build.
         LinuxGpuMemory.prepare(context,container,env,false,directProgram && !LinuxBionicSession.enabled(container),program==null ? 0 : elfMachine(program));
         if (emulator != null && LinuxEmulator.BOX64.equals(emulator.emulator) && !LinuxBionicSession.enabled(container))
-            FramePipelineDiagnostics.prepare(context, env, com.winlator.cmod.lsfg.LsfgManager.getMultiplier(container)>=2);
+            FramePipelineDiagnostics.prepare(context, env, com.winlator.cmod.lsfg.LsfgManager.isArmed(context,container) && com.winlator.cmod.lsfg.LsfgManager.getMultiplier(container)>=2);
 
         List<String> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : env.entrySet()) result.add(entry.getKey() + "=" + entry.getValue());

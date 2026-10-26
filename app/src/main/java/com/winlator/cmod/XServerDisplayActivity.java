@@ -502,11 +502,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (shortcut != null && container.isLinux()) {
             String shortcutMultiplier = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_MULTIPLIER);
             String shortcutFlow = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_FLOW_SCALE);
-            try {
-                LsfgManager.beginSession(
-                        shortcutMultiplier.isEmpty() ? null : Integer.valueOf(shortcutMultiplier),
-                        shortcutFlow.isEmpty() ? null : Float.valueOf(shortcutFlow));
-            } catch (NumberFormatException ignored) {}
+            String shortcutLayer = shortcut.getExtra(LsfgManager.EXTRA_LAYER);
+            Boolean layer = shortcutLayer.isEmpty() ? null : !"0".equals(shortcutLayer);
+            Integer multiplier = null;
+            Float flow = null;
+            try { if (!shortcutMultiplier.isEmpty()) multiplier = Integer.valueOf(shortcutMultiplier); } catch (NumberFormatException ignored) {}
+            try { if (!shortcutFlow.isEmpty()) flow = Float.valueOf(shortcutFlow); } catch (NumberFormatException ignored) {}
+            LsfgManager.beginSession(multiplier, flow, layer);
         }
 
         taskAffinityMask = (short) ProcessHelper.getAffinityMask(container.getCPUList(true));
@@ -2695,8 +2697,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (llFrameGenOptions != null) llFrameGenOptions.setVisibility(View.VISIBLE);
         if (tvFrameGenHint  != null) {
             tvFrameGenHint.setVisibility(lsfgArmed ? View.GONE : View.VISIBLE);
-            if (tvFrameGenHint instanceof TextView)
-                ((TextView) tvFrameGenHint).setText("Import Lossless.dll in Settings > Components > Frame Generation, then relaunch.");
+            if (tvFrameGenHint instanceof TextView) {
+                boolean layerOff = container != null && LsfgManager.hasDll(this) && !LsfgManager.isLayerEnabled(container);
+                ((TextView) tvFrameGenHint).setText(layerOff
+                        ? "Frame generation is switched off for this game and is not loaded. Turn it on in the "
+                            + (shortcut != null && container.isLinux() ? "shortcut's" : "container's") + " Frame generation settings, then relaunch."
+                        : "Import Lossless.dll in Settings > Components > Frame Generation, then relaunch.");
+            }
         }
         if (spFrameGenFPS   != null) spFrameGenFPS.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
         if (lblFrameGenFlow != null) lblFrameGenFlow.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
@@ -2811,12 +2818,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
-    /** A change from the sidebar: kept on the shortcut when the shortcut has its own frame generation, else on the container. */
+    /**
+     * A change from the sidebar: kept on the shortcut when the session's multiplier came from the shortcut (or its game
+     * profile), else on the container. "Off" is kept like any other choice.
+     */
     private void applyFrameGeneration(int multiplier, float flowScale) {
         boolean ownSettings = shortcut != null && container.isLinux()
-                && !shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER).isEmpty();
+                && !GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_MULTIPLIER).isEmpty();
         if (ownSettings) {
-            if (multiplier >= 2) shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, String.valueOf(multiplier));
+            shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, String.valueOf(multiplier >= 2 ? multiplier : LsfgManager.MULTIPLIER_OFF));
             shortcut.putExtra(LsfgManager.EXTRA_FLOW_SCALE, String.format(java.util.Locale.US, "%.2f", flowScale));
             shortcut.saveData();
         }

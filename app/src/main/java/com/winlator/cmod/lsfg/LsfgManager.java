@@ -45,6 +45,8 @@ public final class LsfgManager {
     public static final String EXTRA_FLOW_SCALE = "lsfgFlowScale";
     public static final String EXTRA_PERFORMANCE_MODE = "lsfgPerformanceMode";
     public static final String EXTRA_PRESENT_MODE = "lsfgPresentMode";
+    /** "0" keeps the layer out of the game's Vulkan pipeline entirely; anything else loads it when Lossless.dll is imported. */
+    public static final String EXTRA_LAYER = "lsfgLayer";
 
     /** Frame generation off: the layer is not loaded at all. */
     public static final int MULTIPLIER_OFF = 0;
@@ -138,16 +140,39 @@ public final class LsfgManager {
     // (set when it starts, cleared when it ends) and win over the container's.
     private static volatile Integer sessionMultiplier;
     private static volatile Float sessionFlowScale;
+    private static volatile Boolean sessionLayer;
 
     /** @param multiplier the shortcut's multiplier, or null to follow the container; @param flowScale likewise */
     public static void beginSession(Integer multiplier, Float flowScale) {
+        beginSession(multiplier, flowScale, null);
+    }
+
+    /** @param layer whether the shortcut loads the layer at all, or null to follow the container */
+    public static void beginSession(Integer multiplier, Float flowScale, Boolean layer) {
         sessionMultiplier = multiplier;
         sessionFlowScale = flowScale == null ? null : clampFlowScale(flowScale);
+        sessionLayer = layer;
     }
 
     public static void endSession() {
         sessionMultiplier = null;
         sessionFlowScale = null;
+        sessionLayer = null;
+    }
+
+    /** Whether the layer is loaded into the game (when Lossless.dll is imported): the session's choice, else the container's. */
+    public static boolean isLayerEnabled(Container container) {
+        Boolean session = sessionLayer;
+        return session != null ? session : isContainerLayerEnabled(container);
+    }
+
+    public static boolean isContainerLayerEnabled(Container container) {
+        return !"0".equals(container.getExtra(EXTRA_LAYER));
+    }
+
+    public static void setLayerEnabled(Container container, boolean enabled) {
+        container.putExtra(EXTRA_LAYER, enabled ? null : "0");
+        container.saveData();
     }
 
     /** 0 ({@link #MULTIPLIER_OFF}) or 2..4. There is no separate enable switch. */
@@ -250,12 +275,12 @@ public final class LsfgManager {
     }
 
     /**
-     * The layer is loaded whenever a Lossless.dll was imported, whatever the multiplier: with "Off" it passes frames
-     * through, and the in-game sidebar can turn frame generation on, which cannot be done once the game has started
-     * without the layer.
+     * The layer is loaded when a Lossless.dll was imported and the layer is not switched off, whatever the multiplier:
+     * with "Off" it passes frames through, and the in-game sidebar can turn frame generation on, which cannot be done
+     * once the game has started without the layer. Switched off, nothing of it is in the game's Vulkan pipeline.
      */
     public static boolean isArmed(Context context, Container container) {
-        return hasDll(context);
+        return hasDll(context) && isLayerEnabled(container);
     }
 
     /**
@@ -342,7 +367,7 @@ public final class LsfgManager {
      */
     public static boolean prepareLaunch(Context context, ImageFs imageFs, Container container, EnvVars envVars) {
         if (!isArmed(context, container)) {
-            if (getMultiplier(container) >= 2) Log.w(TAG, "LSFG multiplier set but no Lossless.dll imported; skipping");
+            logNotArmed(context, container);
             return false;
         }
 
@@ -375,7 +400,7 @@ public final class LsfgManager {
      */
     public static boolean prepareLinuxLaunch(Context context, Container container, Map<String, String> env) {
         if (!isArmed(context, container)) {
-            if (getMultiplier(container) >= 2) Log.w(TAG, "LSFG multiplier set but no Lossless.dll imported; skipping");
+            logNotArmed(context, container);
             return false;
         }
 
@@ -397,6 +422,11 @@ public final class LsfgManager {
                 getMultiplier(container), formatFlowScale(getFlowScale(context, container)),
                 isPerformanceMode(context, container), getPresentMode(context, container)));
         return true;
+    }
+
+    private static void logNotArmed(Context context, Container container) {
+        if (!isLayerEnabled(container)) Log.i(TAG, "LSFG layer switched off; not loaded");
+        else if (getMultiplier(container) >= 2) Log.w(TAG, "LSFG multiplier set but no Lossless.dll imported; skipping");
     }
 
     private static boolean ensureLinuxRuntimeInstalled(Context context, File layerDir) {
@@ -521,9 +551,8 @@ public final class LsfgManager {
     /**
      * Rewrites conf.toml for the running container so the layer reloads live. Multiplier and flow
      * scale changes force a swapchain recreation inside the layer; the file write happens off the
-     * UI thread. Persists 2x-4x as the container's multiplier, but not the transient
-     * {@link #RUNTIME_OFF_MULTIPLIER}, so a relaunch restores the last real multiplier. The flow
-     * scale is stored as the container's own override.
+     * UI thread. Persists the multiplier as the container's (Off as {@link #MULTIPLIER_OFF}, so a
+     * relaunch starts the way the game was left) and the flow scale as its own override.
      */
     public static void applyRuntimeConfig(Context context, Container container, int multiplier, float flowScale) {
         applyRuntimeConfig(context, container, multiplier, flowScale, true);
@@ -534,7 +563,7 @@ public final class LsfgManager {
         final int m = Math.max(RUNTIME_OFF_MULTIPLIER, Math.min(4, multiplier));
         if (persist) {
             setFlowScale(container, flowScale);
-            if (m >= 2) setMultiplier(container, m);
+            setMultiplier(container, m);
         } else {
             sessionMultiplier = m;
             sessionFlowScale = clampFlowScale(flowScale);

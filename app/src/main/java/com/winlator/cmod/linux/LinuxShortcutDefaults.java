@@ -65,6 +65,7 @@ public final class LinuxShortcutDefaults {
         values.put(LinuxSession.EXTRA_KEYBOARD_BUTTON, on(container, LinuxSession.EXTRA_KEYBOARD_BUTTON));
         values.put(LinuxSession.EXTRA_AUTO_KEYBOARD, on(container, LinuxSession.EXTRA_AUTO_KEYBOARD));
         values.put(LsfgManager.EXTRA_MULTIPLIER, String.valueOf(LsfgManager.getMultiplier(container)));
+        values.put(LsfgManager.EXTRA_LAYER, LsfgManager.isContainerLayerEnabled(container) ? "1" : "0");
         values.put(LsfgManager.EXTRA_PERFORMANCE_MODE, LsfgManager.isPerformanceMode(context, container) ? "1" : "0");
         values.put(LsfgManager.EXTRA_PRESENT_MODE, LsfgManager.getPresentMode(context, container));
         values.put(LsfgManager.EXTRA_FLOW_SCALE,
@@ -159,7 +160,8 @@ public final class LinuxShortcutDefaults {
             String key = entry.getKey();
             boolean added = key.equals(RUNTIME) || key.equals("cpuList") || key.equals("graphicsFpsPreset")
                     || key.equals("hudMode") || key.equals(LinuxSession.EXTRA_NO_PROOT)
-                    || key.equals(LsfgManager.EXTRA_PERFORMANCE_MODE) || key.equals(LsfgManager.EXTRA_PRESENT_MODE);
+                    || key.equals(LsfgManager.EXTRA_PERFORMANCE_MODE) || key.equals(LsfgManager.EXTRA_PRESENT_MODE)
+                    || key.equals(LsfgManager.EXTRA_LAYER);
             if ((!own || added) && shortcut.getExtra(key).isEmpty()) shortcut.putExtra(key, entry.getValue());
         }
         // Explicit shortcut variables override the old container's variables, preserving unrelated inherited variables.

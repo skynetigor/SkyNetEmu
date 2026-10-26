@@ -590,7 +590,7 @@ private fun LinuxContainerEditorBody(
     }
     val frameGenerationSummary = editing?.let { container ->
         val multiplier = LsfgManager.getMultiplier(container)
-        if (multiplier >= 2) "${multiplier}x" else "Off"
+        if (!LsfgManager.isContainerLayerEnabled(container)) "Not loaded" else if (multiplier >= 2) "${multiplier}x" else "Off"
     } ?: "Off"
     val envCount = envVars.trim().split(Regex("\\s+")).count { it.isNotEmpty() }
 

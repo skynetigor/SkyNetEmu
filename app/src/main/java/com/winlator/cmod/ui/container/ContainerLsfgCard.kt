@@ -41,6 +41,7 @@ internal fun ContainerLsfgCard(container: Container) {
     val defaultPerformance = remember { "Default (${onOff(LsfgManager.getDefaultPerformanceMode(context))})" }
     val defaultPresent = remember { "Default (${LsfgManager.getDefaultPresentMode(context)})" }
 
+    var layer by remember { mutableStateOf(onOff(LsfgManager.isContainerLayerEnabled(container))) }
     var multiplier by remember { mutableStateOf(multiplierLabel(LsfgManager.getMultiplier(container))) }
     var flowScale by remember {
         mutableStateOf(LsfgManager.getFlowScaleOverride(container)?.let(::formatFlowScale) ?: defaultFlow)
@@ -59,11 +60,23 @@ internal fun ContainerLsfgCard(container: Container) {
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
         )
         SettingsDivider()
+        SettingChoice("Load Frame Generation", layer, performanceEntries) {
+            layer = it
+            LsfgManager.setLayerEnabled(container, it == "On")
+        }
+        Text(
+            if (layer == "Off") "Off: the layer is not loaded, so it is not part of the game's rendering at all, and the in-game menu cannot turn it on."
+            else "On: the layer is loaded once Lossless.dll is imported, so the in-game menu can switch the multiplier live.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+        )
+        SettingsDivider()
         SettingChoice("Multiplier", multiplier, multiplierEntries) {
             multiplier = it
             LsfgManager.setMultiplier(container, if (it == "Off") LsfgManager.MULTIPLIER_OFF else it.removeSuffix("x").toInt())
         }
-        if (multiplier != "Off" && !hasDll) {
+        if (layer == "On" && multiplier != "Off" && !hasDll) {
             Text(
                 "Frame generation stays off until you import Lossless.dll in Settings > Components > Frame Generation.",
                 style = MaterialTheme.typography.bodySmall,

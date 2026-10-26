@@ -105,6 +105,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var touch by remember { mutableStateOf(com.winlator.cmod.linux.LinuxTouchMode.resolve(container, shortcut, null)) }
     var steamClient by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL)) }
     var multiplier by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER)) }
+    var lsfgLayer by remember {
+        mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_LAYER).ifEmpty { if (LsfgManager.isContainerLayerEnabled(container)) "1" else "0" })
+    }
     var lsfgPerformance by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_PERFORMANCE_MODE, "1")) }
     var lsfgPresent by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_PRESENT_MODE, LsfgManager.PRESENT_MODE_MAILBOX)) }
     var flowScale by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_FLOW_SCALE)) }
@@ -185,6 +188,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     "linuxTouchMode" -> touch = value
                     LsfgManager.EXTRA_MULTIPLIER -> multiplier = value
                     LsfgManager.EXTRA_FLOW_SCALE -> flowScale = value
+                    LsfgManager.EXTRA_LAYER -> lsfgLayer = value
                 }
             }
         }
@@ -221,6 +225,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL, steamClient.ifEmpty { null })
         shortcut.putExtra(UPSCALER, upscaler.ifEmpty { null })
         shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, multiplier.ifEmpty { null })
+        shortcut.putExtra(LsfgManager.EXTRA_LAYER, lsfgLayer)
         shortcut.putExtra(LsfgManager.EXTRA_PERFORMANCE_MODE, lsfgPerformance)
         shortcut.putExtra(LsfgManager.EXTRA_PRESENT_MODE, lsfgPresent)
         shortcut.putExtra(LsfgManager.EXTRA_FLOW_SCALE, flowScale.ifEmpty { null })
@@ -257,7 +262,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         UPSCALER_MODES.firstOrNull { it.first == upscaler && it.first != "0" }?.second?.substringBefore(" (") ?: "no upscaler"
     ).joinToString(" · ")
     val frameGenerationSummary =
-        if (multiplier == "0" || multiplier.isEmpty()) "Off" else "${multiplier}x · flow $flowScale"
+        if (lsfgLayer == "0") "Not loaded"
+        else if (multiplier == "0" || multiplier.isEmpty()) "Off" else "${multiplier}x · flow $flowScale"
 
     val gameSummary = profile?.let { it.name + " · " + (effective?.version?.label ?: "version not recognised") }
         ?: if (profileId == GameProfiles.NONE) "None (turned off)" else "None"
@@ -458,12 +464,25 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         },
         EditorCategory("framegen", "Frame generation", frameGenerationSummary, false) {
             SettingsCard {
+                SettingMappedChoice("Load frame generation", lsfgLayer, linkedMapOf("1" to "On", "0" to "Off")) { lsfgLayer = it }
+                Text(
+                    if (lsfgLayer == "0")
+                        "Off: the frame generation layer is not loaded, so it is not part of the game's rendering at all. " +
+                            "The game's sidebar cannot turn it on until you switch this on and relaunch."
+                    else
+                        "On: the layer is loaded (once Lossless.dll is imported), so the game's sidebar can switch the multiplier live. " +
+                            "With the multiplier Off it passes frames through.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                )
+                SettingsDivider()
                 SettingMappedChoice(
                     "Multiplier",
                     multiplier,
                     linkedMapOf("0" to "Off", "2" to "2x", "3" to "3x", "4" to "4x")
                 ) { multiplier = it }
-                if (multiplier.isNotEmpty() && multiplier != "0" && !hasDll) {
+                if (lsfgLayer != "0" && multiplier.isNotEmpty() && multiplier != "0" && !hasDll) {
                     Text(
                         "Frame generation stays off until you import Lossless.dll in Settings > Components > Frame Generation.",
                         style = MaterialTheme.typography.bodySmall,
@@ -484,7 +503,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             }
             Text(
                 "Works with native output only (the container's \"Software Vulkan output\" off). Changes made in the " +
-                    "game's sidebar are kept on the shortcut once it has its own multiplier.",
+                    "game's sidebar, including Off, are kept on the shortcut once it has its own multiplier.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
