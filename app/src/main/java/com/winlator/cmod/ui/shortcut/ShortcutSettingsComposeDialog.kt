@@ -13,8 +13,10 @@ import com.winlator.cmod.container.Shortcut
 import com.winlator.cmod.ui.theme.WinZTheme
 
 object ShortcutSettingsComposeDialog {
+    /** [onDismiss] runs when the editor is closed (the shortcut may have been renamed by then). */
     @JvmStatic
-    fun show(fragment: Fragment, shortcut: Shortcut) {
+    @JvmOverloads
+    fun show(fragment: Fragment, shortcut: Shortcut, onDismiss: Runnable? = null) {
         if (shortcut.hasFixedSettings()) {
             android.widget.Toast.makeText(fragment.requireContext(),
                 "This shortcut belongs to the container and cannot be changed.", android.widget.Toast.LENGTH_SHORT).show()
@@ -23,7 +25,11 @@ object ShortcutSettingsComposeDialog {
         val dialog = ComponentDialog(fragment.requireContext())
         dialog.show()
         val controllerInput = dialog.window?.let(com.winlator.cmod.ui.GamepadNavigation::install)
-        dialog.setOnDismissListener { controllerInput?.close() }
+        dialog.setOnDismissListener {
+            controllerInput?.close()
+            if (fragment is com.winlator.cmod.ShortcutsFragment) fragment.loadShortcutsList()
+            onDismiss?.run()
+        }
         dialog.window?.apply {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundDrawable(ColorDrawable(android.graphics.Color.BLACK))
