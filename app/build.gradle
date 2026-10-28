@@ -205,7 +205,7 @@ android {
             buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
             buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
             minifyEnabled false
-            signingConfig signingConfigs.findByName('production') ?: signingConfigs.debug
+            signingConfig signingConfigs.findByName('production')
             crunchPngs false
         }
     }
@@ -281,6 +281,20 @@ androidComponents {
     def releaseAppId = providers.gradleProperty("releaseAppId").getOrElse("com.skynetemu.dev")
     onVariants(selector().withBuildType("release")) { variant ->
         variant.applicationId.set(releaseAppId)
+        variant.outputs.each { output ->
+            output.versionCode.set(providers.gradleProperty("buildVersionCode").map { it.toInteger() }.orElse(2))
+            output.versionName.set(providers.gradleProperty("buildVersionName").orElse("0.1.1")
+                    .zip(buildCommit) { version, commit -> "${version}-stable+${commit}" })
+        }
+    }
+
+    tasks.matching { it.name == "packageRelease" }.configureEach {
+        doFirst {
+            if (!providers.gradleProperty("skynetemuReleaseStoreFile").isPresent())
+                throw new GradleException("Production signing properties are required; refusing an unsigned or debug-signed release")
+            if (!gitDirty.get().isEmpty())
+                throw new GradleException("Production releases require a clean source checkout")
+        }
     }
     def prereleaseAppId = providers.gradleProperty("prereleaseAppId").getOrElse("com.winlator.cmod.dev2")
     onVariants(selector().withBuildType("prerelease")) { variant ->
