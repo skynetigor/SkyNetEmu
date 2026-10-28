@@ -721,6 +721,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
              */
             private void selectFrameRatingWindowOfLinuxSession(Window window, boolean direct) {
                 if (!linuxSession) return;
+                if (direct && !desktopSession) xServer.windowManager.protectGameWindow(window);
                 // A game may present into a child of its top-level window (Shadow of the Tomb Raider does), and the
                 // renderer counts frames by the window they are presented to.
                 if (!(isSessionApplicationWindow(window) || direct && isInsideSessionApplicationWindow(window))) return;
@@ -1072,6 +1073,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
         if (!isInPictureInPictureMode() && !linuxSession)
             ProcessHelper.resumeAllWineProcesses();
+        restoreLinuxGameFocus();
     }
 
     @Override
@@ -1386,6 +1388,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 touchpadView.requestPointerCapture();
             else if (!hasFocus)
                 touchpadView.releasePointerCapture();
+        }
+        if (hasFocus) restoreLinuxGameFocus();
+    }
+
+    private void restoreLinuxGameFocus() {
+        if (!linuxSession || desktopSession || xServer == null) return;
+        try (com.winlator.cmod.xserver.XLock lock = xServer.lock(
+                XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
+            xServer.windowManager.restoreGameFocus();
+            xServer.inputDeviceManager.refreshFocusedWindow();
         }
     }
 

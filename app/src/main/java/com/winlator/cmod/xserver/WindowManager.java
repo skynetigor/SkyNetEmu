@@ -33,6 +33,7 @@ public class WindowManager extends XResourceManager {
     private Window focusedWindow;
     private FocusRevertTo focusRevertTo = FocusRevertTo.NONE;
     private final ArrayList<Window> focusHistory = new ArrayList<>();
+    private Window protectedGameWindow;
     private final ArrayList<OnWindowModificationListener> onWindowModificationListeners = new ArrayList<>();
 
     public interface OnWindowModificationListener {
@@ -154,17 +155,18 @@ public class WindowManager extends XResourceManager {
     }
 
     public void revertFocus() {
+        Window target = null;
         switch (focusRevertTo) {
             case NONE:
-                focusedWindow = null;
                 break;
             case POINTER_ROOT:
-                focusedWindow = rootWindow;
+                target = rootWindow;
                 break;
             case PARENT:
-                if (focusedWindow.getParent() != null) focusedWindow = focusedWindow.getParent();
+                if (focusedWindow != null) target = focusedWindow.getParent();
                 break;
         }
+        setFocus(target, focusRevertTo);
     }
 
     public interface OnFocusChangeListener {
@@ -178,6 +180,16 @@ public class WindowManager extends XResourceManager {
     }
 
     public void setFocus(Window focusedWindow, FocusRevertTo focusRevertTo) {
+        Window game = viewableProtectedGame();
+        if (game != null && (!isGameFamily(focusedWindow)
+                || focusedWindow.getMapState() != Window.MapState.VIEWABLE)) {
+            android.util.Log.i("GameFocus", "Keeping game=" + game.id + " requested="
+                    + (focusedWindow == null ? 0 : focusedWindow.id));
+            focusedWindow = isGameFamily(this.focusedWindow)
+                    && this.focusedWindow.getMapState() == Window.MapState.VIEWABLE
+                    ? this.focusedWindow : protectedGameWindow;
+            focusRevertTo = FocusRevertTo.POINTER_ROOT;
+        }
         Window oldFocus = this.focusedWindow;
         this.focusedWindow = focusedWindow;
         this.focusRevertTo = focusRevertTo;
@@ -186,6 +198,72 @@ public class WindowManager extends XResourceManager {
             focusHistory.add(focusedWindow);
         }
         if (oldFocus != focusedWindow && focusChangeListener != null) focusChangeListener.onFocusChanged(oldFocus, focusedWindow);
+    }
+
+    private Window topLevel(Window window) {
+        if (window == null || window == rootWindow) return null;
+        while (window.getParent() != null && window.getParent() != rootWindow) window = window.getParent();
+        return window.getParent() == rootWindow ? window : null;
+    }
+
+    private Window viewableProtectedGame() {
+        if (desktopSession || protectedGameWindow == null
+                || getWindow(protectedGameWindow.id) != protectedGameWindow
+                || protectedGameWindow.getMapState() != Window.MapState.VIEWABLE) return null;
+        return topLevel(protectedGameWindow);
+    }
+
+    private boolean isGameFamily(Window window) {
+        Window top = topLevel(window);
+        Window game = topLevel(protectedGameWindow);
+        if (top == null || game == null || top.isNonActivatingWindow()
+                || window.isNonActivatingWindow()) return false;
+        if (top == game) return true;
+        if (protectedGameWindow.originClient != null && top.originClient == protectedGameWindow.originClient) return true;
+        if (protectedGameWindow.getProcessId() > 0 && top.getProcessId() == protectedGameWindow.getProcessId()) return true;
+        Window transientWindow = top;
+        for (int i = 0; i < 16; i++) {
+            Property transientFor = transientWindow.getProperty(Atom.getId("WM_TRANSIENT_FOR"));
+            if (transientFor == null || transientFor.format != Property.Format.INT_ARRAY
+                    || transientFor.data.capacity() < 4) return false;
+            transientWindow = getWindow(transientFor.getInt(0));
+            if (transientWindow == game || transientWindow == protectedGameWindow) return true;
+            if (transientWindow == null || transientWindow == rootWindow) return false;
+        }
+        return false;
+    }
+
+    /** Called only for a native Linux application's accepted direct-rendering window. */
+    public void protectGameWindow(Window renderingWindow) {
+        if (desktopSession || viewableProtectedGame() != null) return;
+        Window game = topLevel(renderingWindow);
+        if (game == null || !game.acceptsAutomaticFocus()) return;
+        String className = game.getClassName().toLowerCase(java.util.Locale.ROOT);
+        if (className.isEmpty() || (className.contains("steam") && !className.contains("steam_app_"))) return;
+        protectedGameWindow = game;
+        android.util.Log.i("GameFocus", "Protecting game=" + game.id);
+        restoreGameFocus();
+    }
+
+    public void restoreGameFocus() {
+        Window game = viewableProtectedGame();
+        if (game == null) return;
+        Window target = isGameFamily(focusedWindow) && focusedWindow.getMapState() == Window.MapState.VIEWABLE
+                ? focusedWindow : protectedGameWindow;
+        setFocus(target, FocusRevertTo.POINTER_ROOT);
+        if (keepGameWindowsAbove())
+            triggerOnChangeWindowZOrder(Window.StackMode.ABOVE, topLevel(target), null);
+    }
+
+    private boolean keepGameWindowsAbove() {
+        Window game = viewableProtectedGame();
+        if (game == null) return false;
+        List<Window> children = new ArrayList<>(rootWindow.getChildren());
+        rootWindow.moveChildAbove(game, null);
+        for (Window child : children) {
+            if (child != game && isGameFamily(child)) rootWindow.moveChildAbove(child, null);
+        }
+        return !children.equals(rootWindow.getChildren());
     }
 
     /** The most recently focused window that can still take the focus, other than the focused one; or null. */
@@ -296,6 +374,7 @@ public class WindowManager extends XResourceManager {
                 parent.moveChildBelow(window, sibling);
                 break;
         }
+        keepGameWindowsAbove();
         triggerOnChangeWindowZOrder(stackMode, window, sibling);
     }
 
@@ -399,6 +478,7 @@ public class WindowManager extends XResourceManager {
         for (int i = onWindowModificationListeners.size()-1; i >= 0; i--) {
             onWindowModificationListeners.get(i).onMapWindow(window);
         }
+        restoreGameFocus();
     }
 
     private void triggerOnUnmapWindow(Window window) {
@@ -453,11 +533,13 @@ public class WindowManager extends XResourceManager {
         for (int i = onWindowModificationListeners.size()-1; i >= 0; i--) {
             onWindowModificationListeners.get(i).onModifyWindowProperty(window, property);
         }
+        restoreGameFocus();
     }
 
     public void triggerOnReparentWindow(Window window, Window newParent, short x, short y) {
         for (int i = onWindowModificationListeners.size()-1; i >= 0; i--) {
             onWindowModificationListeners.get(i).onReparentWindow(window, newParent, x, y);
         }
+        restoreGameFocus();
     }
 }
