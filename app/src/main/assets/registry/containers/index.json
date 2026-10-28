@@ -111,6 +111,27 @@
       ]
     },
     {
+      "id": "shadow-of-the-tomb-raider-linux-fex-performance",
+      "name": "Linux, FEX Performance",
+      "platform": "linux",
+      "file": "containers/shadow-of-the-tomb-raider-linux-fex-performance.wcfg",
+      "description": "Shadow of the Tomb Raider, native x86-64 Steam build 11668867. FEX 2610 Performance, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, NVIDIA vendor override, Zink and Turnip 26.3 for Adreno 8xx, native Vulkan output, 1280x800. Gameplay, gamepad and memory fixes checked on SM-F976B; long-session stability is untested. Keep the game in the container's internal storage.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "64-bit",
+        "Vulkan",
+        "Turnip"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
       "id": "beamng-linux-box64-performance",
       "name": "Linux, Box64 Performance",
       "platform": "linux",
@@ -236,5 +257,5 @@
       "testedOn": []
     }
   ],
-  "revision": 7
+  "revision": 8
 }
