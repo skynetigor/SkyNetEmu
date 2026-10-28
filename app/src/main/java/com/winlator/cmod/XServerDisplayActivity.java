@@ -221,6 +221,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private short taskAffinityMaskWoW64 = 0;
     private String wineCpuTopologyValue = "";
     private int frameRatingWindowId = -1;
+    private boolean directRendererWindow;
 
     private int activeRendererWindowId = -1;
     private String lastRendererName = null;
@@ -463,6 +464,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         linuxSession = container.isLinux();
+        if (linuxSession) Log.i("LinuxStartup", "stage=activity_setup boot_ms=" + android.os.SystemClock.elapsedRealtime());
         com.winlator.cmod.linux.FramePipelineDiagnostics.configure(this);
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
@@ -708,6 +710,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                     preloaderDialog.closeOnUiThread();
                     winStarted[0] = true;
+                    if (linuxSession) Log.i("LinuxStartup", "stage=first_window_content boot_ms=" + android.os.SystemClock.elapsedRealtime());
                     GameSessionRecorder.onWindow();
                 }
             }
@@ -716,8 +719,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
              * Wine's wrapper tags the window it renders with a _MESA_DRV property, and that is how the HUD finds the
              * window whose frames it counts. A Linux session has no such tag: the first top-level window that draws is it.
              */
-            private void selectFrameRatingWindowOfLinuxSession(Window window) {
-                if (!linuxSession || !isSessionApplicationWindow(window)) return;
+            private void selectFrameRatingWindowOfLinuxSession(Window window, boolean direct) {
+                if (!linuxSession) return;
+                // A game may present into a child of its top-level window (Shadow of the Tomb Raider does), and the
+                // renderer counts frames by the window they are presented to.
+                if (!(isSessionApplicationWindow(window) || direct && isInsideSessionApplicationWindow(window))) return;
+                // Steam keeps its CPU-drawn windows next to the game, and one of them draws first. A window that
+                // presents GPU frames (a dma-buf) is the game: it takes the counting over from a CPU-drawn window,
+                // and from another presenting window once it holds the keyboard focus.
+                if (direct && window.id != activeRendererWindowId && (!directRendererWindow
+                        || window == xServer.windowManager.getFocusedWindow())) {
+                    directRendererWindow = true;
+                    activeRendererWindowId = window.id;
+                    if (xServerView != null) xServerView.setSessionWindowId(window.id);
+                    if (frameRatingWindowId != -1) {
+                        frameRatingWindowId = window.id;
+                        if (xServerView != null) xServerView.setFpsWindowId(window.id);
+                    }
+                }
                 // Telemetry must count accepted direct frames even with the HUD hidden.
                 if (activeRendererWindowId == -1) {
                     activeRendererWindowId = window.id;
@@ -738,13 +757,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // A frame handed over as a dma-buf (or a hardware buffer) is the program drawing too. The renderer
                 // counts the frame for the HUD itself; what is left to do is to pick the window it counts.
                 onApplicationWindowDrawn(window);
-                selectFrameRatingWindowOfLinuxSession(window);
+                selectFrameRatingWindowOfLinuxSession(window, true);
             }
 
             @Override
             public void onUpdateWindowContent(Window window) {
                 onApplicationWindowDrawn(window);
-                selectFrameRatingWindowOfLinuxSession(window);
+                selectFrameRatingWindowOfLinuxSession(window, false);
 
                 if (window.id == activeRendererWindowId) GameSessionRecorder.onFrame();
 
@@ -772,7 +791,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // has just opened. A toolkit waits to be told: SDL keeps no keyboard focus and drops every key,
                 // and only a program that asks for the focus itself (BeamNG does) ever gets one. So the server
                 // gives it, the way a window manager would.
-                if (linuxSession && !desktopSession && window.isMappedTopLevel()) {
+                if (linuxSession && !desktopSession && window.isMappedTopLevel() && window.acceptsAutomaticFocus()) {
                     xServer.windowManager.setFocus(window, WindowManager.FocusRevertTo.POINTER_ROOT);
                 }
             }
@@ -783,8 +802,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onUnmapWindow(Window window) {
+                restoreFocusOfLinuxSession();
+            }
+
+            @Override
             public void onDestroyWindow(Window window) {
                 changeFrameRatingVisibility(window, null);
+                restoreFocusOfLinuxSession();
+            }
+
+            /**
+             * When the focused window goes away (Steam's achievement toast takes the focus, then closes), X reverts the
+             * focus to nothing, and a window manager would hand it back. Without one the game keeps no focus: SDL
+             * drops its gamepad and keyboard input and Feral's games pause.
+             */
+            private void restoreFocusOfLinuxSession() {
+                if (!linuxSession || desktopSession) return;
+                WindowManager windowManager = xServer.windowManager;
+                Window focused = windowManager.getFocusedWindow();
+                if (focused != null && focused != windowManager.rootWindow
+                        && focused.getMapState() == Window.MapState.VIEWABLE) return;
+                Window previous = windowManager.getPreviouslyFocusedViewableWindow();
+                if (previous != null) windowManager.setFocus(previous, WindowManager.FocusRevertTo.POINTER_ROOT);
             }
         });
 
@@ -850,6 +890,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             Executors.newSingleThreadExecutor().execute(() -> {
                 if (linuxSession) {
+                    Log.i("LinuxStartup", "stage=environment_setup boot_ms=" + android.os.SystemClock.elapsedRealtime());
                     setupLinuxEnvironment();
                     return;
                 }
@@ -882,10 +923,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if ("auto".equalsIgnoreCase(getSelectedRendererDriverId()) && !isDisplayXEnabled() && !useEglRenderer()) {
             Thread prepareRenderer = new Thread(() -> {
                 try {
+                    if (linuxSession) Log.i("LinuxStartup", "stage=renderer_selection boot_ms=" + android.os.SystemClock.elapsedRealtime());
                     preloaderDialog.setStatusText("Selecting Android renderer driver…");
                     resolvedRendererDriverId = com.winlator.cmod.contents.RendererDriverCatalog.resolve(
                             getApplicationContext(), "auto", isLinuxNativeOutput(), preloaderDialog::setStatusText);
                     Log.i("RendererDriver", "requested=auto selected=" + resolvedRendererDriverId);
+                    if (linuxSession) Log.i("LinuxStartup", "stage=renderer_selected boot_ms=" + android.os.SystemClock.elapsedRealtime());
                     preloaderDialog.setStatusText(getString(R.string.starting_up));
                     runOnUiThread(begin);
                 } catch (Exception error) {
@@ -902,6 +945,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // A desktop has no one program: the first window that draws shows it is up (what is a top-level window is the window manager's frames).
         if (desktopSession) return window.attributes.isMapped() && window.isInputOutput() && window.getWidth() > 1 && window.getHeight() > 1;
         return linuxSession ? window.isMappedTopLevel() : window.isApplicationWindow();
+    }
+
+    private boolean isInsideSessionApplicationWindow(Window window) {
+        if (!window.attributes.isMapped() || window.getWidth() <= 1 || window.getHeight() <= 1) return false;
+        for (Window ancestor = window.getParent(); ancestor != null; ancestor = ancestor.getParent()) {
+            if (!ancestor.attributes.isMapped()) return false;
+            if (isSessionApplicationWindow(ancestor)) return true;
+        }
+        return false;
     }
 
     private int parseContainerIdFromDesktopFile(File desktopFile) {
@@ -1196,6 +1248,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (steamGameLaunchMonitor != null) steamGameLaunchMonitor.stop();
         if (!isChangingConfigurations() && environment != null)
             environment.stopEnvironmentComponents();
         if (inputControlsView != null) inputControlsView.cancelNativeInput();
@@ -1568,6 +1621,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         showProgramExitDialog(message);
     }
 
+    private com.winlator.cmod.linux.SteamGameLaunchMonitor steamGameLaunchMonitor;
+
     /** A Linux program ended: a failure is explained to the user before the session is closed. */
     private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
         int status = launcher.guestStatus(prootStatus);
@@ -1678,6 +1733,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command(this, com.winlator.cmod.linux.LinuxDesktop.scaleFor(xServer.screenInfo.width))
                 : LinuxSession.programCommand(this, linuxContainer, shortcut);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(linuxContainer, linuxRuntime, command);
+        steamGameLaunchMonitor = new com.winlator.cmod.linux.SteamGameLaunchMonitor(container.getLinuxHomeDir(), (appId, code) -> {
+            if (!exiting.get() && !isFinishing() && !isDestroyed())
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle(R.string.steam_game_launch_failed_title)
+                        .setMessage(getString(R.string.steam_game_launch_failed, appId, code))
+                        .setPositiveButton(android.R.string.ok, null).show();
+        });
+        steamGameLaunchMonitor.start();
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.
         launcher.setTerminationCallback((status) -> runOnUiThread(

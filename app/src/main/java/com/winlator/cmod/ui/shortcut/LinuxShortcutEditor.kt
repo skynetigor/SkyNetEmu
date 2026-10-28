@@ -208,6 +208,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val hasDll = remember { LsfgManager.hasDll(context) }
     val sizeValid = size.isEmpty() || isValidScreenSize(size.trim())
 
+    var name by remember { mutableStateOf(shortcut.name) }
+    val nameClean = Shortcut.cleanName(name)
+
     fun save() {
         // One line: the shortcut file keeps each extra on a line of its own.
         val text = options.replace('\n', ' ').trim()
@@ -253,6 +256,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxShortcutDefaults.EXTRA_OWN, "1")
         performanceTuning.saveTo(shortcut)
         shortcut.saveData()
+        // After the settings are written to the file under its old name.
+        if (nameClean.isNotEmpty() && nameClean != shortcut.name && !shortcut.rename(context, nameClean))
+            android.widget.Toast.makeText(context, "The name is already used by another shortcut.", android.widget.Toast.LENGTH_SHORT).show()
         onClose()
     }
 
@@ -688,6 +694,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             )
         },
         EditorCategory("program", "Program", shortcut.path, false) {
+            SettingsCard { SettingText("Name", name) { name = it } }
             SettingsCard {
                 PreviewRow("Path", shortcut.path)
                 SettingsDivider()

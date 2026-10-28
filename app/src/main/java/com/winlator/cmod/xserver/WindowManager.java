@@ -32,6 +32,7 @@ public class WindowManager extends XResourceManager {
     public final DrawableManager drawableManager;
     private Window focusedWindow;
     private FocusRevertTo focusRevertTo = FocusRevertTo.NONE;
+    private final ArrayList<Window> focusHistory = new ArrayList<>();
     private final ArrayList<OnWindowModificationListener> onWindowModificationListeners = new ArrayList<>();
 
     public interface OnWindowModificationListener {
@@ -111,6 +112,7 @@ public class WindowManager extends XResourceManager {
         if (window.isInputOutput()) drawableManager.removeDrawable(window.getContent().id);
         triggerOnFreeResourceListener(window);
         if (window == focusedWindow) revertFocus();
+        focusHistory.remove(window);
         parent.removeChild(window);
     }
 
@@ -179,7 +181,20 @@ public class WindowManager extends XResourceManager {
         Window oldFocus = this.focusedWindow;
         this.focusedWindow = focusedWindow;
         this.focusRevertTo = focusRevertTo;
+        if (focusedWindow != null && focusedWindow != rootWindow) {
+            focusHistory.remove(focusedWindow);
+            focusHistory.add(focusedWindow);
+        }
         if (oldFocus != focusedWindow && focusChangeListener != null) focusChangeListener.onFocusChanged(oldFocus, focusedWindow);
+    }
+
+    /** The most recently focused window that can still take the focus, other than the focused one; or null. */
+    public Window getPreviouslyFocusedViewableWindow() {
+        for (int i = focusHistory.size() - 1; i >= 0; i--) {
+            Window window = focusHistory.get(i);
+            if (window != focusedWindow && window.getMapState() == Window.MapState.VIEWABLE) return window;
+        }
+        return null;
     }
 
     public FocusRevertTo getFocusRevertTo() {

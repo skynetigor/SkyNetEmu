@@ -236,6 +236,25 @@ public class Window extends XResource {
                 && width > 1 && height > 1;
     }
 
+    public boolean acceptsAutomaticFocus() {
+        if (attributes.isOverrideRedirect()
+                || !(hasEventListenerFor(Event.KEY_PRESS) || hasEventListenerFor(Event.KEY_RELEASE)
+                     || hasEventListenerFor(Event.FOCUS_CHANGE))) return false;
+        return !isNonActivatingWindow();
+    }
+
+    public boolean isNonActivatingWindow() {
+        Property type = getProperty(Atom.getId("_NET_WM_WINDOW_TYPE"));
+        if (type != null && type.format == Property.Format.INT_ARRAY) {
+            for (int i = 0; i < type.data.capacity() / 4; i++) {
+                String name = Atom.getName(type.getInt(i));
+                if ("_NET_WM_WINDOW_TYPE_NOTIFICATION".equals(name)
+                        || "_NET_WM_WINDOW_TYPE_TOOLTIP".equals(name)) return true;
+            }
+        }
+        return false;
+    }
+
     public boolean isInputOutput() {
         return content != null;
     }

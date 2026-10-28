@@ -495,7 +495,8 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
     }
 
     fun closeEditor() {
-        renameShortcutV2(shortcut, state.name)
+        if (state.name.isNotBlank() && !shortcut.rename(context, state.name))
+            Toast.makeText(context, "The name is already used by another shortcut.", Toast.LENGTH_SHORT).show()
         if (fragment is ShortcutsFragment) fragment.loadShortcutsList()
         close()
     }
@@ -1387,21 +1388,4 @@ private fun parseShortcutComponentsV2(raw: String): Map<String, Int> {
     }
     shortcutComponentRowsV2.forEach { (key, _) -> result.putIfAbsent(key, 0) }
     return result
-}
-
-private fun renameShortcutV2(shortcut: Shortcut, requested: String) {
-    val clean = requested.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
-    if (clean.isBlank() || clean == shortcut.name) return
-
-    val parent = shortcut.file.parentFile
-    val oldName = shortcut.name
-    val ext = shortcut.file.extension.takeIf { it.isNotBlank() } ?: "desktop"
-    val target = File(parent, "$clean.$ext")
-    if (target.exists() || !shortcut.file.renameTo(target)) return
-
-    val oldLink = File(parent, "$oldName.lnk")
-    if (oldLink.isFile) {
-        val newLink = File(parent, "$clean.lnk")
-        if (!newLink.exists()) oldLink.renameTo(newLink)
-    }
 }

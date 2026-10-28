@@ -59,12 +59,17 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         this.terminationCallback = terminationCallback;
     }
 
+    private void startupStage(String stage) {
+        Log.i("LinuxStartup", "stage=" + stage + " boot_ms=" + android.os.SystemClock.elapsedRealtime());
+    }
+
     /** The X server is started just before this component; a program must not run before it accepts connections. */
     private static void waitForXServer(File socket) {
-        long deadline = System.currentTimeMillis() + 10000;
-        while (System.currentTimeMillis() < deadline) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + 10000;
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try (android.net.LocalSocket probe = new android.net.LocalSocket()) {
                 probe.connect(new android.net.LocalSocketAddress(socket.getPath(), android.net.LocalSocketAddress.Namespace.FILESYSTEM));
+                Log.i("LinuxStartup", "stage=xserver_ready boot_ms=" + android.os.SystemClock.elapsedRealtime());
                 return;
             }
             catch (IOException e) {
@@ -77,6 +82,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
             }
         }
         Log.w(TAG, "The X server did not accept connections within 10 s");
+        Log.w("LinuxStartup", "stage=xserver_timeout boot_ms=" + android.os.SystemClock.elapsedRealtime());
     }
 
     @Override
@@ -85,12 +91,15 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         ImageFs imageFs = environment.getImageFs();
         startedAt = System.currentTimeMillis();
         phase = "waiting_xserver";
+        startupStage(phase);
         waitForXServer(new File(imageFs.getRootDir(), "usr/tmp/.X11-unix/X0"));
         LinuxSession.Launch launch;
         try {
             phase = "building";
+            startupStage(phase);
             launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
             executionMode = launch.executionMode;
+            startupStage("build_complete");
         }
         catch (RuntimeException e) {
             phase = "build_failed";
@@ -99,6 +108,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         }
         // Root exit status does not wait for output pipes inherited by surviving daemons.
         phase = "spawning";
+        startupStage(phase);
         synchronized (lock) {
             process = environment.startProcess(launch.argv, launch.hostEnv, launch.workingDir, status -> {
                 synchronized (lock) {
@@ -111,6 +121,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
             pid = process.getPid();
             lastPid = pid;
             if (pid > 0) phase = "running";
+            startupStage(phase);
             if (pid == -1) {
                 phase = "spawn_failed";
                 Log.e(TAG, "The Linux session did not start");

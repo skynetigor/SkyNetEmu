@@ -489,8 +489,15 @@ public:
     std::atomic<int> actualPresentMode{VK_PRESENT_MODE_FIFO_KHR};
     std::atomic<uint32_t> outputWidth{0}, outputHeight{0};
     // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
-    std::unordered_set<AHardwareBuffer*> dmaBufKeys;
-    void releaseAhbKey(AHardwareBuffer* key) { if (key && !dmaBufKeys.erase(key)) AHardwareBuffer_release(key); }
+    // Counted because X reuses pixmap ids: a key can be imported again while its retired import still waits in deleteQueue.
+    std::unordered_map<AHardwareBuffer*, uint32_t> dmaBufKeys;
+    bool dropDmaBufKey(AHardwareBuffer* key) {
+        auto it = dmaBufKeys.find(key);
+        if (it == dmaBufKeys.end()) return false;
+        if (--it->second == 0) dmaBufKeys.erase(it);
+        return true;
+    }
+    void releaseAhbKey(AHardwareBuffer* key) { if (key && !dropDmaBufKey(key)) AHardwareBuffer_release(key); }
     void  cleanupAllAHBCache();
     void  flushDeleteQueue();
     void  destroyTexNow(RetiredTex& retired);

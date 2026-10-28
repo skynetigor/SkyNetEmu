@@ -246,32 +246,37 @@ public final class LinuxSession {
 
     /**
      * Runs the runtime's native arm64 Steam client on the container's own display (no gamescope). The first run
-     * downloads the client (bannerlator-steam-install); its output goes to Winlator/logs/linux-steam.log on shared
-     * storage. Files a killed session left behind are cleared first, as the runtime's own session does.
+     * downloads the client through the app-staged installer; its output goes to Winlator/logs/linux-steam.log
+     * unless SKY_STEAM_LOG_DIR selects another destination. Files a killed session left behind are cleared first.
      */
     private static String[] steamCommand(String appId, boolean minimal, boolean bigPicture) {
         return new String[]{"/bin/bash", "-c",
                 "export XDG_DATA_HOME=\"${XDG_DATA_HOME:-$HOME/.local/share}\"; steam_root=\"$XDG_DATA_HOME/Steam\"; "
-                        + "mkdir -p /storage/emulated/0/Winlator/logs; exec >/storage/emulated/0/Winlator/logs/linux-steam.log 2>&1; "
+                        + "log_dir=\"${SKY_STEAM_LOG_DIR:-/storage/emulated/0/Winlator/logs}\"; "
+                        + "mkdir -p \"$log_dir\" || exit 1; exec >\"$log_dir/linux-steam.log\" 2>&1; "
                         + "echo \"== steam start $(date) uid=$(id -u) home=$HOME\"; "
                         // The runtime ships gawk (what awk links to) without the execute bit, and the installer needs awk.
                         + "chmod 755 /usr/bin/gawk; "
-                        + "bannerlator-steam-install || exit 1; "
+                        + "sky_stage() { printf '== SKY_STEAM stage=%s epoch_s=%s\\n' \"$1\" \"$(date -u +%s)\"; }; "
+                        + "sky_stage installer_start; "
+                        + "if [ -z \"$SKY_STEAM_INSTALLER\" ] || [ ! -f \"$SKY_STEAM_INSTALLER\" ]; then "
+                        + "echo 'SkyNetEmu Steam installer is missing' >&2; exit 1; fi; "
+                        + "/bin/bash \"$SKY_STEAM_INSTALLER\" || exit 1; sky_stage installer_complete; "
                         // ~/.steam/sdk64 is where an x86-64 game looks for steamclient.so, and the installer points it at the arm64
                         // client (which Box64 cannot load): the client's x86-64 copy is in linux64. sdkarm64 keeps the arm64 one.
                         + "if [ -f \"$steam_root/linux64/steamclient.so\" ]; then mkdir -p \"$HOME/.steam\"; "
                         + "ln -sfn \"$steam_root/linux64\" \"$HOME/.steam/sdk64\"; fi; "
-                        // Steam hands an x86 game to Valve's FEX tool; with Box64 the game's command is run directly instead.
-                        + "tool=\"$steam_root/steamapps/common/FEX-Emu/fex-compat-tool\"; "
-                        + "if [ -n \"$SKY_LAUNCHER\" ] && [ -f \"$tool\" ] && ! cmp -s \"$SKY_LAUNCHER\" \"$tool\"; then "
-                        + "[ -f \"$tool.orig\" ] || cp \"$tool\" \"$tool.orig\"; cp \"$SKY_LAUNCHER\" \"$tool\"; chmod 755 \"$tool\"; fi; "
+                        + "/bin/bash \"$SKY_STEAM_COMPAT_INSTALLER\" || exit 1; "
                         // The client's own logs are in the container's private home: keep a copy on shared storage.
-                        + "( while sleep 10; do mkdir -p /storage/emulated/0/Winlator/logs/steam-logs; "
-                        + "cp -r \"$steam_root/logs/.\" /storage/emulated/0/Winlator/logs/steam-logs/ 2>/dev/null; done ) & "
+                        + "( while sleep 10; do "
+                        + "if ! /bin/bash \"$SKY_STEAM_LOG_EXPORT\" \"$steam_root/logs\" \"$log_dir/steam-logs\"; then "
+                        + "echo 'SkyNetEmu: Steam diagnostic log export failed' >&2; fi; done ) & "
                         + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; "
                         // The client starts its web helper through taskset: the stand-in (first in PATH) has the helper draw on the GPU.
                         + "if [ -n \"$SKY_STEAM_TASKSET\" ] && [ -f \"$SKY_STEAM_TASKSET\" ]; then mkdir -p \"$HOME/.skynet/bin\"; "
-                        + "cp -f \"$SKY_STEAM_TASKSET\" \"$HOME/.skynet/bin/taskset\"; chmod 755 \"$HOME/.skynet/bin/taskset\"; "
+                        + "if ! cmp -s \"$SKY_STEAM_TASKSET\" \"$HOME/.skynet/bin/taskset\"; then "
+                        + "cp -f \"$SKY_STEAM_TASKSET\" \"$HOME/.skynet/bin/taskset\" || exit 1; fi; "
+                        + "chmod 755 \"$HOME/.skynet/bin/taskset\"; "
                         + "export PATH=\"$HOME/.skynet/bin:$PATH\"; fi; "
                         // The client works around a bug of old libXrandr by looking its functions up behind its own; with RandR 1.3 offered
                         // it asks for XRRGetOutputInfo, finds nothing (the library is not loaded yet) and crashes. Loading it first fixes that.
@@ -280,7 +285,7 @@ public final class LinuxSession {
                         + "if [ \"$GALLIUM_DRIVER\" = zink ]; then export SKY_GAME_GL=zink LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe; "
                         + "unset MESA_LOADER_DRIVER_OVERRIDE; fi; "
                         + "[ -f /usr/lib/libXrandr.so.2 ] && export LD_PRELOAD=\"/usr/lib/libXrandr.so.2${LD_PRELOAD:+:$LD_PRELOAD}\"; "
-                        + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 "
+                        + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 STEAM_LAUNCH_WRAPPER_AUDIO_NAMESPACE=0 "
                         + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
                         // The client exits with 42 after updating itself and wants a fresh start; an update that cannot
                         // install asks again every time, so the restarts are capped.
@@ -295,9 +300,9 @@ public final class LinuxSession {
                         + "if [ -n \"$game\" ] && [ \"$minimal\" = 1 ] && grep -qs '\"RememberPassword\"[[:space:]]*\"1\"' "
                         + "\"$steam_root/config/loginusers.vdf\"; then extra=\"$extra -silent -no-browser\"; fi; "
                         + "echo \"== steam launch: game=$game minimal=$minimal flags=$extra\"; "
-                        + "for try in 1 2 3 4; do \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
+                        + "for try in 1 2 3 4; do sky_stage client_attempt_$try; \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
                         + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game} \"${@:4}\"; code=$?; "
-                        + "[ \"$code\" = 42 ] || break; done; exit $code",
+                        + "sky_stage client_exit_$code; [ \"$code\" = 42 ] || break; done; exit $code",
                 STEAM_MARKER, appId, minimal ? "1" : "0", bigPicture ? "1" : "0"};
     }
 
@@ -425,7 +430,8 @@ public final class LinuxSession {
         // (Chromium opens "/proc" and stats "self/task/" in it; its sandbox check dies on that) finds nothing. The real
         // ones are put over the root filesystem's, as a chroot would have them mounted.
         LinuxEmulator.Installed fexEmulator = LinuxEmulator.resolve(context, container);
-        if (fexEmulator != null && fexEmulator.emulator.equals(LinuxEmulator.FEX)) {
+        if ((fexEmulator != null && fexEmulator.emulator.equals(LinuxEmulator.FEX))
+                || java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
             LinuxRootfs.Installed x86Root = LinuxRootfs.resolve(context, container);
             if (x86Root != null) {
                 String root = x86Root.dir.getPath();
@@ -443,6 +449,8 @@ public final class LinuxSession {
 
         argv.add("/usr/bin/env");
         argv.add("-i");
+        if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER))
+            prepareSteamGames(context, rt, imageFsRoot, container);
         String programGuestPath = programGuestPath(guestCommand);
         List<String> guestEnv = guestEnv(context, rt, imageFsRoot, container,
                 programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath,
@@ -635,9 +643,9 @@ public final class LinuxSession {
 
     /**
      * The launch options of a shortcut of a Steam game (the ones in the shortcut's settings, written like Steam's), in
-     * ~/.skynet/steam-emulator/&lt;appId&gt;.launch for the stand-in launcher, which starts the game and applies them: the variables are
+     * ~/.skynet/steam-emulator/&lt;appId&gt;.launch for the registered compatibility tool: the variables are
      * exported, the wrapper goes before the game's command and the arguments after it (Steam's own launch options for the game, set in
-     * Steam, are already in that command). A game that needs no emulator is not started by the launcher: they do not reach it.
+     * Steam, are already in that command).
      */
     private static void writeSteamLaunchOptions(Container container, String appId, LinuxLaunchOptions options) {
         StringBuilder text = new StringBuilder("unset sky_wrap sky_args\n");
@@ -651,7 +659,8 @@ public final class LinuxSession {
         text.append(")\n");
         File dir = new File(container.getLinuxHomeDir(), ".skynet/steam-emulator");
         dir.mkdirs();
-        FileUtils.writeString(new File(dir, appId + ".launch"), text.toString());
+        if (!FileUtils.writeString(new File(dir, appId + ".launch"), text.toString()))
+            throw new IllegalStateException("Cannot prepare Steam launch options for " + appId);
     }
 
     /** The variables that make up the x86 emulator of a session: the launcher of a Steam game applies the ones of its own game. */
@@ -664,6 +673,10 @@ public final class LinuxSession {
     private static boolean isEmulatorVariable(String name) {
         return name.startsWith("BOX64_") || name.startsWith("FEX_") || name.startsWith("SKY_X86_") || name.startsWith("SKY_FEX_")
                 || name.startsWith("SKY_GPU_MEMORY_")
+                || name.equals("SKY_GAME_SETUP_ERROR")
+                || name.equals("VK_DRIVER_FILES") || name.equals("VK_ICD_FILENAMES")
+                || name.equals("GALLIUM_DRIVER") || name.equals("MESA_LOADER_DRIVER_OVERRIDE")
+                || name.equals("LIBGL_ALWAYS_SOFTWARE") || name.equals("LD_LIBRARY_PATH")
                 || name.equals("SDL_TOUCH_MOUSE_EVENTS") || name.equals("SDL_MOUSE_TOUCH_EVENTS")
                 || name.equals("SKY_LAUNCHER") || name.equals("SKY_MIMALLOC_STUB") || name.equals("TU_DEBUG");
     }
@@ -671,7 +684,7 @@ public final class LinuxSession {
     /**
      * A Steam game is started by the Steam client, which may already be running (another session of the container started it) with the
      * environment of that session. So a shortcut of a Steam game leaves the emulator's variables for its game in
-     * ~/.skynet/steam-emulator/&lt;appId&gt;.env, and the stand-in launcher (skynet-launcher.sh), which starts every game, applies them. This is
+     * ~/.skynet/steam-emulator/&lt;appId&gt;.env, and the selected SkyNetEmu compatibility tool applies them. This is
      * what lets each Steam game have its own emulator (see {@link LinuxEmulatorSetup}).
      */
     private static void writeSteamEmulatorEnv(File home, String[] guestCommand, List<String> guestEnv) {
@@ -680,7 +693,7 @@ public final class LinuxSession {
             if (STEAM_MARKER.equals(guestCommand[i])) appId = guestCommand[i + 1];
         }
         if (appId == null || !appId.matches("\\d+")) return;
-        StringBuilder text = new StringBuilder();
+        StringBuilder text = new StringBuilder("unset LIBGL_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER VK_DRIVER_FILES VK_ICD_FILENAMES\n");
         for (String entry : guestEnv) {
             int eq = entry.indexOf('=');
             if (eq <= 0 || !isEmulatorVariable(entry.substring(0, eq))) continue;
@@ -688,7 +701,64 @@ public final class LinuxSession {
         }
         File dir = new File(home, ".skynet/steam-emulator");
         dir.mkdirs();
-        FileUtils.writeString(new File(dir, appId + ".env"), text.toString());
+        File fexConfig = new File(home, ".config/fex-emu/Config.json");
+        if (fexConfig.isFile()) {
+            try {
+                org.json.JSONObject config = new org.json.JSONObject(FileUtils.readString(fexConfig));
+                org.json.JSONObject thunkConfig = new org.json.JSONObject();
+                if (config.has("ThunksDB")) thunkConfig.put("ThunksDB", config.getJSONObject("ThunksDB"));
+                if (!FileUtils.writeString(new File(dir, appId + ".thunks64.json"), thunkConfig.toString()))
+                    throw new IllegalStateException("Cannot prepare Steam 64-bit FEX thunks for " + appId);
+                // Architecture-specific thunk selection belongs to FEX_THUNKCONFIG, not the app override.
+                config.remove("ThunksDB");
+                if (!FileUtils.writeString(new File(dir, appId + ".fex.json"), config.toString()))
+                    throw new IllegalStateException("Cannot prepare Steam FEX configuration for " + appId);
+            } catch (org.json.JSONException e) {
+                throw new IllegalStateException("Invalid Steam FEX configuration for " + appId, e);
+            }
+            text.append("export FEX_APP_CONFIG='/root/.skynet/steam-emulator/").append(appId).append(".fex.json'\n");
+            text.append("export SKY_FEX_THUNKCONFIG64='/root/.skynet/steam-emulator/").append(appId).append(".thunks64.json'\n");
+        }
+        File thunks = new File(home, ".config/fex-emu/ThunkConfig32.json");
+        if (thunks.isFile()) {
+            if (!FileUtils.copy(thunks, new File(dir, appId + ".thunks.json")))
+                throw new IllegalStateException("Cannot prepare Steam FEX thunks for " + appId);
+            text.append("export SKY_FEX_THUNKCONFIG32='/root/.skynet/steam-emulator/").append(appId).append(".thunks.json'\n");
+        }
+        if (!FileUtils.writeString(new File(dir, appId + ".env"), text.toString()))
+            throw new IllegalStateException("Cannot prepare Steam emulator for " + appId);
+    }
+
+    private static void prepareSteamGames(Context context, File rt, File imageFsRoot, Container container) {
+        LinuxSteamGames.sync(context, container);
+        File[] shortcuts = container.getDesktopDir().listFiles((dir, name) -> name.endsWith(".desktop"));
+        if (shortcuts == null) return;
+        for (File file : shortcuts) {
+            com.winlator.cmod.container.Shortcut shortcut = new com.winlator.cmod.container.Shortcut(container, file);
+            if (!isSteamGame(shortcut.path)) continue;
+            String appId = steamAppId(shortcut.path);
+            if (!appId.matches("\\d+")) continue;
+            GameProfiles.Effective profile = GameProfiles.resolve(context, container, shortcut);
+            LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
+                    shortcut.getExtra(LinuxLaunchOptions.EXTRA_ENV_VARS));
+            LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
+            writeSteamLaunchOptions(container, appId, options);
+            Container gameContainer = LinuxEmulatorSetup.of(container, shortcut);
+            if (!gameContainer.getLinuxRuntime().equals(container.getLinuxRuntime())) {
+                writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId},
+                        java.util.Collections.singletonList("SKY_GAME_SETUP_ERROR=This game needs a different Linux runtime; start it from its SkyNetEmu shortcut."));
+                continue;
+            }
+            LinuxRootfs.Installed sessionRootfs = LinuxRootfs.resolve(context, container);
+            LinuxRootfs.Installed gameRootfs = LinuxRootfs.resolve(context, gameContainer);
+            if (gameRootfs != null && (sessionRootfs == null || !gameRootfs.dir.equals(sessionRootfs.dir))) {
+                writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId},
+                        java.util.Collections.singletonList("SKY_GAME_SETUP_ERROR=This game needs a different FEX root filesystem; start it from its SkyNetEmu shortcut."));
+                continue;
+            }
+            List<String> env = guestEnv(context, rt, imageFsRoot, gameContainer, null, null, false);
+            writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId}, env);
+        }
     }
 
     /** The program a session starts, as the guest sees its path (the argument after "bannerlator-run"); null if none. */
@@ -729,6 +799,16 @@ public final class LinuxSession {
         // The Steam client's web helper draws on the GPU through this taskset stand-in unless the container turns that off.
         File steamTaskset = stageAsset(context, "steam-taskset.sh");
         if (steamTaskset != null) env.put("SKY_STEAM_TASKSET", steamTaskset.getPath());
+        if (!directProgram) {
+            File installer = stageAsset(context, "steam-install.sh");
+            File logExport = stageAsset(context, "steam-log-export.sh");
+            File compatInstaller = stageAsset(context, "steam-compat-install.sh");
+            if (installer == null || logExport == null || compatInstaller == null)
+                throw new IllegalStateException("Cannot prepare Steam startup scripts");
+            env.put("SKY_STEAM_INSTALLER", installer.getPath());
+            env.put("SKY_STEAM_LOG_EXPORT", logExport.getPath());
+            env.put("SKY_STEAM_COMPAT_INSTALLER", compatInstaller.getPath());
+        }
         env.put("SKY_STEAM_GPU", "0".equals(container.getExtra(EXTRA_STEAM_GPU)) ? "0" : "1");
 
         // Turnip: an imported Linux driver, or the one the runtime ships.
@@ -749,6 +829,9 @@ public final class LinuxSession {
         // binds over /dev/input. SDL lists a pad by reading that directory, so the bind is what makes it visible;
         // on its own the shim only answers a path a program already knows.
         env.put("SKY_INPUT_DIR", inputDir(context).getPath());
+        // SDL before 2.0.14 (Feral's ports ship 2.0.10) has no SDL_JOYSTICK_DISABLE_UDEV and finds pads only through
+        // udev, which reports none here; it does read this list first. A slot without a file yet is skipped.
+        env.put("SDL_JOYSTICK_DEVICE", "/dev/input/event0:/dev/input/event1:/dev/input/event2:/dev/input/event3");
         // Turnip's tiled rendering (GMEM) switched off: sysmem renders straight into memory. A game started by Steam gets it from
         // ~/.skynet/steam-emulator/<appId>.env like the emulator's variables.
         if ("1".equals(container.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM))) {

@@ -4,7 +4,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/DrawerLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:defaultFocusHighlightEnabled="false">
 
     <FrameLayout
         android:id="@+id/FLXServerDisplay"
