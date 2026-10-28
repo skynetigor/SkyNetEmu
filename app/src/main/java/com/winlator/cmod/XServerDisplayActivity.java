@@ -1811,8 +1811,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 + " rendererSelected=" + selected;
         Log.e("RendererDriver", diagnostics + " error=" + message);
         boolean frameFailure = message.startsWith("The renderer ");
+        boolean stalled = message.startsWith("The renderer stopped");
         com.winlator.cmod.telemetry.Telemetry.event("skynet.error", "launch", "failure",
-                "error.type", frameFailure ? "renderer_frame_import_failed" : "renderer_initialization_failed", "error.message", message,
+                "error.type", stalled ? "renderer_stalled" : frameFailure ? "renderer_frame_import_failed" : "renderer_initialization_failed", "error.message", message,
                 "skynet.renderer.diagnostics", diagnostics);
         preloaderDialog.closeOnUiThread();
         new android.app.AlertDialog.Builder(this).setTitle(frameFailure ? "Rendering failed" : "Renderer driver unavailable")

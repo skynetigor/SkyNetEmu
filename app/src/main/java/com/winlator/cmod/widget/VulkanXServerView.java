@@ -43,6 +43,32 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private long nativeHandle = 0;
     private long rendererSampleAt;
     private boolean importFailureReported;
+    private boolean rendererFailureReported;
+    private final Runnable rendererHealthCheck = new Runnable() {
+        @Override public void run() {
+            if (!initComplete) return;
+            queueEvent(() -> {
+                synchronized (lock) {
+                    if (!initComplete || nativeHandle == 0) return;
+                    if (!rendererFailureReported && nativeRendererFailed(nativeHandle)) {
+                        rendererFailureReported = true;
+                        String details = nativeRendererDiagnostics(nativeHandle);
+                        Log.e("VulkanXServerView", "Renderer stopped: " + details);
+                        com.winlator.cmod.telemetry.Telemetry.event("skynet.error", "render", "failure",
+                                "error.type", "renderer_stalled",
+                                "error.message", "Renderer stopped after a persistent stall or Vulkan error",
+                                "skynet.renderer.diagnostics", details);
+                        if (initializationError != null) post(() -> initializationError.accept(
+                                "The renderer stopped after a persistent GPU stall or Vulkan error. "
+                                + "No in-flight buffers were discarded. Close this session before trying again."));
+                        return;
+                    }
+                }
+                removeCallbacks(this);
+                postDelayed(this, 1000);
+            });
+        }
+    };
     private final Object lock = new Object();
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private final Set<Integer> compositeRedirectedWindows = ConcurrentHashMap.newKeySet();
@@ -142,6 +168,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, long key, int fd,
         int w, int h, int stride, int offset);
     private native String nativeRendererDiagnostics(long handle);
+    private native boolean nativeRendererFailed(long handle);
     private native String nativePipelineDiagnostics(long handle);
     private native void nativeSetPipelineTarget(long handle, long id);
     public String pipelineDiagnostics() {
@@ -230,6 +257,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         updateTransform();
                         sendCursorToNative(lastCursor);
                         initComplete = true;
+                        post(rendererHealthCheck);
                         return;
                     }
                 }
@@ -270,6 +298,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 }
             }
             initComplete = true;
+            post(rendererHealthCheck);
         });
     }
 
@@ -295,6 +324,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void onSurfaceDestroyed() {
+        removeCallbacks(rendererHealthCheck);
         initComplete = false;
         if (initExecutor != null) {
             initExecutor.shutdownNow();
@@ -313,6 +343,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     }
 
     public void forceCleanup() {
+        removeCallbacks(rendererHealthCheck);
         initComplete = false;
         if (initExecutor != null) {
             initExecutor.shutdownNow();

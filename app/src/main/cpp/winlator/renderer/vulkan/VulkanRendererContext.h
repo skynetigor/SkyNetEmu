@@ -306,6 +306,7 @@ public:
     float sharpness = 0.5f;
     bool swapRB = false;
     float maxAnisotropy           = 1.0f;
+    uint32_t maxImageDimension2D = 0;
     VkPhysicalDeviceMemoryProperties memProperties{};
     VkPresentModeKHR requestedPresentMode = VK_PRESENT_MODE_FIFO_KHR;
     uint32_t graphicsQueueFamilyIndex = 0;
@@ -392,6 +393,13 @@ public:
     std::atomic<bool> isRunning{false};
     std::atomic<bool> fbResized{false};
     std::atomic<bool> swapchainRetryPending{false};
+    std::atomic<bool> rendererFailed{false};
+    std::atomic<unsigned> rendererStalls{0};
+    std::atomic<int> rendererWaitResult{VK_SUCCESS};
+    std::atomic<const char*> rendererWaitStage{"none"};
+    unsigned acquireTimeouts = 0;
+    VkResult waitFrameFence(VkFence fence, const char* stage);
+    void rendererError(VkResult result, const char* stage);
     std::mutex        renderMutex;
     std::mutex        dirtyMutex;
     std::condition_variable dirtyCV;
@@ -525,8 +533,6 @@ public:
     uint32_t        findMemType(uint32_t filter, VkMemoryPropertyFlags props);
     void            createBuffer(VkDeviceSize sz, VkBufferUsageFlags usage,
                                  VkMemoryPropertyFlags props, VkBuffer& buf, VkDeviceMemory& mem);
-    VkCommandBuffer beginOneTime();
-    void            endOneTime(VkCommandBuffer cmd);
     void            transition(VkCommandBuffer cmd, VkImage img,
                                VkImageLayout oldL, VkImageLayout newL,
                                VkAccessFlags srcA, VkAccessFlags dstA,

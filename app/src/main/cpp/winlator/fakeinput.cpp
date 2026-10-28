@@ -496,7 +496,19 @@ EXPORT ssize_t read(int fd, void *buf, size_t count) {
         ssize_t bytes_read = 0;
         int flags = fcntl(fd, F_GETFL);
         bool isNonBlock = flags & O_NONBLOCK;
-        bytes_read = syscall(SYS_read, fd, buf, count);
+        if (count == 0) return 0;
+        if (count < sizeof(struct input_event)) { errno = EINVAL; return -1; }
+        auto readEvents = [&]() -> ssize_t {
+            struct stat st;
+            off_t offset = lseek(fd, 0, SEEK_CUR);
+            if (offset < 0 || syscall(SYS_fstat, fd, &st) < 0) return -1;
+            if (st.st_nlink == 0) { errno = ENODEV; return -1; }
+            size_t available = st.st_size > offset ? (size_t)(st.st_size - offset) : 0;
+            size_t bytes = std::min(count, available);
+            bytes -= bytes % sizeof(struct input_event);
+            return bytes ? syscall(SYS_read, fd, buf, bytes) : 0;
+        };
+        bytes_read = readEvents();
         while(bytes_read == 0) {
             struct stat statbuf;
             if (!my_fstat) *(void **)&my_fstat = dlsym(RTLD_NEXT, "fstat");
@@ -505,7 +517,8 @@ EXPORT ssize_t read(int fd, void *buf, size_t count) {
                 return -1;
             }
             if (isNonBlock) {
-                break;
+                errno = EAGAIN;
+                return -1;
             }
             setup_signal_handler();
             if (stop_flag) {
@@ -513,17 +526,9 @@ EXPORT ssize_t read(int fd, void *buf, size_t count) {
             	errno = EINTR;
             	return bytes_read;
             }
-            struct pollfd pfd;
-            pfd.fd = fd;
-            pfd.events = POLLIN;
-            if (poll(&pfd, 1, 1000) > 0) {
-                // If it's a disconnected pipe, poll returns immediately with POLLHUP.
-                // We fallback to usleep to prevent a 100% CPU busy-spin loop.
-                if (pfd.revents & POLLHUP) {
-                    usleep(1000); 
-                }
-            }
-            bytes_read = syscall(SYS_read, fd, buf, count);
+            // A regular file is always poll-readable, even at EOF or mid-event.
+            usleep(1000);
+            bytes_read = readEvents();
         }
         
     	return bytes_read;

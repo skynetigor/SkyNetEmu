@@ -10,6 +10,7 @@ public class GPUImage {
     public int format;
     private ByteBuffer virtualData;
     private short stride;
+    private int width, height;
     private static boolean supported = false;
 
     static {
@@ -38,6 +39,22 @@ public class GPUImage {
 
     public short getStride() {
         return stride;
+    }
+
+    public int getWidth() { return width; }
+    public int getHeight() { return height; }
+
+    @Keep
+    private void setDimensions(int width, int height) {
+        this.width = width;
+        this.height = height;
+    }
+
+    public void releaseImportedBuffer() {
+        if (hardwareBufferPtr != 0) {
+            releaseHardwareBuffer(hardwareBufferPtr);
+            hardwareBufferPtr = 0;
+        }
     }
 
     @Keep
@@ -69,6 +86,8 @@ public class GPUImage {
     private native long createHardwareBuffer(short width, short height);
 
     private native void destroyHardwareBuffer(long hardwareBufferPtr);
+
+    private native void releaseHardwareBuffer(long hardwareBufferPtr);
 
     private native ByteBuffer lockHardwareBuffer(long hardwareBufferPtr);
 }

@@ -11,6 +11,9 @@
 #include <inttypes.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include "../../buffer_geometry.h"
+#include "fence_wait.h"
 #include "window_vert.h"
 #include "window_frag.h"
 #include "window_sgsr_frag.h"
@@ -377,6 +380,7 @@ void VulkanRendererContext::createLogicalDevice() {
     VkPhysicalDeviceProperties props{};
     vk_.GetPhysicalDeviceProperties(physicalDevice, &props);
     maxAnisotropy = props.limits.maxSamplerAnisotropy;
+    maxImageDimension2D = props.limits.maxImageDimension2D;
 }
 
 void VulkanRendererContext::createSwapchain() {
@@ -769,23 +773,6 @@ void VulkanRendererContext::createBuffer(VkDeviceSize sz, VkBufferUsageFlags usa
     vk_.BindBufferMemory(device,buf,mem,0);
 }
 
-VkCommandBuffer VulkanRendererContext::beginOneTime() {
-    VkCommandBufferAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY; ai.commandPool=cmdPool; ai.commandBufferCount=1;
-    VkCommandBuffer cb; vk_.AllocateCommandBuffers(device,&ai,&cb);
-    VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO; bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk_.BeginCommandBuffer(cb,&bi); return cb;
-}
-
-void VulkanRendererContext::endOneTime(VkCommandBuffer cb) {
-    vk_.EndCommandBuffer(cb);
-    VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO; si.commandBufferCount=1; si.pCommandBuffers=&cb;
-    VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; VkFence fence;
-    vk_.CreateFence(device,&fi,nullptr,&fence);
-    vk_.QueueSubmit(graphicsQueue,1,&si,fence); vk_.WaitForFences(device,1,&fence,VK_TRUE,UINT64_MAX);
-    vk_.DestroyFence(device,fence,nullptr); vk_.FreeCommandBuffers(device,cmdPool,1,&cb);
-}
-
 void VulkanRendererContext::transition(VkCommandBuffer cb, VkImage img,
     VkImageLayout ol, VkImageLayout nl, VkAccessFlags sa, VkAccessFlags da,
     VkPipelineStageFlags ss, VkPipelineStageFlags dss)
@@ -823,6 +810,15 @@ bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
 }
 
 bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) {
+    AHardwareBuffer_Desc desc{};
+    if (!ahb) return false;
+    AHardwareBuffer_describe(ahb,&desc);
+    if (!valid_ahb_geometry(desc.width,desc.height,desc.stride,desc.layers,desc.format)
+        || desc.width > maxImageDimension2D || desc.height > maxImageDimension2D) {
+        RLOG_E("importAHBToWinTex: invalid geometry %ux%u stride=%u layers=%u format=%u",
+            desc.width,desc.height,desc.stride,desc.layers,desc.format);
+        return false;
+    }
     if (!vk_.GetAndroidHardwareBufferPropertiesANDROID)
         return false;
 
@@ -833,9 +829,6 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
     props.pNext=&fmtP;
     if (vk_.GetAndroidHardwareBufferPropertiesANDROID(device,ahb,&props)!=VK_SUCCESS)
         return false;
-
-    AHardwareBuffer_Desc desc{};
-    AHardwareBuffer_describe(ahb,&desc);
 
     VkFormat imageFormat = fmtP.format;
     if (imageFormat == VK_FORMAT_UNDEFINED) {
@@ -884,7 +877,10 @@ bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) 
         wt.img=VK_NULL_HANDLE;
         return false;
     }
-    vk_.BindImageMemory(device,wt.img,wt.mem,0);
+    if (vk_.BindImageMemory(device,wt.img,wt.mem,0)!=VK_SUCCESS) {
+        destroyWinTex(wt);
+        return false;
+    }
 
     VkImageViewCreateInfo vi{};
     vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1355,11 +1351,11 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 void VulkanRendererContext::renderLoop() {
     while (isRunning) {
         { std::unique_lock<std::mutex> lk(dirtyMutex);
-           auto ready=[this]{ return !isRunning||(!surfaceDetached.load()&&
-                   (needsRender.load()||fbResized.load()||cursorMoved.load())); };
+           auto ready=[this]{ return !isRunning||(!rendererFailed.load()&&!surfaceDetached.load()&&
+                   (needsRender.load()||fbResized.load()||cursorMoved.load()||swapchainRetryPending.load())); };
            if (pipelineEnabled && displayTimingEnabled) dirtyCV.wait_for(lk,std::chrono::seconds(1),ready);
            else dirtyCV.wait(lk,ready); }
-        if (pipelineEnabled && displayTimingEnabled && !surfaceDetached.load()) pollDisplayTiming();
+        if (pipelineEnabled && displayTimingEnabled && !rendererFailed.load() && !surfaceDetached.load()) pollDisplayTiming();
         if (!isRunning) break;
         try { renderFrame(); }
         catch (const std::exception& e) {
@@ -1399,18 +1395,47 @@ void VulkanRendererContext::destroyTexNow(RetiredTex& retired) {
     releaseAhbKey(retired.ahb);
 }
 
+void VulkanRendererContext::rendererError(VkResult result, const char* stage) {
+    rendererWaitStage.store(stage);
+    rendererWaitResult.store(result);
+    if (result == VK_TIMEOUT) {
+        unsigned stalls = ++rendererStalls;
+        if (stalls == 1 || stalls == 3)
+            RLOG_E("renderer stall: stage=%s result=%d attempts=%u", stage, result, stalls);
+        if (stalls >= 3) rendererFailed.store(true);
+    } else if (result != VK_SUCCESS && result != VK_NOT_READY) {
+        if (!rendererFailed.exchange(true))
+            RLOG_E("renderer failure: stage=%s result=%d", stage, result);
+    }
+}
+
+VkResult VulkanRendererContext::waitFrameFence(VkFence fence, const char* stage) {
+    VkResult result = wait_renderer_fence(
+        [&](uint64_t timeout) { return vk_.WaitForFences(device,1,&fence,VK_TRUE,timeout); },
+        [&] { return !isRunning.load() || surfaceDetached.load(); });
+    if (result != VK_SUCCESS) rendererError(result,stage);
+    return result;
+}
+
 void VulkanRendererContext::renderFrame() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
 
     needsRender.store(false,std::memory_order_relaxed);
     cursorMoved.store(false,std::memory_order_relaxed);
 
-    if (surfaceDetached.load(std::memory_order_acquire)) return;
+    if (rendererFailed.load() || surfaceDetached.load(std::memory_order_acquire)) return;
     if (surfaceWidth==0||surfaceHeight==0) { swapchainRetryPending.store(true); return; }
 
     if (fbResized.load()) {
-        for (auto& f:inFlightFences) vk_.WaitForFences(device,1,&f,VK_TRUE,UINT64_MAX);
-        vk_.DeviceWaitIdle(device);
+        for (auto& f:inFlightFences) {
+            if (waitFrameFence(f,"resize") != VK_SUCCESS) {
+                swapchainRetryPending.store(true);
+                return;
+            }
+        }
+        // Render fences do not prove presentation completion. Vulkan has no timed queue-idle call.
+        VkResult idle = vk_.DeviceWaitIdle(device);
+        if (idle != VK_SUCCESS) { rendererError(idle,"resize_idle"); return; }
         cleanupSwapchain();
         // A successful acquire followed by a failed submit leaves its semaphore
         // signaled. Retire acquire semaphores only while recreating the swapchain.
@@ -1450,10 +1475,12 @@ void VulkanRendererContext::renderFrame() {
     VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
     if (fenceState==VK_NOT_READY) {
         ScopedRendererTiming timing(fenceTiming, performanceDiagnostics.load(std::memory_order_relaxed));
-        if (vk_.WaitForFences(device,1,&inFlightFences[currentFrame],VK_TRUE,UINT64_MAX)!=VK_SUCCESS)
-            throw std::runtime_error("frame fence wait");
+        if (waitFrameFence(inFlightFences[currentFrame],"frame")!=VK_SUCCESS) {
+            swapchainRetryPending.store(true);
+            return;
+        }
         currentFenceWaited = true;
-    } else if (fenceState!=VK_SUCCESS) throw std::runtime_error("frame fence status");
+    } else if (fenceState!=VK_SUCCESS) { rendererError(fenceState,"frame_status"); return; }
     completedSerial=std::max(completedSerial,slotSerial[currentFrame]);
     if (retirePending.load(std::memory_order_acquire)) {
         std::lock_guard<std::mutex> lk(renderMutex);
@@ -1472,13 +1499,25 @@ void VulkanRendererContext::renderFrame() {
     VkResult res;
     {
         ScopedRendererTiming timing(acquireTiming, performanceDiagnostics.load(std::memory_order_relaxed));
-        res=vk_.AcquireNextImageKHR(device,swapchain,UINT64_MAX,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
+        res=vk_.AcquireNextImageKHR(device,swapchain,100000000ULL,imgAvailSems[currentFrame],VK_NULL_HANDLE,&imgIdx);
     }
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR){fbResized.store(true);return;}
-    if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) return;
+    if (res==VK_TIMEOUT || res==VK_NOT_READY) {
+        if (++acquireTimeouts >= 20) {
+            acquireTimeouts=0;
+            rendererError(VK_TIMEOUT,"acquire");
+        }
+        needsRender.store(true);
+        swapchainRetryPending.store(true);
+        return;
+    }
+    if (res!=VK_SUCCESS&&res!=VK_SUBOPTIMAL_KHR) { rendererError(res,"acquire"); return; }
+    acquireTimeouts=0;
     if (imgIdx >= swapchainFBs.size() || imgIdx >= swapchainImages.size()) {
         RLOG_E("renderFrame: invalid acquired image index=%u (fb=%zu images=%zu)",
             imgIdx, swapchainFBs.size(), swapchainImages.size());
+        fbResized.store(true);
+        swapchainRetryPending.store(true);
         return;
     }
 
@@ -1487,7 +1526,11 @@ void VulkanRendererContext::renderFrame() {
         (!currentFenceWaited || imgInFlight[imgIdx] != inFlightFences[currentFrame])) {
         if (!vk_.GetFenceStatus || vk_.GetFenceStatus(device, imgInFlight[imgIdx]) == VK_NOT_READY) {
             ScopedRendererTiming timing(fenceTiming, performanceDiagnostics.load(std::memory_order_relaxed));
-            vk_.WaitForFences(device,1,&imgInFlight[imgIdx],VK_TRUE,UINT64_MAX);
+            if (waitFrameFence(imgInFlight[imgIdx],"image")!=VK_SUCCESS) {
+                fbResized.store(true);
+                swapchainRetryPending.store(true);
+                return;
+            }
         }
     }
     imgInFlight[imgIdx]=inFlightFences[currentFrame];
@@ -1505,6 +1548,14 @@ void VulkanRendererContext::renderFrame() {
 
     {
         std::lock_guard<std::mutex> lk(renderMutex);
+
+        if (isCursorImageDirty.load() && !cursorPixels.empty() && cursorImg!=VK_NULL_HANDLE &&
+            (cursorTexW!=cursorPendingW || cursorTexH!=cursorPendingH)) {
+            // Wait before consuming dirty uploads or pinning a frame that may not be submitted.
+            for (auto& fence:inFlightFences)
+                if (waitFrameFence(fence,"cursor_resize")!=VK_SUCCESS)
+                    throw std::runtime_error("cursor resize fence wait");
+        }
 
         // Pin the draw list before releasing renderMutex: removeWindow may run
         // while commands are recorded but before their submit reaches the GPU.
@@ -1551,13 +1602,6 @@ void VulkanRendererContext::renderFrame() {
 
         if (isCursorImageDirty.load() && !cursorPixels.empty()) {
             if (cursorImg==VK_NULL_HANDLE || cursorTexW!=cursorPendingW || cursorTexH!=cursorPendingH) {
-                // The shared cursor descriptor and old image view can still be
-                // referenced by either frame slot. Resizes are rare; wait only
-                // here, never on pointer motion or same-size cursor updates.
-                if (cursorImg!=VK_NULL_HANDLE)
-                    for (auto& fence:inFlightFences)
-                        if (vk_.WaitForFences(device,1,&fence,VK_TRUE,UINT64_MAX)!=VK_SUCCESS)
-                            throw std::runtime_error("cursor resize fence wait");
                 ensureCursorTex(cursorPendingW,cursorPendingH);
             }
             VkDeviceSize csz=(VkDeviceSize)cursorTexW*cursorTexH*4;
@@ -1581,7 +1625,8 @@ void VulkanRendererContext::renderFrame() {
     si.commandBufferCount=1; si.pCommandBuffers=&cmdBufs[currentFrame];
     si.signalSemaphoreCount=1; si.pSignalSemaphores=sSem;
 
-    vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
+    VkResult resetResult=vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
+    if (resetResult!=VK_SUCCESS) { rendererError(resetResult,"reset_fence"); return; }
     rendererDraws.store((uint32_t)frameDraws.size());
     VkResult submitResult;
     {
@@ -1590,13 +1635,16 @@ void VulkanRendererContext::renderFrame() {
     }
     rendererSubmitResult.store(submitResult);
     if (submitResult!=VK_SUCCESS) {
+        rendererError(submitResult,"submit");
         { std::lock_guard<std::mutex> lk(renderMutex);
           pendingFrameSerial=0;
           if (hasCurUpload) isCursorImageDirty.store(true);
         }
         vk_.DestroyFence(device,inFlightFences[currentFrame],nullptr);
         VkFenceCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fi.flags=VK_FENCE_CREATE_SIGNALED_BIT;
-        vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
+        inFlightFences[currentFrame]=VK_NULL_HANDLE;
+        VkResult created=vk_.CreateFence(device,&fi,nullptr,&inFlightFences[currentFrame]);
+        if (created!=VK_SUCCESS) rendererError(created,"submit_fence_recreate");
         fbResized.store(true);
         swapchainRetryPending.store(true);
         return;
@@ -1631,6 +1679,10 @@ void VulkanRendererContext::renderFrame() {
     }
     rendererPresentResult.store(res);
     if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) {
+        rendererStalls.store(0);
+        rendererWaitStage.store("none");
+        rendererWaitResult.store(VK_SUCCESS);
+        swapchainRetryPending.store(false);
         ++rendererPresents;
         if (pipelineEnabled) {
             std::lock_guard<std::mutex> lk(renderMutex);
@@ -1639,6 +1691,7 @@ void VulkanRendererContext::renderFrame() {
     }
 
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) fbResized.store(true);
+    else if (res!=VK_SUCCESS) rendererError(res,"present");
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
@@ -1796,10 +1849,14 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int64_t key, i
     AHardwareBuffer* stand = reinterpret_cast<AHardwareBuffer*>(static_cast<uintptr_t>(0x7d000000u) + static_cast<uintptr_t>(key));
     std::lock_guard<std::mutex> lk(renderMutex);
     ++dmaUpdates;
-    if (fd < 0 || w <= 0 || h <= 0 || stride <= 0 || offset < 0) {
+    struct stat stat{};
+    bool validFd = fd >= 0 && fstat(fd, &stat) == 0;
+    if (!validFd || !valid_dma_geometry(w,h,stride,offset,maxImageDimension2D,
+            stat.st_size > 0 ? (uint64_t)stat.st_size : 0)) {
         dmaDiagnostics = {};
         dmaDiagnostics.w=w; dmaDiagnostics.h=h; dmaDiagnostics.stride=stride; dmaDiagnostics.offset=offset;
         dmaDiagnostics.stage="invalid_buffer"; dmaDiagnostics.result=VK_ERROR_UNKNOWN;
+        RLOG_E("updateWindowContentDmaBuf: invalid geometry %dx%d stride=%d offset=%d", w,h,stride,offset);
         ++dmaFailures; return false;
     }
 
@@ -2147,7 +2204,8 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         "row_pitch=%llu image_bytes=%llu buffer_bytes=%lld image_types=0x%x fd_types=0x%x "
         "updates=%llu accepted=%llu failed=%llu submits=%llu presents=%llu draws=%u submit_result=%d present_result=%d "
         "custom_driver=%d driver_id=%u driver_name=%.64s driver_info=%.128s output=%ux%u present_mode=%d "
-        "dma_live=%zu dma_released_displayed=%zu retired_textures=%zu",
+        "dma_live=%zu dma_released_displayed=%zu retired_textures=%zu "
+        "renderer_failed=%d wait_stage=%s wait_result=%d stalls=%u",
         dmaDiagnostics.stage,(int)dmaDiagnostics.result,props.deviceName,props.vendorID,props.driverVersion,
         VK_VERSION_MAJOR(props.apiVersion),VK_VERSION_MINOR(props.apiVersion),VK_VERSION_PATCH(props.apiVersion),
         hasExternalMemoryFd,hasDmaBufExtension,vk_.GetMemoryFdPropertiesKHR!=nullptr,(int)VK_FORMAT_B8G8R8A8_UNORM,
@@ -2159,7 +2217,8 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         rendererSubmitResult.load(),rendererPresentResult.load(),adrenotoolsHandle!=nullptr,
         (unsigned)driverProps.driverID,driverProps.driverName,driverProps.driverInfo,
         outputWidth.load(),outputHeight.load(),actualPresentMode.load(),
-        dmaBufKeys.size(),releasedDmaBufs.size(),deleteQueue.size());
+        dmaBufKeys.size(),releasedDmaBufs.size(),deleteQueue.size(),
+        rendererFailed.load(),rendererWaitStage.load(),rendererWaitResult.load(),rendererStalls.load());
     std::string snapshot(text);
     auto appendTiming = [&](const char* name, const RendererTiming& timing) {
         char part[160];

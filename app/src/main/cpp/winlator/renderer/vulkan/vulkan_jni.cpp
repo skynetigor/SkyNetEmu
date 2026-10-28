@@ -191,6 +191,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererDiagnostics(
         // Diagnostics must never unwind through JNI into a rendering callback.
         return nullptr;
     }
+
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererFailed(
+    JNIEnv*, jobject, jlong handle) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return r && r->rendererFailed.load();
 }
 
 extern "C" JNIEXPORT void JNICALL

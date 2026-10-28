@@ -12,7 +12,7 @@ import java.nio.channels.FileChannel;
 public class FakeInputWriter {
     private static final String TAG = "FakeInputWriter";
     private static final int EVENT_SIZE = 24;
-    private static final int MAX_EVENTS_PER_UPDATE = 20; // Buttons + axes + sync
+    private static final int MAX_EVENTS_PER_UPDATE = 10 * 2 + 8 + 1;
     private static final int BUFFER_SIZE = EVENT_SIZE * MAX_EVENTS_PER_UPDATE;
 
     // Event types
@@ -65,6 +65,8 @@ public class FakeInputWriter {
     private int prevTriggerL, prevTriggerR;
     private int prevHatX, prevHatY;
     private boolean hasChanges = false;
+    private boolean pendingWrite = false;
+    private boolean fullResend = false;
 
     public FakeInputWriter(String fakeInputPath, int slot) {
         this.eventFile = new File(fakeInputPath, "event" + slot);
@@ -91,7 +93,8 @@ public class FakeInputWriter {
             Log.i(TAG, "Opened fake input: " + eventFile.getAbsolutePath());
             return true;
         } catch (IOException e) {
-            Log.e(TAG, "Failed to open: " + e.getMessage());
+            Log.e(TAG, "Failed to open fake input", e);
+            close();
             return false;
         }
     }
@@ -101,6 +104,7 @@ public class FakeInputWriter {
             try {
                 channel.close();
             } catch (IOException e) {
+                Log.e(TAG, "Failed to close fake input channel", e);
             }
             channel = null;
         }
@@ -108,6 +112,7 @@ public class FakeInputWriter {
             try {
                 raf.close();
             } catch (IOException e) {
+                Log.e(TAG, "Failed to close fake input file", e);
             }
             raf = null;
         }
@@ -120,65 +125,7 @@ public class FakeInputWriter {
      * reconnect.
      */
     public synchronized void reset() {
-        if (!isOpen && !open())
-            return;
-
-        buffer.clear();
-        hasChanges = false;
-
-        // Release all buttons
-        for (int i = 0; i < BUTTON_MAP.length; i++) {
-            if (prevButtonStates[i]) {
-                prevButtonStates[i] = false;
-                writeEvent(EV_MSC, MSC_SCAN, BUTTON_MAP[i]);
-                writeEvent(EV_KEY, BUTTON_MAP[i], 0);
-            }
-        }
-
-        // Zero all axes
-        if (prevThumbLX != 0) {
-            prevThumbLX = 0;
-            writeEvent(EV_ABS, ABS_X, 0);
-        }
-        if (prevThumbLY != 0) {
-            prevThumbLY = 0;
-            writeEvent(EV_ABS, ABS_Y, 0);
-        }
-        if (prevThumbRX != 0) {
-            prevThumbRX = 0;
-            writeEvent(EV_ABS, ABS_RX, 0);
-        }
-        if (prevThumbRY != 0) {
-            prevThumbRY = 0;
-            writeEvent(EV_ABS, ABS_RY, 0);
-        }
-        if (prevTriggerL != 0) {
-            prevTriggerL = 0;
-            writeEvent(EV_ABS, ABS_BRAKE, 0);
-        }
-        if (prevTriggerR != 0) {
-            prevTriggerR = 0;
-            writeEvent(EV_ABS, ABS_GAS, 0);
-        }
-        if (prevHatX != 0) {
-            prevHatX = 0;
-            writeEvent(EV_ABS, ABS_HAT0X, 0);
-        }
-        if (prevHatY != 0) {
-            prevHatY = 0;
-            writeEvent(EV_ABS, ABS_HAT0Y, 0);
-        }
-
-        if (hasChanges) {
-            writeEvent(EV_SYN, SYN_REPORT, 0);
-            buffer.flip();
-            try {
-                channel.write(buffer);
-            } catch (IOException e) {
-                Log.e(TAG, "Reset write error: " + e.getMessage());
-            }
-        }
-        Log.i(TAG, "Reset fake input to neutral state: " + eventFile.getAbsolutePath());
+        writeGamepadState(new GamepadState());
     }
 
 
@@ -187,12 +134,13 @@ public class FakeInputWriter {
      * Full destroy - reset, close, and delete the file.
      */
     public synchronized void destroy() {
-        destroyed = true;
+        if (destroyed) return;
         reset();
+        destroyed = true;
         close();
         if (eventFile != null && eventFile.exists()) {
             boolean deleted = eventFile.delete();
-            Log.i(TAG, "Deleted fake input: " + eventFile.getAbsolutePath() + " (" + deleted + ")");
+            if (!deleted) Log.e(TAG, "Failed to delete fake input: " + eventFile.getAbsolutePath());
         }
     }
 
@@ -209,7 +157,7 @@ public class FakeInputWriter {
     private void writeButton(int idx, boolean pressed) {
         if (idx < 0 || idx >= BUTTON_MAP.length)
             return;
-        if (prevButtonStates[idx] == pressed)
+        if (!fullResend && prevButtonStates[idx] == pressed)
             return;
         prevButtonStates[idx] = pressed;
         writeEvent(EV_MSC, MSC_SCAN, BUTTON_MAP[idx]);
@@ -223,9 +171,31 @@ public class FakeInputWriter {
         writeEvent(EV_ABS, code, value);
     }
 
-    public void writeGamepadState(GamepadState state) {
+    protected int writeBatch(ByteBuffer data) throws IOException {
+        return channel.write(data);
+    }
+
+    private boolean finishPendingWrite() {
+        if (!pendingWrite) return true;
+        try {
+            while (buffer.hasRemaining()) {
+                if (writeBatch(buffer) <= 0) throw new IOException("Fake input write made no progress");
+            }
+            pendingWrite = false;
+            return true;
+        } catch (IOException e) {
+            // Keep the unwritten suffix, including a partial event, before any new batch.
+            fullResend = true;
+            Log.e(TAG, "Fake input batch incomplete; retaining suffix for retry", e);
+            return false;
+        }
+    }
+
+    public synchronized void writeGamepadState(GamepadState state) {
+        if (destroyed) return;
         if (!isOpen && !open())
             return;
+        if (!finishPendingWrite()) return;
 
         buffer.clear();
         hasChanges = false;
@@ -241,19 +211,19 @@ public class FakeInputWriter {
         int rx = (int) (state.thumbRX * 32767);
         int ry = (int) (state.thumbRY * 32767);
 
-        if (lx != prevThumbLX) {
+        if (fullResend || lx != prevThumbLX) {
             prevThumbLX = lx;
             writeEvent(EV_ABS, ABS_X, lx);
         }
-        if (ly != prevThumbLY) {
+        if (fullResend || ly != prevThumbLY) {
             prevThumbLY = ly;
             writeEvent(EV_ABS, ABS_Y, ly);
         }
-        if (rx != prevThumbRX) {
+        if (fullResend || rx != prevThumbRX) {
             prevThumbRX = rx;
             writeEvent(EV_ABS, ABS_RX, rx);
         }
-        if (ry != prevThumbRY) {
+        if (fullResend || ry != prevThumbRY) {
             prevThumbRY = ry;
             writeEvent(EV_ABS, ABS_RY, ry);
         }
@@ -261,11 +231,11 @@ public class FakeInputWriter {
         // L2 and R2 (Triggers)
         int tl = (int) (state.triggerL * 255);
         int tr = (int) (state.triggerR * 255);
-        if (tl != prevTriggerL) {
+        if (fullResend || tl != prevTriggerL) {
             prevTriggerL = tl;
             writeEvent(EV_ABS, ABS_BRAKE, tl);
         }
-        if (tr != prevTriggerR) {
+        if (fullResend || tr != prevTriggerR) {
             prevTriggerR = tr;
             writeEvent(EV_ABS, ABS_GAS, tr);
         }
@@ -273,11 +243,11 @@ public class FakeInputWriter {
         // D-pad
         int hatX = state.dpad[3] ? -1 : (state.dpad[1] ? 1 : 0);
         int hatY = state.dpad[0] ? -1 : (state.dpad[2] ? 1 : 0);
-        if (hatX != prevHatX) {
+        if (fullResend || hatX != prevHatX) {
             prevHatX = hatX;
             writeEvent(EV_ABS, ABS_HAT0X, hatX);
         }
-        if (hatY != prevHatY) {
+        if (fullResend || hatY != prevHatY) {
             prevHatY = hatY;
             writeEvent(EV_ABS, ABS_HAT0Y, hatY);
         }
@@ -286,15 +256,12 @@ public class FakeInputWriter {
         if (hasChanges) {
             writeEvent(EV_SYN, SYN_REPORT, 0);
             buffer.flip();
-            try {
-                channel.write(buffer);
-            } catch (IOException e) {
-                Log.e(TAG, "Write error: " + e.getMessage());
-            }
+            pendingWrite = true;
+            if (finishPendingWrite()) fullResend = false;
         }
     }
 
-    public boolean isOpen() {
+    public synchronized boolean isOpen() {
         return isOpen;
     }
 }

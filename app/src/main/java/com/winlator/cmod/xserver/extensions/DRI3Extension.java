@@ -22,6 +22,7 @@ import com.winlator.cmod.xserver.XServer;
 import com.winlator.cmod.xserver.errors.BadDrawable;
 import com.winlator.cmod.xserver.errors.BadIdChoice;
 import com.winlator.cmod.xserver.errors.BadImplementation;
+import com.winlator.cmod.xserver.errors.BadMatch;
 import com.winlator.cmod.xserver.errors.BadWindow;
 import com.winlator.cmod.xserver.errors.XRequestError;
 
@@ -221,6 +222,13 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
     private void pixmapFromDmaBuf(XClient client, int pixmapId, Window window, short width, short height, int stride, int offset, byte depth, long modifier, int fd) throws XRequestError {
         boolean keepFd = false;
         try {
+            if (fd < 0 || width <= 0 || height <= 0 || stride < (long)width * 4
+                    || stride % 4 != 0 || offset < 0 || offset % 4 != 0
+                    || modifier != 0 || (depth != 24 && depth != 32)) {
+                Log.e("Dri3", "Rejected dma-buf geometry " + width + "x" + height
+                        + " stride=" + stride + " offset=" + offset + " modifier=" + modifier);
+                throw new BadMatch();
+            }
             String link = "?";
             try { link = Os.readlink("/proc/self/fd/" + fd); } catch (Exception ignored) {}
             Log.d("Dri3", "dma-buf pixmap " + pixmapId + " " + width + "x" + height + " stride " + stride + " offset " + offset
@@ -243,8 +251,17 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
     }
 
     private void pixmapFromHardwareBuffer(XClient client, int pixmapId, short width, short height, byte depth, int fd, Window window) throws IOException, XRequestError {
+        GPUImage gpuImage = null;
+        boolean installed = false;
         try {
-            GPUImage gpuImage = new GPUImage(fd);
+            gpuImage = new GPUImage(fd);
+            if (gpuImage.hardwareBufferPtr == 0 || width <= 0 || height <= 0
+                    || width != gpuImage.getWidth() || height != gpuImage.getHeight()
+                    || (depth != 24 && depth != 32)) {
+                Log.e("Dri3", "Rejected AHB pixmap " + width + "x" + height + ", actual "
+                        + gpuImage.getWidth() + "x" + gpuImage.getHeight());
+                throw new BadMatch();
+            }
             Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, width, height, depth);
             drawable.setGPUImage(gpuImage);
             drawable.setDirectScanout(true);
@@ -255,8 +272,10 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
 
             DirectContent directContent = new DirectContent(window, pixmap);
             directContents.put(pixmap.id, directContent);
+            installed = true;
         }
         finally {
+            if (!installed && gpuImage != null) gpuImage.releaseImportedBuffer();
             XConnectorEpoll.closeFd(fd);
         }
     }
