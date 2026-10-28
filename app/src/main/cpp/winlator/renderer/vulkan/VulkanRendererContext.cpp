@@ -1809,7 +1809,7 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
         WinTex tmp{};
         DmaImport result = importDmaBufToWinTex(tmp, fd, w, h, stride, offset);
         if (result == DmaImport::Ok) {
-            dmaBufKeys.insert(stand);
+            ++dmaBufKeys[stand];
             ahbImportCache[stand] = tmp;
             windowAhbs[id].push_back(stand);
             cit = ahbImportCache.find(stand);
@@ -1820,7 +1820,7 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
                 RLOG_E("updateWindowContentDmaBuf: buffer import failed for id=%" PRId64, id);
                 ++dmaFailures; return false;
             }
-            dmaBufKeys.insert(stand);
+            ++dmaBufKeys[stand];
             dmaBufSrcCache[stand] = src;
             windowDmaSrcs[id].push_back(stand);
             sit = dmaBufSrcCache.find(stand);
@@ -1897,7 +1897,7 @@ void VulkanRendererContext::removeWindow(int64_t id) {
             deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial, nullptr});
             retirePending.store(true, std::memory_order_release);
             dmaBufSrcCache.erase(sc);
-            dmaBufKeys.erase(key);
+            dropDmaBufKey(key);
         }
         windowDmaSrcs.erase(dit);
     }

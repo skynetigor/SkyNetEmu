@@ -144,7 +144,7 @@ public abstract class WindowRequests {
         if (wasMapped) {
             windowManager.mapWindow(window);
             // The server hands the focus to a window that opens (XServerDisplayActivity), so a new parent holds it now.
-            if (hadFocus || windowManager.getFocusedWindow() == parent) {
+            if ((hadFocus || windowManager.getFocusedWindow() == parent) && window.acceptsAutomaticFocus()) {
                 windowManager.setFocus(window, WindowManager.FocusRevertTo.POINTER_ROOT);
             }
         }
@@ -389,6 +389,8 @@ public abstract class WindowRequests {
                 target = client.xServer.windowManager.getWindow(windowId);
                 if (target == null) throw new BadWindow(windowId);
             }
+            // Steam notifications request focus explicitly, even while a game is foreground.
+            if (!client.xServer.desktopSession && target != null && target.isNonActivatingWindow()) return;
             client.xServer.windowManager.setFocus(target, focusRevertTo);
             return;
         }
