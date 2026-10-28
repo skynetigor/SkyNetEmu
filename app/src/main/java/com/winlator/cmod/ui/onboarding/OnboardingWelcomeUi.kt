@@ -45,8 +45,8 @@ internal fun ClassicWinlatorWelcome(
         ) {
             Spacer(Modifier.weight(.62f))
             Image(
-                painterResource(R.drawable.winlator_mark_exact),
-                "Winlator",
+                painterResource(R.drawable.skynetemu_mark),
+                "SkyNetEmu",
                 Modifier.size(146.dp)
             )
             Spacer(Modifier.height(22.dp))

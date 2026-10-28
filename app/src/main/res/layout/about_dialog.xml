@@ -47,7 +47,7 @@
             <ImageView
                 android:layout_width="70dp"
                 android:layout_height="70dp"
-                android:src="@mipmap/ic_launcher" />
+                android:src="@drawable/skynetemu_mark" />
         </LinearLayout>
 
         <View style="@style/HorizontalLine" />
