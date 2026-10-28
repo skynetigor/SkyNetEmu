@@ -829,6 +829,7 @@ public final class LinuxSession {
         // binds over /dev/input. SDL lists a pad by reading that directory, so the bind is what makes it visible;
         // on its own the shim only answers a path a program already knows.
         env.put("SKY_INPUT_DIR", inputDir(context).getPath());
+        env.put("SKY_INPUT_PROTOCOL", com.winlator.cmod.inputcontrols.NativeInputTransport.isEnabled() ? "2" : "1");
         // SDL before 2.0.14 (Feral's ports ship 2.0.10) has no SDL_JOYSTICK_DISABLE_UDEV and finds pads only through
         // udev, which reports none here; it does read this list first. A slot without a file yet is skipped.
         env.put("SDL_JOYSTICK_DEVICE", "/dev/input/event0:/dev/input/event1:/dev/input/event2:/dev/input/event3");

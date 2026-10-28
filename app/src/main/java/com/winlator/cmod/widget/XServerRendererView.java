@@ -13,10 +13,34 @@ public abstract class XServerRendererView extends SurfaceView {
 
     public final ViewTransformation viewTransformation = new ViewTransformation();
     protected final XServer xServer;
+    private final com.winlator.cmod.perf.DisplayFrameRate displayFrameRate;
 
     protected XServerRendererView(Context context, XServer xServer) {
         super(context);
         this.xServer = xServer;
+        android.content.Context owner = context;
+        while (owner instanceof android.content.ContextWrapper && !(owner instanceof android.app.Activity))
+            owner = ((android.content.ContextWrapper) owner).getBaseContext();
+        displayFrameRate = owner instanceof android.app.Activity
+                ? new com.winlator.cmod.perf.DisplayFrameRate(this, (android.app.Activity) owner) : null;
+    }
+
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (displayFrameRate != null) displayFrameRate.attach();
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        if (displayFrameRate != null) displayFrameRate.detach();
+        super.onDetachedFromWindow();
+    }
+
+    protected final void updateDisplayFps(int cap) {
+        if (displayFrameRate != null) displayFrameRate.setCap(cap);
+    }
+
+    public final void setDisplayRateActive(boolean active) {
+        if (displayFrameRate != null) displayFrameRate.setActive(active);
     }
 
     /** The X screen changed size (a program picked another resolution): its size is the new one in xServer.screenInfo. */

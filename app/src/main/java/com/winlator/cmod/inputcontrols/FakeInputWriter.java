@@ -54,6 +54,8 @@ public class FakeInputWriter {
     };
 
     private final File eventFile;
+    private final int slot;
+    private final boolean nativeTransport;
     private RandomAccessFile raf;
     private FileChannel channel;
     private final ByteBuffer buffer;
@@ -69,6 +71,8 @@ public class FakeInputWriter {
     private boolean fullResend = false;
 
     public FakeInputWriter(String fakeInputPath, int slot) {
+        this.slot = slot;
+        nativeTransport = NativeInputTransport.isEnabled();
         this.eventFile = new File(fakeInputPath, "event" + slot);
         this.buffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
         this.buffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -84,6 +88,12 @@ public class FakeInputWriter {
             eventFile.getParentFile().mkdirs();
             if (!eventFile.exists()) {
                 eventFile.createNewFile();
+            }
+            if (nativeTransport) {
+                NativeInputTransport.activate(slot);
+                fullResend = true;
+                isOpen = true;
+                return true;
             }
 
             raf = new RandomAccessFile(eventFile, "rw");
@@ -136,6 +146,7 @@ public class FakeInputWriter {
     public synchronized void destroy() {
         if (destroyed) return;
         reset();
+        if (nativeTransport) NativeInputTransport.disconnect(slot);
         destroyed = true;
         close();
         if (eventFile != null && eventFile.exists()) {
@@ -172,6 +183,7 @@ public class FakeInputWriter {
     }
 
     protected int writeBatch(ByteBuffer data) throws IOException {
+        if (nativeTransport) return NativeInputTransport.publish(slot, data);
         return channel.write(data);
     }
 

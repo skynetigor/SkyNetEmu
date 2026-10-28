@@ -29,6 +29,7 @@
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <linux/input.h>
+#include "input_transport.h"
 
 #define EXPORT __attribute__((visibility("default"))) extern "C"
 
@@ -175,6 +176,11 @@ EXPORT int open(const char *pathname, int flags, ...) {
 	else
 	    fd = my_open(pathname, flags);
 
+    if (isFromInput && getenv("FAKE_EVDEV_PROTOCOL") && !strcmp(getenv("FAKE_EVDEV_PROTOCOL"), "2")) {
+        if (fd < 0) return fd;
+        syscall(SYS_close, fd);
+        return sky_input_open(hook_dir, get_event_number(get_event(pathname)), flags, 0);
+    }
 	if (isFromInput) {
 		Logger::log("Adding controller, fd %d event %s\n", fd, get_event(pathname));
 		controller_map[fd] = strdup(get_event(pathname));
@@ -219,6 +225,12 @@ EXPORT int openat(int dirfd, const char *pathname, int flags, ...) {
     else
         fd = my_openat(dirfd, pathname, flags);
 
+    if (isFromInput && getenv("FAKE_EVDEV_PROTOCOL") && !strcmp(getenv("FAKE_EVDEV_PROTOCOL"), "2")) {
+        if (fd < 0) return fd;
+        syscall(SYS_close, fd);
+        return sky_input_open(hook_dir, get_event_number(get_event(pathname)), flags, 0);
+    }
+
     if (isFromInput) {
         Logger::log("Adding controller, fd %d event %s\n", fd, get_event(pathname));
         controller_map[fd] = strdup(get_event(pathname));
@@ -248,7 +260,10 @@ EXPORT int stat(const char *pathname, struct stat *statbuf) {
 	int ret = my_stat(pathname, statbuf);
     
     if (event && event_number >= 0) {
-		statbuf->st_rdev = makedev(1, event_number);
+        if (ret == 0 && getenv("FAKE_EVDEV_PROTOCOL") && !strcmp(getenv("FAKE_EVDEV_PROTOCOL"), "2")) {
+            statbuf->st_mode = S_IFCHR | 0660;
+            statbuf->st_rdev = makedev(13, 64 + event_number);
+        } else statbuf->st_rdev = makedev(1, event_number);
 	}
 
 	return ret;
@@ -260,6 +275,12 @@ EXPORT int fstat(int fd, struct stat *buf) {
 
     int ret = my_fstat(fd, buf);
 
+    int new_slot = sky_input_slot(fd);
+    if (ret == 0 && new_slot >= 0) {
+        buf->st_mode = S_IFCHR | 0660;
+        buf->st_rdev = makedev(13, 64 + new_slot);
+        return ret;
+    }
     auto controller = controller_map.find(fd);
     if (controller != controller_map.end()) {
     	buf->st_rdev = makedev(1, get_event_number(controller->second));
@@ -305,14 +326,18 @@ EXPORT int ioctl(int fd, int op, ...) {
 	argp = va_arg(va, void *);
 	va_end(va);
 
+    int transport = sky_input_ioctl(fd, (unsigned int)op, argp);
+    if (transport != -2) return transport;
+    int new_slot = sky_input_slot(fd);
 	auto controller = controller_map.find(fd);
-	if (controller == controller_map.end()) {
+	if (controller == controller_map.end() && new_slot < 0) {
 		return syscall(SYS_ioctl, fd, op, argp);
 	}
 
 	int type = (op >> 8 & 0xFF);
 	int number = (op >> 0 & 0xFF);
-	const char *event = controller->second;
+    std::string transport_event = "event" + std::to_string(new_slot);
+	const char *event = new_slot >= 0 ? transport_event.c_str() : controller->second;
 	int event_number = get_event_number(event);
 
     if (type == 0x45 && number == 0x1) {
@@ -476,6 +501,7 @@ EXPORT int ioctl(int fd, int op, ...) {
 }
 
 EXPORT int close(int fd) {
+    sky_input_close(fd);
 	if (!my_close)
 		*(void **)&my_close = dlsym(RTLD_NEXT, "close");
 
@@ -490,6 +516,7 @@ EXPORT int close(int fd) {
 }
 
 EXPORT ssize_t read(int fd, void *buf, size_t count) {
+    if (sky_input_owns(fd)) return sky_input_read(fd, buf, count);
     auto controller = controller_map.find(fd);
     
     if (controller != controller_map.end()) {
@@ -562,11 +589,12 @@ EXPORT ssize_t write(int fd, const void *buf, size_t count) {
   if (!my_write)
     *(void **)&my_write = dlsym(RTLD_NEXT, "write");
 
+  int new_slot = sky_input_slot(fd);
   auto controller = controller_map.find(fd);
-  if (controller != controller_map.end()) {
+  if (controller != controller_map.end() || new_slot >= 0) {
     if (count == sizeof(struct input_event)) {
       const struct input_event *ev = (const struct input_event *)buf;
-      uint16_t slot = (uint16_t)get_event_number(controller->second);
+      uint16_t slot = (uint16_t)(new_slot >= 0 ? new_slot : get_event_number(controller->second));
       check_ff_event(ev, slot);
       // EV_FF events are FF control commands sent by Wine to the fake device.
       // Writing them to the fake evdev file causes Wine to read them back as
@@ -580,9 +608,10 @@ EXPORT ssize_t write(int fd, const void *buf, size_t count) {
 }
 
 EXPORT ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
+  int new_slot = sky_input_slot(fd);
   auto controller = controller_map.find(fd);
-  if (controller != controller_map.end()) {
-    uint16_t slot = (uint16_t)get_event_number(controller->second);
+  if (controller != controller_map.end() || new_slot >= 0) {
+    uint16_t slot = (uint16_t)(new_slot >= 0 ? new_slot : get_event_number(controller->second));
     // Separate FF control events from regular input events.
     // FF events must not be written to the fake evdev file (see write() above).
     struct iovec filtered[iovcnt];

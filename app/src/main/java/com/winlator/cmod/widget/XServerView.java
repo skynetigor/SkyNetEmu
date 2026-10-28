@@ -260,6 +260,7 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
     @Override
     public void setFpsLimit(int fps) {
         fpsLimit = Math.max(0, Math.min(1000, fps));
+        updateDisplayFps(fpsLimit);
     }
 
     @Override

@@ -535,6 +535,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
 
         execEnvVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
+        execEnvVars.put("FAKE_EVDEV_PROTOCOL", com.winlator.cmod.inputcontrols.NativeInputTransport.isEnabled() ? "2" : "1");
         execEnvVars.put("FAKE_EVDEV_VIBRATION", "1");
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);

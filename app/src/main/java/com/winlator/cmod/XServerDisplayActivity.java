@@ -470,6 +470,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
             shortcut = new Shortcut(container, new File(shortcutPath));
             if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
         }
+        boolean legacyController = "legacy".equals(shortcut != null
+                ? shortcut.getExtra("controllerTransport") : container.getExtra("controllerTransport"))
+                || (linuxSession && com.winlator.cmod.linux.LinuxBionicSession.enabled(
+                        com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut)));
+        try {
+            com.winlator.cmod.inputcontrols.NativeInputTransport.start(devInputDir.getAbsolutePath(), legacyController);
+        } catch (java.io.IOException e) {
+            Log.e("SkyInput", "Controller transport could not start", e);
+            Toast.makeText(this, "Controller transport could not start: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         performanceSession = new com.winlator.cmod.perf.PerformanceSession(this, shortcut);
         if (linuxSession) {
             linuxRuntime = LinuxRuntime.resolve(this, com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut));
@@ -1063,6 +1075,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onResume() {
         super.onResume();
+        if (!exiting.get()) com.winlator.cmod.perf.GameModeSignal.report(this, true);
+        if (xServerView != null) xServerView.setDisplayRateActive(!exiting.get());
         if (performanceSession != null) performanceSession.resume();
 
         if (environment != null) {
@@ -1078,6 +1092,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public void onPause() {
+        if (xServerView != null) xServerView.setDisplayRateActive(false);
+        if (winHandler != null) winHandler.resetGamepadState();
+        com.winlator.cmod.perf.GameModeSignal.report(this, false);
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
         if (inputControlsView != null) inputControlsView.cancelNativeInput();
         if (touchpadView != null) touchpadView.cancelNativeTouches();
@@ -1186,6 +1203,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
+        if (xServerView != null) xServerView.setDisplayRateActive(false);
+        com.winlator.cmod.perf.GameModeSignal.report(this, false);
         com.winlator.cmod.linux.FramePipelineDiagnostics.stop();
         if (performanceSession != null) performanceSession.close();
         com.winlator.cmod.telemetry.LinuxDiagnostics.stop();
@@ -1250,6 +1269,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (winHandler != null && !exiting.get()) winHandler.stop();
+        com.winlator.cmod.perf.GameModeSignal.report(this, false);
         if (steamGameLaunchMonitor != null) steamGameLaunchMonitor.stop();
         if (!isChangingConfigurations() && environment != null)
             environment.stopEnvironmentComponents();

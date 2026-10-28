@@ -572,7 +572,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         });
     }
 
-    public void sendGamepadState() {
+    public synchronized void sendGamepadState() {
         final ControlsProfile profile = activity.getInputControlsView().getProfile();
         if (profile == null) {
             releaseSlot(OSC_DEVICE_ID);
@@ -594,7 +594,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
 
     }
 
-    public void sendGamepadState(ExternalController controller) {
+    public synchronized void sendGamepadState(ExternalController controller) {
         if (controller == null)
             return;
 
@@ -616,7 +616,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         }
     }
 
-    private int assignSlot(int deviceId) {
+    private synchronized int assignSlot(int deviceId) {
         Integer existing = deviceToSlot.get(deviceId);
         if (existing != null)
             return existing;
@@ -637,7 +637,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         return -1;
     }
 
-    private void releaseSlot(int deviceId) {
+    private synchronized void releaseSlot(int deviceId) {
         Integer slot = deviceToSlot.remove(deviceId);
         if (slot != null) {
             if (fallbackSlot == slot) fallbackSlot = -1;
@@ -665,7 +665,18 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         }
     }
 
-    public void closeFakeInputWriter() {
+    public synchronized void resetGamepadState() {
+        GamepadState neutral = new GamepadState();
+        if (activity.getInputControlsView() != null && activity.getInputControlsView().getProfile() != null)
+            activity.getInputControlsView().getProfile().getGamepadState().copy(neutral);
+        for (ExternalController controller : controllers.values()) {
+            controller.state.copy(neutral);
+            controller.remappedState.copy(neutral);
+        }
+        for (FakeInputWriter writer : writers) if (writer != null) writer.reset();
+    }
+
+    public synchronized void closeFakeInputWriter() {
         if (inputManager != null && inputDeviceListener != null) {
             inputManager.unregisterInputDeviceListener(inputDeviceListener);
         }
@@ -680,6 +691,7 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         controllers.clear();
         fallbackSlot = -1;
 
+        com.winlator.cmod.inputcontrols.NativeInputTransport.stop();
         vibrationRunning = false;
         if (vibrationServer != null) {
             try {

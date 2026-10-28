@@ -909,7 +909,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public int getFpsLimit() {
         return fpsLimit;
     }
-    public void setFpsLimit(int limit) { this.fpsLimit = Math.max(0, Math.min(1000, limit)); }
+    public void setFpsLimit(int limit) {
+        this.fpsLimit = Math.max(0, Math.min(1000, limit));
+        updateDisplayFps(fpsLimit);
+    }
     public void setPipMode(boolean pip) { inPipMode = pip; }
     public int getSurfaceWidth() { return surfaceWidth; }
     public int getSurfaceHeight() { return surfaceHeight; }
