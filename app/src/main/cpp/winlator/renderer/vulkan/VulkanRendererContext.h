@@ -170,7 +170,8 @@ public:
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
     // A frame a Linux client rendered into a dma-buf (DRI3). [key] names the buffer (its pixmap) across frames.
-    bool updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
+    bool updateWindowContentDmaBuf(int64_t id, int64_t key, int fd, int w, int h, int stride, int offset);
+    void releaseDmaBuf(int64_t key);
     std::string rendererDiagnostics();
     std::string pipelineDiagnostics();
     void setPipelineTarget(int64_t id);
@@ -489,8 +490,10 @@ public:
     std::atomic<int> actualPresentMode{VK_PRESENT_MODE_FIFO_KHR};
     std::atomic<uint32_t> outputWidth{0}, outputHeight{0};
     // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
-    // Counted because X reuses pixmap ids: a key can be imported again while its retired import still waits in deleteQueue.
+    // Keep synthetic keys distinguishable from real AHardwareBuffers until GPU retirement.
     std::unordered_map<AHardwareBuffer*, uint32_t> dmaBufKeys;
+    std::unordered_set<AHardwareBuffer*> releasedDmaBufs;
+    void retireReleasedDmaBufs();
     bool dropDmaBufKey(AHardwareBuffer* key) {
         auto it = dmaBufKeys.find(key);
         if (it == dmaBufKeys.end()) return false;

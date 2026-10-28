@@ -139,7 +139,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
-    @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
+    @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, long key, int fd,
         int w, int h, int stride, int offset);
     private native String nativeRendererDiagnostics(long handle);
     private native String nativePipelineDiagnostics(long handle);
@@ -158,6 +158,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
     @FastNative private native void nativeRemoveWindow(long handle, long id);
+    @FastNative private native void nativeReleaseDmaBuf(long handle, long key);
     @FastNative private native void nativeSetVerboseLog(long handle, boolean v);
     @FastNative private native void nativeSetSharpness(long handle, float sharpness);
 
@@ -607,18 +608,25 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
                 if (pixmap.dmaBufFd >= 0) {
-                    boolean accepted = nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
+                    boolean accepted = nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.dmaBufKey,
                         pixmap.dmaBufFd, pixmap.width, pixmap.height, pixmap.dmaBufStride, pixmap.dmaBufOffset);
                     if (!accepted) {
                         if (!importFailureReported) {
                             importFailureReported = true;
+                            String details = nativeRendererDiagnostics(nativeHandle);
+                            Log.e("VulkanXServerView", "Linux frame import failed: " + details);
                             try {
-                                String details = nativeRendererDiagnostics(nativeHandle);
-                                Log.e("VulkanXServerView", "Linux frame import failed: " + details);
                                 com.winlator.cmod.telemetry.LinuxDiagnostics.rendererImportFailed(details);
-                            } catch (Exception ignored) {}
+                            } catch (Exception e) {
+                                Log.w("VulkanXServerView", "Cannot report frame import failure", e);
+                            }
                             if (requireDmaBufImport && initializationError != null) {
-                                post(() -> initializationError.accept("The selected renderer driver could not import the game's DMA-BUF frame."));
+                                final String failure = details.contains("vk_result=-1000069000")
+                                        ? "The renderer ran out of descriptor pool space while importing a frame."
+                                        : details.contains("vk_result=-1 ") || details.contains("vk_result=-2 ")
+                                        ? "The renderer ran out of memory while importing a frame."
+                                        : "The renderer could not import the game's DMA-BUF frame.";
+                                post(() -> initializationError.accept(failure));
                             }
                         }
                         return;
@@ -657,6 +665,12 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void nativeRemoveDirectContent(int windowId, int pixmapId) {
         Pixmap pixmap = xServer.pixmapManager.getPixmap(pixmapId);
         if (pixmap == null || pixmap.drawable == null) return;
+        if (pixmap.drawable.dmaBufStride > 0) {
+            synchronized (lock) {
+                if (nativeHandle != 0) nativeReleaseDmaBuf(nativeHandle, pixmap.drawable.dmaBufKey);
+            }
+            return;
+        }
         final long contentId = did(pixmap.drawable);
         queueEvent(() -> {
             synchronized (lock) {

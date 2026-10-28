@@ -25,6 +25,9 @@ public class Drawable extends XResource {
     private boolean directScanout;
     /** A frame a Linux client rendered into a dma-buf (DRI3): the descriptor, kept open while the pixmap lives. */
     public int dmaBufFd = -1;
+    private static final java.util.concurrent.atomic.AtomicLong nextDmaBufKey =
+            new java.util.concurrent.atomic.AtomicLong();
+    public final long dmaBufKey = nextDmaBufKey.incrementAndGet();
     public int dmaBufStride;
     public int dmaBufOffset;
     private Runnable onDrawListener;

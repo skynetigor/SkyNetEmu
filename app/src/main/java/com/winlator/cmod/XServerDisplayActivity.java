@@ -1798,13 +1798,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String diagnostics = "rendererRequested=" + (resolvedRendererDriverId == null ? selected : "auto")
                 + " rendererSelected=" + selected;
         Log.e("RendererDriver", diagnostics + " error=" + message);
+        boolean frameFailure = message.startsWith("The renderer ");
         com.winlator.cmod.telemetry.Telemetry.event("skynet.error", "launch", "failure",
-                "error.type", "renderer_initialization_failed", "error.message", message,
+                "error.type", frameFailure ? "renderer_frame_import_failed" : "renderer_initialization_failed", "error.message", message,
                 "skynet.renderer.diagnostics", diagnostics);
         preloaderDialog.closeOnUiThread();
-        new android.app.AlertDialog.Builder(this).setTitle("Renderer driver unavailable")
+        new android.app.AlertDialog.Builder(this).setTitle(frameFailure ? "Rendering failed" : "Renderer driver unavailable")
                 .setMessage(message + "\n\nRenderer driver: " + selected
-                        + "\nChoose Auto or a compatible Android Turnip driver in the shortcut's Renderer driver setting.")
+                        + (frameFailure ? "\nThe game session must close. This error does not mean the controller disconnected."
+                        : "\nChoose Auto or a compatible Android Turnip driver in the shortcut's Renderer driver setting."))
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> exit())
                 .setOnCancelListener(dialog -> exit()).show();
     }
