@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap as composeAsImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -359,7 +360,7 @@ private fun AddGameTile(
                 code in KeyEvent.KEYCODE_DPAD_UP..KeyEvent.KEYCODE_DPAD_RIGHT &&
                     event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN && moveFocus(code)
             },
-        shape = RoundedCornerShape(16.dp),
+        shape = if (cards) RoundedCornerShape(16.dp) else RectangleShape,
         color = if (cards) MaterialTheme.colorScheme.surface else Color.Transparent,
         border = if (focused) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null
     ) {
@@ -368,7 +369,7 @@ private fun AddGameTile(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Box(Modifier.size(size.icon.dp).clip(RoundedCornerShape(22))
+            Box(Modifier.size(size.icon.dp).clip(if (cards) RoundedCornerShape(22) else RectangleShape)
                 .background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
                 Icon(Icons.Outlined.Add, null, Modifier.size((size.icon / 2).dp),
                     tint = MaterialTheme.colorScheme.onSecondaryContainer)
@@ -420,7 +421,7 @@ private fun LibraryTile(
             if (cards && !item.steamClient) cb.onOpen(item.shortcutPath) else cb.onRun(item.shortcutPath)
         }, onLongClickLabel = actionsLabel, onLongClick = { showMenu(bounds) })
     Surface(
-        modifier = tileModifier, shape = RoundedCornerShape(16.dp),
+        modifier = tileModifier, shape = if (cards) RoundedCornerShape(16.dp) else RectangleShape,
         color = if (cards) MaterialTheme.colorScheme.surface else Color.Transparent,
         border = if (focused) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null
     ) {
@@ -456,7 +457,7 @@ private fun LibraryTile(
 @Composable
 internal fun LibraryIconContent(item: LibraryItem, size: LibraryIconSize, customBackground: Boolean) {
     Column(Modifier.fillMaxWidth().padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        LibraryArtwork(item, false, Modifier.size(size.icon.dp).clip(RoundedCornerShape(22))
+        LibraryArtwork(item, false, Modifier.size(size.icon.dp).clip(RectangleShape)
             .background(MaterialTheme.colorScheme.surfaceVariant))
         Spacer(Modifier.height(8.dp))
         Text(item.name, style = MaterialTheme.typography.bodyMedium.copy(

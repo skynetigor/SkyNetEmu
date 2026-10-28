@@ -97,8 +97,14 @@ public final class RendererDriverCatalog {
         if (!AUTO.equalsIgnoreCase(requested)) return requested;
         String renderer = GPUInformation.getRenderer(null, context);
         AdrenotoolsManager manager = new AdrenotoolsManager(context);
+        List<Entry> entries = load(context);
+        if (entries.stream().noneMatch(entry -> entry.matches(renderer, Build.VERSION.SDK_INT, requireDmaBuf))) {
+            if (progress != null) progress.accept("Refreshing Android renderer driver mappings…");
+            RegistryCache.get(context, FILE, RegistryCache.TTL_NONE, true);
+            entries = load(context);
+        }
         boolean matched = false;
-        for (Entry entry : load(context)) {
+        for (Entry entry : entries) {
             if (!entry.matches(renderer, Build.VERSION.SDK_INT, requireDmaBuf)) continue;
             matched = true;
             if (usable(manager, entry.id)) return entry.id;

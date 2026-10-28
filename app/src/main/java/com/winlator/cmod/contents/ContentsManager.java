@@ -6,6 +6,7 @@ import android.net.Uri;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.core.TarCompressorUtils;
@@ -99,7 +100,7 @@ public class ContentsManager {
     }
 
     public interface OnInstallFinishedCallback {
-        void onFailed(InstallFailedReason reason, Exception e);
+        void onFailed(InstallFailedReason reason, @Nullable Exception e);
         void onSucceed(ContentProfile profile);
     }
 

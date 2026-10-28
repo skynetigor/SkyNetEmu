@@ -321,13 +321,16 @@ internal suspend fun installRuntimeComponent(
 
     val result = suspendCoroutine<String?> { continuation ->
         manager.extraContentFile(Uri.fromFile(archive), object : ContentsManager.OnInstallFinishedCallback {
-            override fun onFailed(reason: ContentsManager.InstallFailedReason, error: Exception) {
+            override fun onFailed(reason: ContentsManager.InstallFailedReason, error: Exception?) {
+                android.util.Log.w("RuntimeInstall", "Extraction failed: $typeName/$version: $reason", error)
                 continuation.resume(null)
             }
 
             override fun onSucceed(extracted: ContentProfile) {
                 manager.finishInstallContent(extracted, object : ContentsManager.OnInstallFinishedCallback {
-                    override fun onFailed(reason: ContentsManager.InstallFailedReason, error: Exception) {
+                    override fun onFailed(reason: ContentsManager.InstallFailedReason, error: Exception?) {
+                        if (reason != ContentsManager.InstallFailedReason.ERROR_EXIST)
+                            android.util.Log.w("RuntimeInstall", "Installation failed: $typeName/$version: $reason", error)
                         continuation.resume(
                             if (reason == ContentsManager.InstallFailedReason.ERROR_EXIST) profile.verName else null
                         )

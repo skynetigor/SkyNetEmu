@@ -90,7 +90,8 @@ public final class LinuxSession {
     /** Where a program, given as the guest sees its path, lives on the host (null if it cannot be told). */
     public static File hostFile(Context context, Container container, String guestPath) {
         if (guestPath.startsWith("/root/")) return new File(container.getLinuxHomeDir(), guestPath.substring(6));
-        if (guestPath.startsWith("/storage/") || guestPath.startsWith("/data/")) return new File(guestPath);
+        if (guestPath.startsWith("/storage/") || guestPath.startsWith("/sdcard/") || guestPath.startsWith("/data/"))
+            return new File(guestPath);
         LinuxRuntime.Installed runtime = LinuxRuntime.resolve(context, container);
         return runtime == null ? null : new File(LinuxRuntime.rootDir(context, runtime.id), guestPath.substring(1));
     }
@@ -194,7 +195,7 @@ public final class LinuxSession {
         }
         File program = hostFile(context, container, path);
         if (runsOnFex && program != null
-                && program.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
+                && LinuxProgramPaths.isWithin(Environment.getExternalStorageDirectory(), program)) {
             // FEX maps a program and its libraries as executable, which shared storage (mounted noexec) refuses.
             return refusal((machine == 3 ? "This 32-bit program is run by FEX (Box64 cannot run it), and " : "") + "FEX cannot run a program from shared storage. Copy the program into the container (add it with \"Program only\" "
                     + "or \"Whole game\"), or choose Box64 for this shortcut.");
@@ -323,7 +324,7 @@ public final class LinuxSession {
 
     public static Launch build(Context context, ImageFs imageFs, Container container,
                                LinuxRuntime.Installed runtime, String[] guestCommand) {
-        if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) LinuxSteamGames.registerSharedLibrary(container);
+        if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) LinuxSteamGames.removeEmptySharedLibrary(container);
         File rt = LinuxRuntime.rootDir(context, runtime.id);
         File hostDir = new File(rt, HOST_DIR);
         File proot = new File(hostDir, "proot");
@@ -371,10 +372,8 @@ public final class LinuxSession {
             throw new IllegalStateException("Cannot create guest power supply directory");
         bind(argv, powerSupplies.getPath(), "/sys/class/power_supply");
         bind(argv, "/dev/urandom", "/dev/random");
-        bind(argv, "/proc/self/fd", "/dev/fd");
-        for (int fd = 0; fd < 3; fd++) {
-            bind(argv, "/proc/self/fd/" + fd, "/dev/" + new String[]{"stdin", "stdout", "stderr"}[fd]);
-        }
+        // The bound Android /dev already supplies fd/stdin/stdout/stderr symlinks into /proc.
+        // Binding individual pipe descriptors makes proot realpath() their anonymous pipe names and fail.
         bind(argv, shmDir.getPath(), "/dev/shm");
         // Android's own /dev/input is unreadable by apps, and SDL finds a pad by listing that directory: the app's
         // gamepad files stand in for it. libskyshim turns them from plain files into evdev devices (see guestEnv).
@@ -417,7 +416,10 @@ public final class LinuxSession {
         bind(argv, context.getFilesDir().getPath());
         bind(argv, cacheDir.getPath());
         bind(argv, imageFsRoot.getPath());
-        bind(argv, "/storage/emulated/0");
+        String sharedStorage = Environment.getExternalStorageDirectory().getPath();
+        bind(argv, sharedStorage);
+        bind(argv, sharedStorage, "/sdcard");
+        bind(argv, sharedStorage, "/storage/self/primary");
         // FEX looks a path up in the x86-64 root filesystem first, and that has /proc, /sys and /dev as empty folders: a path
         // given whole (/proc/self/task) falls through to the phone's, but one opened as a directory and then looked into
         // (Chromium opens "/proc" and stats "self/task/" in it; its sandbox check dies on that) finds nothing. The real
