@@ -1745,6 +1745,7 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
             if (!createWinTexResources(wt,w,h)) { texMap.erase(id); return; }
         }
         mapped=wt.mapped;
+        retireReleasedDmaBufs();
     }
     if (!mapped) return;
     const size_t dstPitch=(size_t)w*4;
@@ -1784,11 +1785,12 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     wt.img  = src.img; wt.mem  = src.mem; wt.view = src.view; wt.ds   = src.ds;
     wt.isAHB = true; wt.ahb  = ahb; wt.w = src.w; wt.h = src.h;
     wt.needsTransition = false; // The first-use layout belongs to the cached VkImage.
+    retireReleasedDmaBufs();
     if (pipelineEnabled && id==pipelineTarget) pipe.accept();
     needsRender.store(true); dirtyCV.notify_one();
 }
 
-bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset) {
+bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int64_t key, int fd, int w, int h, int stride, int offset) {
     // Includes time waiting to acquire renderMutex as well as importing/updating the buffer.
     ScopedRendererTiming timing(dmaTiming, performanceDiagnostics.load(std::memory_order_relaxed));
     AHardwareBuffer* stand = reinterpret_cast<AHardwareBuffer*>(static_cast<uintptr_t>(0x7d000000u) + static_cast<uintptr_t>(key));
@@ -1809,22 +1811,22 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
         WinTex tmp{};
         DmaImport result = importDmaBufToWinTex(tmp, fd, w, h, stride, offset);
         if (result == DmaImport::Ok) {
-            dmaBufKeys.insert(stand);
+            ++dmaBufKeys[stand];
             ahbImportCache[stand] = tmp;
             windowAhbs[id].push_back(stand);
             cit = ahbImportCache.find(stand);
-            RLOG("updateWindowContentDmaBuf: imported dma-buf %d for id=%" PRId64 " (%dx%d stride %d), sampled in place", key, id, w, h, stride);
+            RLOG("updateWindowContentDmaBuf: imported dma-buf %" PRId64 " for id=%" PRId64 " (%dx%d stride %d), sampled in place", key, id, w, h, stride);
         } else if (result == DmaImport::PitchMismatch) {
             DmaBufSrc src;
             if (!importDmaBufAsBuffer(src, fd, h, stride, offset)) {
                 RLOG_E("updateWindowContentDmaBuf: buffer import failed for id=%" PRId64, id);
                 ++dmaFailures; return false;
             }
-            dmaBufKeys.insert(stand);
+            ++dmaBufKeys[stand];
             dmaBufSrcCache[stand] = src;
             windowDmaSrcs[id].push_back(stand);
             sit = dmaBufSrcCache.find(stand);
-            RLOG("updateWindowContentDmaBuf: imported dma-buf %d for id=%" PRId64 " (%dx%d stride %d), copied each frame", key, id, w, h, stride);
+            RLOG("updateWindowContentDmaBuf: imported dma-buf %" PRId64 " for id=%" PRId64 " (%dx%d stride %d), copied each frame", key, id, w, h, stride);
         } else {
             RLOG_E("updateWindowContentDmaBuf: import failed for id=%" PRId64, id);
             ++dmaFailures; return false;
@@ -1853,10 +1855,57 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int key, int f
     }
     dmaDiagnostics.stage = sit != dmaBufSrcCache.end() ? "buffer_copy" : "sampled_image";
     dmaDiagnostics.result = VK_SUCCESS;
+    retireReleasedDmaBufs();
     ++dmaAccepted;
     if (pipelineEnabled && id==pipelineTarget) pipe.accept();
     needsRender.store(true); dirtyCV.notify_one();
     return true;
+}
+
+void VulkanRendererContext::releaseDmaBuf(int64_t key) {
+    std::lock_guard<std::mutex> lk(renderMutex);
+    auto stand = reinterpret_cast<AHardwareBuffer*>(static_cast<uintptr_t>(0x7d000000u) + static_cast<uintptr_t>(key));
+    if (ahbImportCache.count(stand) || dmaBufSrcCache.count(stand)) {
+        releasedDmaBufs.insert(stand);
+        retireReleasedDmaBufs();
+        needsRender.store(true);
+        dirtyCV.notify_one();
+    }
+}
+
+void VulkanRendererContext::retireReleasedDmaBufs() {
+    for (auto it = releasedDmaBufs.begin(); it != releasedDmaBufs.end();) {
+        auto key = *it;
+        auto image = ahbImportCache.find(key);
+        auto source = dmaBufSrcCache.find(key);
+        bool displayed = std::any_of(texMap.begin(), texMap.end(), [&](const auto& entry) {
+            const auto& wt = entry.second;
+            return (wt.isAHB && wt.ahb == key)
+                    || (source != dmaBufSrcCache.end() && wt.stgBorrowed && wt.stg == source->second.buf);
+        });
+        if (displayed) { ++it; continue; }
+        WinTex deferred{};
+        if (image != ahbImportCache.end()) {
+            deferred = image->second;
+            deferred.isAHB = false;
+            ahbImportCache.erase(image);
+        } else if (source != dmaBufSrcCache.end()) {
+            deferred.stg = source->second.buf;
+            deferred.stgMem = source->second.mem;
+            dmaBufSrcCache.erase(source);
+        }
+        if (deferred.img != VK_NULL_HANDLE || deferred.stg != VK_NULL_HANDLE) {
+            deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial, key});
+            retirePending.store(true, std::memory_order_release);
+        }
+        for (auto* owners : {&windowAhbs, &windowDmaSrcs}) {
+            for (auto& owner : *owners) {
+                auto& keys = owner.second;
+                keys.erase(std::remove(keys.begin(), keys.end(), key), keys.end());
+            }
+        }
+        it = releasedDmaBufs.erase(it);
+    }
 }
 
 void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, const int* ys, int count) {
@@ -1877,6 +1926,7 @@ void VulkanRendererContext::removeWindow(int64_t id) {
     auto wit = windowAhbs.find(id);
     if (wit != windowAhbs.end()) {
         for (AHardwareBuffer* ahb : wit->second) {
+            if (dmaBufKeys.count(ahb)) continue;
             auto cit = ahbImportCache.find(ahb);
             if (cit != ahbImportCache.end()) {
                 WinTex deferred = cit->second; deferred.isAHB = false;
@@ -1890,6 +1940,7 @@ void VulkanRendererContext::removeWindow(int64_t id) {
     auto dit = windowDmaSrcs.find(id);
     if (dit != windowDmaSrcs.end()) {
         for (AHardwareBuffer* key : dit->second) {
+            if (dmaBufKeys.count(key)) continue;
             auto sc = dmaBufSrcCache.find(key);
             if (sc == dmaBufSrcCache.end()) continue;
             WinTex deferred{};
@@ -1897,10 +1948,11 @@ void VulkanRendererContext::removeWindow(int64_t id) {
             deleteQueue.push_back({deferred, pendingFrameSerial ? pendingFrameSerial : submittedSerial, nullptr});
             retirePending.store(true, std::memory_order_release);
             dmaBufSrcCache.erase(sc);
-            dmaBufKeys.erase(key);
+            dropDmaBufKey(key);
         }
         windowDmaSrcs.erase(dit);
     }
+    retireReleasedDmaBufs();
     renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
         [id](const RenderEntry& e){return e.id==id;}),renderList.end());
     needsRender.store(true); dirtyCV.notify_one();
@@ -2071,6 +2123,7 @@ void VulkanRendererContext::cleanupAllAHBCache() {
     }
     dmaBufSrcCache.clear(); windowDmaSrcs.clear();
     ahbImportCache.clear(); windowAhbs.clear();
+    releasedDmaBufs.clear();
 }
 
 std::string VulkanRendererContext::rendererDiagnostics() {
@@ -2093,7 +2146,8 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         "external_fd=%d dma_buf=%d fd_properties=%d format=BGRA8(%d) size=%dx%d stride=%d offset=%d "
         "row_pitch=%llu image_bytes=%llu buffer_bytes=%lld image_types=0x%x fd_types=0x%x "
         "updates=%llu accepted=%llu failed=%llu submits=%llu presents=%llu draws=%u submit_result=%d present_result=%d "
-        "custom_driver=%d driver_id=%u driver_name=%.64s driver_info=%.128s output=%ux%u present_mode=%d",
+        "custom_driver=%d driver_id=%u driver_name=%.64s driver_info=%.128s output=%ux%u present_mode=%d "
+        "dma_live=%zu dma_released_displayed=%zu retired_textures=%zu",
         dmaDiagnostics.stage,(int)dmaDiagnostics.result,props.deviceName,props.vendorID,props.driverVersion,
         VK_VERSION_MAJOR(props.apiVersion),VK_VERSION_MINOR(props.apiVersion),VK_VERSION_PATCH(props.apiVersion),
         hasExternalMemoryFd,hasDmaBufExtension,vk_.GetMemoryFdPropertiesKHR!=nullptr,(int)VK_FORMAT_B8G8R8A8_UNORM,
@@ -2104,7 +2158,8 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         (unsigned long long)rendererSubmits.load(),(unsigned long long)rendererPresents.load(),rendererDraws.load(),
         rendererSubmitResult.load(),rendererPresentResult.load(),adrenotoolsHandle!=nullptr,
         (unsigned)driverProps.driverID,driverProps.driverName,driverProps.driverInfo,
-        outputWidth.load(),outputHeight.load(),actualPresentMode.load());
+        outputWidth.load(),outputHeight.load(),actualPresentMode.load(),
+        dmaBufKeys.size(),releasedDmaBufs.size(),deleteQueue.size());
     std::string snapshot(text);
     auto appendTiming = [&](const char* name, const RendererTiming& timing) {
         char part[160];

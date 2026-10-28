@@ -4,6 +4,7 @@ import androidx.collection.ArrayMap;
 
 import com.winlator.cmod.xconnector.XInputStream;
 import com.winlator.cmod.xconnector.XOutputStream;
+import com.winlator.cmod.xconnector.XStreamLock;
 import com.winlator.cmod.xserver.events.Event;
 
 import java.io.IOException;
@@ -55,7 +56,8 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
     }
 
     public void sendEvent(Event event) {
-        try {
+        // Capture the sequence under the same lock that orders packets on the wire.
+        try (XStreamLock lock = outputStream.lock()) {
             event.send(sequenceNumber, outputStream);
         }
         catch (IOException e) {

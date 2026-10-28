@@ -66,7 +66,7 @@ public final class LinuxSteamGames {
         }
     }
 
-    /** The Steam library every container shares, so a game is installed once: imagefs/home/steam-library. */
+    /** Legacy shared library, retained for discovering games installed by older app versions. */
     public static File sharedLibrary(Container container) {
         return new File(container.getRootDir().getParentFile(), "steam-library");
     }
@@ -120,38 +120,70 @@ public final class LinuxSteamGames {
         }
     }
 
-    /**
-     * Makes the shared library one of the container's Steam libraries (steamapps/libraryfolders.vdf), so a game Steam installs
-     * there is seen by every container. Done before Steam starts: Steam rewrites the file as it runs and keeps the paths.
-     * The new games still go to the library the install dialog (or Steam's storage settings) names as the default.
-     */
-    public static void registerSharedLibrary(Container container) {
+    /** Stops registering the extra library; remove its old entry only when no content would be hidden. */
+    public static void removeEmptySharedLibrary(Container container) {
         File shared = sharedLibrary(container);
-        File steamapps = new File(shared, "steamapps");
-        steamapps.mkdirs();
-        File marker = new File(shared, "libraryfolder.vdf");   // Steam keeps it in the library folder itself, not in steamapps
-        if (!marker.exists()) FileUtils.writeString(marker, "\"libraryfolder\"\n{\n\t\"contentid\"\t\t\"0\"\n\t\"label\"\t\t\"\"\n}\n");
-
         File list = new File(steamRoot(container), "steamapps/libraryfolders.vdf");
-        String text = list.isFile() ? FileUtils.readString(list) : null;
-        String path = shared.getPath();
-        if (text == null) {
-            list.getParentFile().mkdirs();
-            FileUtils.writeString(list, "\"libraryfolders\"\n{\n" + libraryEntry(0, OWN_LIBRARY_GUEST) + libraryEntry(1, path) + "}\n");
+        if (!list.isFile()) return;
+        if (!emptyLibraryDirectory(shared)) {
+            Log.i(TAG, "Keeping the legacy Steam library because it contains content or cannot be inspected");
             return;
         }
-        if (text.contains("\"" + path + "\"")) return;
-        int end = text.lastIndexOf('}');
-        if (end < 0) return;
-        int next = 0;
-        Matcher index = Pattern.compile("(?m)^\\s*\"(\\d+)\"\\s*$").matcher(text);
-        while (index.find()) next = Math.max(next, Integer.parseInt(index.group(1)) + 1);
-        FileUtils.writeString(list, text.substring(0, end) + libraryEntry(next, path) + text.substring(end));
+        String text = FileUtils.readString(list);
+        if (text == null) {
+            Log.w(TAG, "Cannot read Steam library registrations");
+            return;
+        }
+        try {
+            String updated = withoutSharedLibrary(text, shared.getPath());
+            if (!text.equals(updated)) FileUtils.writeString(list, updated);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "Cannot remove the empty legacy Steam library from malformed registrations", e);
+        }
     }
 
-    private static String libraryEntry(int index, String path) {
-        return "\t\"" + index + "\"\n\t{\n\t\t\"path\"\t\t\"" + path + "\"\n\t\t\"label\"\t\t\"\"\n"
-                + "\t\t\"contentid\"\t\t\"0\"\n\t\t\"totalsize\"\t\t\"0\"\n\t\t\"apps\"\n\t\t{\n\t\t}\n\t}\n";
+    private static boolean emptyLibraryDirectory(File directory) {
+        if (java.nio.file.Files.isSymbolicLink(directory.toPath())) return false;
+        if (!directory.exists()) return true;
+        File[] children = directory.listFiles();
+        if (children == null) return false;
+        for (File child : children) {
+            if (java.nio.file.Files.isSymbolicLink(child.toPath())) return false;
+            if (child.isDirectory()) {
+                if (!emptyLibraryDirectory(child)) return false;
+            } else if (!child.getName().equals("libraryfolder.vdf")
+                    || !child.getParentFile().equals(directory)) return false;
+        }
+        return true;
+    }
+
+    static String withoutSharedLibrary(String text, String path) {
+        Matcher tokens = Pattern.compile("\"(?:\\\\.|[^\"\\\\])*\"|[{}]|//[^\\r\\n]*").matcher(text);
+        int depth = 0, entryStart = -1;
+        boolean matches = false;
+        String previous = "";
+        StringBuilder result = new StringBuilder();
+        int copied = 0;
+        while (tokens.find()) {
+            String token = tokens.group();
+            if (token.startsWith("//")) continue;
+            if (token.equals("{")) {
+                depth++;
+                if (depth == 2) matches = false;
+            } else if (token.equals("}")) {
+                if (depth == 2 && matches && entryStart >= copied) {
+                    result.append(text, copied, entryStart);
+                    copied = tokens.end();
+                }
+                if (--depth < 0) throw new IllegalArgumentException("Unbalanced Steam library registrations");
+            } else {
+                if (depth == 1) entryStart = tokens.start();
+                if (depth == 2 && previous.equals("\"path\"") && token.equals("\"" + path + "\"")) matches = true;
+            }
+            previous = token;
+        }
+        if (depth != 0) throw new IllegalArgumentException("Unbalanced Steam library registrations");
+        return result.append(text, copied, text.length()).toString();
     }
 
     public static int count(Container container) {

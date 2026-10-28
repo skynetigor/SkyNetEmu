@@ -97,7 +97,10 @@ public class GameDetailFragment extends Fragment {
 
                     @Override
                     public void onConfigure() {
-                        ShortcutSettingsComposeDialog.show(GameDetailFragment.this, shortcut);
+                        ShortcutSettingsComposeDialog.show(GameDetailFragment.this, shortcut, () -> {
+                            // A renamed shortcut is another file: this page shows the old one, so go back to the library.
+                            if (!shortcut.file.isFile() && isAdded()) getParentFragmentManager().popBackStack();
+                        });
                     }
 
                     @Override

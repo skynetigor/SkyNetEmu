@@ -519,7 +519,7 @@ public final class GameSaveManager {
         return p;
     }
 
-    private static String sanitize(String name) {
+    public static String sanitize(String name) {
         if (name == null) return "Game";
         String safe = name.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
         return safe.isEmpty() ? "Game" : safe;

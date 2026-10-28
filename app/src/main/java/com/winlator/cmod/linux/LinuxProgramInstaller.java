@@ -37,7 +37,7 @@ public final class LinuxProgramInstaller {
         if (LinuxProgramPaths.inHome(container.getLinuxHomeDir(), file) != null) return false;
         if (LinuxSession.elfMachine(file) != 62) return true;
         if (!LinuxEmulator.BOX64.equals(LinuxEmulator.choice(container))) return true;
-        return !file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/");
+        return !LinuxProgramPaths.isWithin(Environment.getExternalStorageDirectory(), file);
     }
 
     /** Files picked inside the Linux home must be saved as /root/... rather than their Android-private host path. */
@@ -48,7 +48,7 @@ public final class LinuxProgramInstaller {
 
     /** Why {@link #needsCopy} says yes, in a sentence for the person adding the program (the reason depends on what the program is). */
     public static String copyReason(Container container, File file) {
-        if (!file.getPath().startsWith(Environment.getExternalStorageDirectory().getPath() + "/")) {
+        if (!LinuxProgramPaths.isWithin(Environment.getExternalStorageDirectory(), file)) {
             return "This file is on a storage that the container does not see, so it is copied in.";
         }
         switch (LinuxSession.elfMachine(file)) {

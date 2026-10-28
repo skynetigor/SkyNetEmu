@@ -1,11 +1,14 @@
 package com.winlator.cmod.container;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Environment;
 import android.util.Log;
 
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GameSaveManager;
 import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.StringUtils;
 
@@ -228,6 +231,53 @@ public class Shortcut {
         this.coverArt = null;
         putExtra("customCoverArtPath", null);
         saveData();
+    }
+
+    /** Characters a file name cannot hold are replaced; the result is what the shortcut will be called. */
+    public static String cleanName(String requested) {
+        return requested == null ? "" : requested.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
+    }
+
+    /**
+     * Renames the shortcut (its .desktop file, which is its name) and moves what is kept under the old name: the Wine
+     * .lnk, custom icons and cover art, the play time and play count, and the save backups folder. This object keeps
+     * the old name, so the caller reloads the shortcuts afterwards.
+     *
+     * @return false when the name is empty or taken, or the file could not be renamed; nothing is changed then
+     */
+    public boolean rename(Context context, String requested) {
+        String clean = cleanName(requested);
+        if (clean.isEmpty()) return false;
+        if (clean.equals(name)) return true;
+
+        File parent = file.getParentFile();
+        int dot = file.getName().lastIndexOf('.');
+        File target = new File(parent, clean + (dot > 0 ? file.getName().substring(dot) : ".desktop"));
+        if (target.exists() || !file.renameTo(target)) return false;
+
+        File oldLink = new File(parent, name + ".lnk");
+        File newLink = new File(parent, clean + ".lnk");
+        if (oldLink.isFile() && !newLink.exists()) oldLink.renameTo(newLink);
+
+        File iconsDir = new File(Environment.getExternalStorageDirectory(), "Winlator/icons");
+        for (String suffix : new String[]{".user.png", ".png"}) moveIfFree(new File(iconsDir, name + suffix), new File(iconsDir, clean + suffix));
+        if (container != null) {
+            File coverArtDir = new File(container.getRootDir(), COVER_ART_DIR);
+            moveIfFree(new File(coverArtDir, name + ".png"), new File(coverArtDir, clean + ".png"));
+        }
+        File savesRoot = new File(Environment.getExternalStorageDirectory(), "Winlator/Saves");
+        moveIfFree(new File(savesRoot, GameSaveManager.sanitize(name)), new File(savesRoot, GameSaveManager.sanitize(clean)));
+
+        SharedPreferences prefs = context.getSharedPreferences("playtime_stats", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        if (prefs.contains(name + "_playtime")) editor.putLong(clean + "_playtime", prefs.getLong(name + "_playtime", 0)).remove(name + "_playtime");
+        if (prefs.contains(name + "_play_count")) editor.putInt(clean + "_play_count", prefs.getInt(name + "_play_count", 0)).remove(name + "_play_count");
+        editor.apply();
+        return true;
+    }
+
+    private static void moveIfFree(File from, File to) {
+        if (from.exists() && !to.exists()) from.renameTo(to);
     }
 
     public boolean cloneToContainer(Container newContainer) {

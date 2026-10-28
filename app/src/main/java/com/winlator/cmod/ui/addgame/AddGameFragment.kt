@@ -127,6 +127,7 @@ class AddGameFragment : Fragment() {
     private val platform get() = if (kind.isLinux) GameProfile.Platform.LINUX else GameProfile.Platform.WINDOWS
     private var match: GameMatcher.Result? = null
     private var configs: Map<String, ContainerConfigCatalog.Config> = emptyMap()
+    private var copyDialog: AlertDialog? = null
 
     private val importPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) importFrom(uri) }
 
@@ -149,6 +150,12 @@ class AddGameFragment : Fragment() {
                 }
             }
         }
+    }
+
+    override fun onDestroyView() {
+        copyDialog?.dismiss()
+        copyDialog = null
+        super.onDestroyView()
     }
 
     // -- loading what the registry says -----------------------------------------------------------------------------------
@@ -177,15 +184,18 @@ class AddGameFragment : Fragment() {
                 }
             }
             val manager = ContainerManager(context)
-            val model = buildModel(found, all, soc, manager)
-            match = found
-            configs = all
-            phase = Phase.Choose(model)
+            val model = buildModel(context, found, all, soc, manager)
+            activity?.runOnUiThread {
+                if (isAdded && view != null) {
+                    match = found
+                    configs = all
+                    phase = Phase.Choose(model)
+                }
+            }
         }.start()
     }
 
-    private fun buildModel(found: GameMatcher.Result?, all: Map<String, ContainerConfigCatalog.Config>, soc: DeviceInfo.Soc, manager: ContainerManager): Model {
-        val context = requireContext()
+    private fun buildModel(context: android.content.Context, found: GameMatcher.Result?, all: Map<String, ContainerConfigCatalog.Config>, soc: DeviceInfo.Soc, manager: ContainerManager): Model {
         val shown = LinkedHashSet<String>()
         val configTile = { config: ContainerConfigCatalog.Config, accent: Int, recommended: Boolean ->
             shown.add(config.id)
@@ -361,7 +371,7 @@ class AddGameFragment : Fragment() {
             val root = it.game.linuxExecutables.firstOrNull { rel -> guest.endsWith("/$rel") }?.let { rel -> guest.removeSuffix("/$rel") }
             extras[GameProfiles.EXTRA_ROOT] = root.orEmpty()
         }
-        return LinuxProgramInstaller.addShortcut(requireContext(), container, name, guest, extras)
+        return LinuxProgramInstaller.addShortcut(context, container, name, guest, extras)
     }
 
     /** Asks (on the screen, from the worker thread) what of the program's folder goes into the container; null when cancelled. */
@@ -380,6 +390,10 @@ class AddGameFragment : Fragment() {
             }
         }.toTypedArray()
         host.runOnUiThread {
+            if (!isAdded || view == null || host.isFinishing || host.isDestroyed) {
+                latch.countDown()
+                return@runOnUiThread
+            }
             // A dialog with a message shows no list of items: the reason and the choices go into one view.
             val pad = (20 * host.resources.displayMetrics.density).toInt()
             val reason = android.widget.TextView(host).apply {
@@ -400,8 +414,10 @@ class AddGameFragment : Fragment() {
                 .setView(body)
                 .setNegativeButton(android.R.string.cancel) { _, _ -> latch.countDown() }
                 .setOnCancelListener { latch.countDown() }
+                .setOnDismissListener { latch.countDown() }
                 .create()
             list.setOnItemClickListener { _, _, which, _ -> answer = modes[which]; dialog.dismiss(); latch.countDown() }
+            copyDialog = dialog
             dialog.show()
         }
         latch.await()
@@ -509,7 +525,9 @@ class AddGameFragment : Fragment() {
             }
             Telemetry.event("skynet.funnel", "shortcut_created",
                 "skynet.game.id", game?.game?.id, "skynet.game.version", game?.version?.id)
-            activity?.runOnUiThread { (activity as? MainActivity)?.gameAdded(desktop.path) }
+            activity?.runOnUiThread {
+                if (isAdded && view != null) (activity as? MainActivity)?.gameAdded(desktop.path)
+            }
         }.start()
     }
 }

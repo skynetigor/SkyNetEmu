@@ -73,6 +73,24 @@ import java.io.File
 
 internal fun Bitmap.asImageBitmap(): ImageBitmap = this.composeAsImageBitmap()
 
+internal fun Bitmap.fillLibraryIcon(): Bitmap {
+    if (!hasAlpha() || width < 8 || height < 8) return this
+    val side = minOf(width, height)
+    val left = (width - side) / 2
+    val top = (height - side) / 2
+    fun alpha(x: Float, y: Float): Int =
+        getPixel(left + ((side - 1) * x).toInt(), top + ((side - 1) * y).toInt()) ushr 24
+    val transparentCorners = listOf(.05f to .05f, .95f to .05f, .05f to .95f, .95f to .95f)
+        .all { (x, y) -> alpha(x, y) < 16 }
+    val filledCircle = listOf(.5f to .05f, .95f to .5f, .5f to .95f, .05f to .5f,
+        .2f to .2f, .8f to .2f, .2f to .8f, .8f to .8f, .5f to .5f)
+        .all { (x, y) -> alpha(x, y) >= 240 }
+    if (!transparentCorners || !filledCircle) return this
+    // Fill the tile from inside a circular artwork mask, rather than displaying its transparent corners.
+    val crop = ((side - 2) / kotlin.math.sqrt(2.0)).toInt().coerceAtLeast(1)
+    return Bitmap.createBitmap(this, (width - crop) / 2, (height - crop) / 2, crop, crop)
+}
+
 internal enum class LibraryIconSize(val cell: Int, val icon: Int, val label: Int) {
     Small(88, 56, R.string.library_view_small_icons),
     Medium(112, 72, R.string.library_view_medium_icons),
@@ -470,11 +488,14 @@ internal fun LibraryIconContent(item: LibraryItem, size: LibraryIconSize, custom
 private fun LibraryArtwork(item: LibraryItem, cover: Boolean, modifier: Modifier) {
     val path = if (cover) item.iconPath?.takeIf { it.endsWith(".user.png", ignoreCase = true) }
         ?: item.coverPath ?: item.bannerPath ?: item.iconPath else item.iconPath
-    val bitmap by produceState(item.fallbackIcon, path, item.fallbackIcon) {
-        value = withContext(Dispatchers.IO) { path?.takeIf { File(it).isFile }?.let(BitmapFactory::decodeFile) ?: item.fallbackIcon }
+    val bitmap by produceState<Bitmap?>(null, path, item.fallbackIcon, cover) {
+        value = withContext(Dispatchers.IO) {
+            val decoded = path?.takeIf { File(it).isFile }?.let(BitmapFactory::decodeFile) ?: item.fallbackIcon
+            if (cover) decoded else decoded?.fillLibraryIcon()
+        }
     }
     val image = bitmap
-    if (image != null) Image(image.asImageBitmap(), null, modifier, contentScale = if (cover) ContentScale.Crop else ContentScale.Fit)
+    if (image != null) Image(image.asImageBitmap(), null, modifier, contentScale = ContentScale.Crop)
     else Box(modifier.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
         Text(item.name.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).map { it.first() }.joinToString("").uppercase(),
             style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)

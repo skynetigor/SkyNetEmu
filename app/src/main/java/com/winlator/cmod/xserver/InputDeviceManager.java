@@ -124,6 +124,15 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
 
     private java.util.concurrent.ScheduledExecutorService focusExecutor;
 
+    public void refreshFocusedWindow() {
+        if (!sendsFocusAndCrossing() || xServer.desktopSession) return;
+        Window window = xServer.windowManager.getFocusedWindow();
+        if (window == null || window == xServer.windowManager.rootWindow
+                || window.getMapState() != Window.MapState.VIEWABLE) return;
+        sendFocusIn(window);
+        repeatFocusIn(window);
+    }
+
     /**
      * The focus is handed to a window the moment it is mapped, which is a moment too early: a program maps its
      * window and asks for focus events in whichever order its toolkit likes, and SDL's ask lands second, so the

@@ -39,7 +39,7 @@ internal fun ClassicWelcomeLandscape(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(.9f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Image(painterResource(R.drawable.winlator_mark_exact), "Winlator", Modifier.size(132.dp))
+                Image(painterResource(R.drawable.skynetemu_mark), "SkyNetEmu", Modifier.size(132.dp))
                 Spacer(Modifier.height(14.dp))
                 Text("Welcome to Winlator", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                 Text("Your lightweight PC emulator for Android.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)

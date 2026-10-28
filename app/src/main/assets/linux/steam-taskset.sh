@@ -5,8 +5,11 @@
 # --disable-gpu and --disable-gpu-compositing on the list: the whole interface is then drawn on the CPU. Here the helper is
 # started without those two and with ANGLE on Vulkan, so its GPU process draws on the phone's GPU through Turnip. OpenGL is
 # no way for it: the X server has no GLX the way ANGLE needs it (a pbuffer, GLX_EXT_create_context_es_profile).
-# The GPU process dies a few times as it starts and Chromium restarts it; the third start holds.
+# GPU-process restarts have been observed during startup; their cause remains unresolved.
 # SKY_STEAM_GPU=0 (the container's "linuxSteamGpu" extra) leaves the helper as the client asked for it.
+if [[ "$2" == */steamwebhelper ]]; then
+  printf '== SKY_STEAM stage=webhelper_start epoch_s=%s gpu=%s\n' "$(date -u +%s)" "${SKY_STEAM_GPU:-1}"
+fi
 if [ "$SKY_STEAM_GPU" != 0 ] && [[ "$2" == */steamwebhelper ]]; then
   args=()
   for a in "${@:3}"; do
