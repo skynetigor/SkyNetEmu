@@ -331,7 +331,12 @@ public final class LinuxSession {
                                LinuxRuntime.Installed runtime, String[] guestCommand) {
         if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) LinuxSteamGames.removeEmptySharedLibrary(container);
         File rt = LinuxRuntime.rootDir(context, runtime.id);
-        File hostDir = new File(rt, HOST_DIR);
+        File hostDir = LinuxProot.hostDir(context, container, new File(rt, HOST_DIR));
+        String programGuestPath = programGuestPath(guestCommand);
+        boolean fastpath = "fastpath".equals(LinuxProot.mode(container))
+                && !noProot(container) && !LinuxBionicSession.enabled(container)
+                && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)
+                && !runsOnFex(context, container, programGuestPath);
         File proot = new File(hostDir, "proot");
         File loader = new File(hostDir, "loader");
         FileUtils.chmod(proot, 0755);
@@ -339,12 +344,13 @@ public final class LinuxSession {
 
         int uid = Process.myUid();
         File cacheDir = context.getCacheDir();
-        File shmDir = new File(cacheDir, "shm");
+        File shmDir = sessionDirectory(context, "shm");
+        File prootTmp = sessionDirectory(context, "proot-tmp");
         File home = container.getLinuxHomeDir();
         File imageFsRoot = imageFs.getRootDir();
 
-        FileUtils.delete(shmDir);
-        shmDir.mkdirs();
+        if (!FileUtils.clear(shmDir) || !FileUtils.clear(prootTmp))
+            throw new IllegalStateException("Cannot clear Linux session temporary files");
         home.mkdirs();
         new File(rt, "tmp/.X11-unix").mkdirs();
         // The X server listens on X0 in this directory; the guest reaches it as X<displayNumber>.
@@ -357,7 +363,7 @@ public final class LinuxSession {
             LinuxFail.w(TAG, "Cannot link the X display", e);
         }
         writeAccounts(rt, uid);
-        writePreload(context, rt);
+        writePreload(context, rt, fastpath ? new File(hostDir, "libskyfastpath.so") : null);
 
         List<String> argv = new ArrayList<>();
         argv.add(proot.getPath());
@@ -372,9 +378,7 @@ public final class LinuxSession {
         bind(argv, "/proc");
         bind(argv, "/sys");
         // Android denies desktop battery probes with EACCES; expose no guest power supplies instead.
-        File powerSupplies = new File(cacheDir, "linux-power-supply");
-        if (!powerSupplies.isDirectory() && !powerSupplies.mkdirs())
-            throw new IllegalStateException("Cannot create guest power supply directory");
+        File powerSupplies = sessionDirectory(context, "power-supply");
         bind(argv, powerSupplies.getPath(), "/sys/class/power_supply");
         bind(argv, "/dev/urandom", "/dev/random");
         // The bound Android /dev already supplies fd/stdin/stdout/stderr symlinks into /proc.
@@ -451,12 +455,17 @@ public final class LinuxSession {
         argv.add("-i");
         if (java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER))
             prepareSteamGames(context, rt, imageFsRoot, container);
-        String programGuestPath = programGuestPath(guestCommand);
         List<String> guestEnv = guestEnv(context, rt, imageFsRoot, container,
                 programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath,
                 !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER));
+        if ("fastpath".equals(LinuxProot.mode(container)) && !fastpath)
+            LinuxFail.w(TAG, "Filesystem fast path is limited to direct Box64 PRoot sessions; using normal filesystem tracing");
+        if (fastpath) {
+            guestEnv.add("SKY_FASTPATH_MAP=" + LinuxProot.bindMap(argv, rt));
+        }
         argv.addAll(guestEnv);
-        writeSteamEmulatorEnv(home, guestCommand, guestEnv);
+        writeSteamEmulatorEnv(home, guestCommand, guestEnv,
+                "1".equals(container.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU)));
         for (String part : guestCommand) argv.add(part);
 
         if (LinuxBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
@@ -470,11 +479,20 @@ public final class LinuxSession {
 
         EnvVars host = new EnvVars();
         host.put("PROOT_LOADER", loader.getPath());
-        host.put("PROOT_TMP_DIR", cacheDir.getPath());
+        if (fastpath) host.put("PROOT_SKY_FASTPATH", "1");
+        host.put("PROOT_TMP_DIR", prootTmp.getPath());
         // Android's linker does not search an executable's own directory, and proot needs libtalloc from there.
         host.put("LD_LIBRARY_PATH", hostDir.getPath());
 
         return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt, "proot");
+    }
+
+    static File sessionDirectory(Context context, String name) {
+        // Android and component-screen cleanup may evict cache files during gameplay.
+        File directory = new File(context.getFilesDir(), "linux-session/" + name);
+        if (!directory.isDirectory() && !directory.mkdirs())
+            throw new IllegalStateException("Cannot create Linux session directory: " + directory);
+        return directory;
     }
 
     /** Legacy container extra: only "1" disables proot; absent values use proot. */
@@ -687,13 +705,16 @@ public final class LinuxSession {
      * ~/.skynet/steam-emulator/&lt;appId&gt;.env, and the selected SkyNetEmu compatibility tool applies them. This is
      * what lets each Steam game have its own emulator (see {@link LinuxEmulatorSetup}).
      */
-    private static void writeSteamEmulatorEnv(File home, String[] guestCommand, List<String> guestEnv) {
+    private static void writeSteamEmulatorEnv(File home, String[] guestCommand, List<String> guestEnv, boolean isolateGameGpu) {
         String appId = null;
         for (int i = 0; i + 1 < guestCommand.length; i++) {
             if (STEAM_MARKER.equals(guestCommand[i])) appId = guestCommand[i + 1];
         }
         if (appId == null || !appId.matches("\\d+")) return;
         StringBuilder text = new StringBuilder("unset LIBGL_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER VK_DRIVER_FILES VK_ICD_FILENAMES\n");
+        // Steam may still carry another session's Turnip policy. Reapply this game's
+        // complete policy below rather than stripping tokens from explicit overrides.
+        if (isolateGameGpu) text.append("unset TU_DEBUG\n");
         for (String entry : guestEnv) {
             int eq = entry.indexOf('=');
             if (eq <= 0 || !isEmulatorVariable(entry.substring(0, eq))) continue;
@@ -746,18 +767,19 @@ public final class LinuxSession {
             Container gameContainer = LinuxEmulatorSetup.of(container, shortcut);
             if (!gameContainer.getLinuxRuntime().equals(container.getLinuxRuntime())) {
                 writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId},
-                        java.util.Collections.singletonList("SKY_GAME_SETUP_ERROR=This game needs a different Linux runtime; start it from its SkyNetEmu shortcut."));
+                        java.util.Collections.singletonList("SKY_GAME_SETUP_ERROR=This game needs a different Linux runtime; start it from its SkyNetEmu shortcut."), false);
                 continue;
             }
             LinuxRootfs.Installed sessionRootfs = LinuxRootfs.resolve(context, container);
             LinuxRootfs.Installed gameRootfs = LinuxRootfs.resolve(context, gameContainer);
             if (gameRootfs != null && (sessionRootfs == null || !gameRootfs.dir.equals(sessionRootfs.dir))) {
                 writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId},
-                        java.util.Collections.singletonList("SKY_GAME_SETUP_ERROR=This game needs a different FEX root filesystem; start it from its SkyNetEmu shortcut."));
+                        java.util.Collections.singletonList("SKY_GAME_SETUP_ERROR=This game needs a different FEX root filesystem; start it from its SkyNetEmu shortcut."), false);
                 continue;
             }
             List<String> env = guestEnv(context, rt, imageFsRoot, gameContainer, null, null, false);
-            writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId}, env);
+            writeSteamEmulatorEnv(container.getLinuxHomeDir(), new String[]{STEAM_MARKER, appId}, env,
+                    "1".equals(gameContainer.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU)));
         }
     }
 
@@ -1070,9 +1092,10 @@ public final class LinuxSession {
     }
 
     /** The runtime's shim library (SysV IPC and other things Android withholds) is loaded into every process. */
-    private static void writePreload(Context context, File rt) {
+    private static void writePreload(Context context, File rt, File fastpath) {
         File preload = new File(rt, "etc/ld.so.preload");
         StringBuilder libraries = new StringBuilder();
+        if (fastpath != null) libraries.append(fastpath.getPath()).append('\n');
         if (new File(rt, PRELOAD.substring(1)).exists()) libraries.append(PRELOAD).append('\n');
         File shim = stageShim(context);
         if (shim != null) libraries.append(shim.getPath()).append('\n');

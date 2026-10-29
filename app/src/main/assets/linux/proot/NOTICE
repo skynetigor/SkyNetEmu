@@ -1,0 +1,31 @@
+Experimental PRoot pairs for SkyNetEmu
+
+PRoot: GPL-2.0-or-later, https://github.com/termux/proot
+Source: 7266fb3e8516535682f5a9c8f3a7e70f6506eddb (v5.1.107.92).
+The accompanying source archive includes copyright and license notices.
+Baseline: no source changes. Filters: accompanying filters.patch.
+Selective ioctl idea: DroidDeck tools/proot patch 0013, revision
+52fa41767c3843d3704020215e1268188557d011 (GPL-3.0).
+Adaptation retains the newer Termux SIOCGIFINDEX handling and all other ABIs.
+No Android security filter is removed; only redundant PRoot tracing is skipped.
+
+libtalloc.so.2: Termux talloc 2.4.3, LGPL-3.0-or-later.
+Source: https://www.samba.org/ftp/talloc/talloc-2.4.3.tar.gz
+The accompanying source archive includes its license and build system.
+Preserved runtime binary SHA256:
+3c9b207c0a6ea2896b7523e03f55d9ab0d9e88baa115d4c32b84058ff4246fbb
+
+Built with Android NDK 29.0.14206865, API 28, -O2, -DARG_MAX=131072,
+-D_FILE_OFFSET_BITS=64, -D_GNU_SOURCE, external matched loader and
+RUNPATH $ORIGIN. Baseline follows the installed binary's dependency policy
+(libtalloc/libc; compiler may add libdl), not the contradictory older SHMEM
+note. PROOT_WITH_LIBANDROID_SHMEM is not enabled for these pairs.
+Both seccomp and process_vm build probes must pass.
+
+Fastpath variant additionally applies fastpath.patch and preloads the accompanying
+fastpath.c built for glibc AArch64 with Zig (-O2 -shared -fPIC).
+SkyNetEmu's conservative read-only implementation is GPL-3.0-or-later.
+The matched capability and instruction-address dispatch were inspired by
+DroidDeck's patch 0014, but do not import its cwd synchronization, broad hooks,
+metadata caches or global SVC rewriting. Symlinks and unsupported operations
+retain normal PRoot translation. The corresponding source is included.

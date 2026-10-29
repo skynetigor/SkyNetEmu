@@ -15,14 +15,15 @@ import java.util.Map;
 public final class LinuxEmulatorSetup {
     /** Container (or shortcut) extra: "1" runs Turnip without its tiled (GMEM) rendering, TU_DEBUG=sysmem. */
     public static final String EXTRA_TU_SYSMEM = "linuxTuSysmem";
+    public static final String EXTRA_ISOLATE_GAME_GPU = "linuxIsolateGameGpu";
 
     /** The shortcut extras that belong to the emulator. */
     public static final String[] EXTRAS = {
             LinuxEmulator.EXTRA_EMULATOR, LinuxEmulator.EXTRA_ID, LinuxEmulator.EXTRA_PRESET, LinuxEmulator.EXTRA_ROOTFS,
             LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS, LinuxFex.EXTRA_GL_32,
-            LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM,
+            LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM, EXTRA_ISOLATE_GAME_GPU,
             LinuxDriverManager.EXTRA_DRIVER, LinuxGpuMemory.EXTRA, LinuxSession.EXTRA_GL_DRIVER, LinuxSession.EXTRA_VULKAN_PRESENT,
-            LinuxBionicSession.EXTRA, LinuxSession.EXTRA_NO_PROOT, LinuxTouchMode.EXTRA,
+            LinuxBionicSession.EXTRA, LinuxSession.EXTRA_NO_PROOT, LinuxProot.EXTRA, LinuxTouchMode.EXTRA,
             com.winlator.cmod.lsfg.LsfgManager.EXTRA_PERFORMANCE_MODE, com.winlator.cmod.lsfg.LsfgManager.EXTRA_PRESENT_MODE
     };
 

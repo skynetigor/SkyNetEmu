@@ -126,6 +126,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var fexThunks by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS)) }
     var fexGl32 by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_32)) }
     var tuSysmem by remember { mutableStateOf(shortcut.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM)) }
+    var isolateGameGpu by remember { mutableStateOf(shortcut.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, "0")) }
+    var prootMode by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxProot.EXTRA, "runtime").ifEmpty { "runtime" }) }
     var glVendor by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_VENDOR)) }
     var rendererDriverId by remember { mutableStateOf(shortcut.getRendererDriverId()) }
     val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
@@ -246,6 +248,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxFex.EXTRA_GL_32, fexGl32.ifEmpty { null })
         shortcut.putExtra(LinuxFex.EXTRA_GL_VENDOR, glVendor.ifEmpty { null })
         shortcut.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, tuSysmem.ifEmpty { null })
+        shortcut.putExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, isolateGameGpu)
+        shortcut.putExtra(com.winlator.cmod.linux.LinuxProot.EXTRA, prootMode)
         shortcut.setRendererDriverId(rendererDriverId)
         shortcut.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId.ifEmpty { null })
         shortcut.putExtra(LinuxGpuMemory.EXTRA, gpuMemory)
@@ -435,6 +439,15 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     linkedMapOf("1" to "On", "0" to "Off")
                 ) { tuSysmem = it }
                 SettingsDivider()
+                SettingMappedChoice(
+                    "Isolate Steam game GPU settings (experimental)",
+                    isolateGameGpu,
+                    linkedMapOf("0" to "Off (current behavior)", "1" to "On")
+                ) { isolateGameGpu = it }
+                Text("Do not inherit the running Steam launcher's TU_DEBUG. This game's sysmem setting and explicit variables still apply. Direct launches already use a fresh environment.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                SettingsDivider()
                 LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 SettingsDivider()
                 SettingMappedChoice("Max GPU memory", gpuMemory, linkedMapOf(
@@ -590,6 +603,14 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 }) { runtimeId = it }
                 SettingsDivider()
                 SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = "0" }
+                SettingsDivider()
+                SettingMappedChoice("PRoot runtime (experimental)", prootMode,
+                    linkedMapOf("runtime" to "Runtime default", "baseline" to "Source-matched rebuild",
+                        "filters" to "Selective syscall filters",
+                        "fastpath" to "Selective filters + filesystem fast path")) { prootMode = it }
+                Text("Opt-in matched tracer/loader. Filesystem fast path supports direct Box64 PRoot games: read-only regular files; symlinks, relative paths and writes use PRoot. Steam and FEX retain normal filesystem tracing.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 SettingsDivider()
                 SettingMappedChoice(
                     "x86 emulator",

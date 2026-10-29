@@ -1,0 +1,58 @@
+--- a/src/syscall/seccomp.c
++++ b/src/syscall/seccomp.c
+@@ -276,6 +276,30 @@
+ 	return add_statements(program, sizeof(statements) / sizeof(statements[0]), statements);
+ }
+ 
++static int allow_sky_filesystem(struct sock_fprog *program)
++{
++	/* Only the matched preload's exact AArch64 syscall instruction.
++	 * Keep all writes, cwd changes and other ABIs on the normal trace path. */
++	struct sock_filter statements[] = {
++		BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, arch)),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AUDIT_ARCH_AARCH64, 0, 11),
++		BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, instruction_pointer) + 4),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 0xf, 0, 9),
++		BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, instruction_pointer)),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 0xfff10020, 0, 7),
++		BPF_STMT(BPF_LD + BPF_W + BPF_ABS, offsetof(struct seccomp_data, nr)),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 56, 4, 0),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 79, 3, 0),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 48, 2, 0),
++		BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, 80, 1, 0),
++		BPF_STMT(BPF_JMP + BPF_JA, 1),
++		BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW)
++	};
++	if (getenv("PROOT_SKY_FASTPATH") == NULL)
++		return 0;
++	return add_statements(program, sizeof(statements) / sizeof(statements[0]), statements);
++}
++
+ static int set_seccomp_filters(const FilteredSysnum *sysnums)
+ {
+ 	SeccompArch seccomp_archs[] = SECCOMP_ARCHS;
+@@ -294,6 +318,10 @@
+ 	if (status < 0)
+ 		goto end;
+ 
++	status = allow_sky_filesystem(&program);
++	if (status < 0)
++		goto end;
++
+ 	/* For each handled architectures */
+ 	for (i = 0; i < nb_archs; i++) {
+ 		word_t syscall;
+--- a/src/syscall/exit.c
++++ b/src/syscall/exit.c
+@@ -596,6 +596,11 @@
+ 		word_t type;
+ 
+ 		option = peek_reg(tracee, ORIGINAL, SYSARG_1);
++		if (option == 0x53594b46 && getenv("PROOT_SKY_FASTPATH") != NULL
++		    && getenv("PROOT_NO_SECCOMP") == NULL && tracee->seccomp == ENABLED) {
++			status = 0x534b5901;
++			break;
++		}
+ 
+ 		/* Record the tracee's own request for the "no new privileges"
+ 		 * flag so a later PR_GET_NO_NEW_PRIVS (answered at sysenter)

@@ -181,8 +181,7 @@ public final class LinuxBionicSession {
         env.put("BOX64_EMULATED_LIBS", "libglib-2.0.so.0:libgobject-2.0.so.0:libgio-2.0.so.0:libgmodule-2.0.so.0:libgthread-2.0.so.0:libpango-1.0.so.0:libpangocairo-1.0.so.0"
                 + ":libpangoft2-1.0.so.0:libcairo.so.2:libcairo-gobject.so.2:libgdk_pixbuf-2.0.so.0:libgtk-3.so.0:libgdk-3.so.0:libatk-1.0.so.0:libatk-bridge-2.0.so.0:libpixman-1.so.0:libxcb-render.so.0");
         // Android has no /dev/shm: shm_open (Box64's own) uses this folder.
-        File shm = new File(context.getCacheDir(), "shm");
-        shm.mkdirs();
+        File shm = LinuxSession.sessionDirectory(context, "shm");
         env.put("BOX64_SHM_DIR", shm.getPath());
 
         // A game with an embedded Chromium looks for icudtl.dat and its .pak files in the game's folder, one level above the program's, where

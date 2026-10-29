@@ -84,6 +84,8 @@ public final class LinuxShortcutDefaults {
         values.put(LinuxFex.EXTRA_GL_32, on(container, LinuxFex.EXTRA_GL_32));
         values.put(LinuxFex.EXTRA_GL_VENDOR, LinuxFex.glVendor(container));
         values.put(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, off(container, LinuxEmulatorSetup.EXTRA_TU_SYSMEM));
+        values.put(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, off(container, LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU));
+        values.put(LinuxProot.EXTRA, container.getExtra(LinuxProot.EXTRA, "runtime"));
         // Empty: the driver the Linux runtime brings. The container names no other one, so neither does the shortcut.
         values.put(LinuxDriverManager.EXTRA_DRIVER, container.getExtra(LinuxDriverManager.EXTRA_DRIVER));
         values.put(LinuxSession.EXTRA_GL_DRIVER,

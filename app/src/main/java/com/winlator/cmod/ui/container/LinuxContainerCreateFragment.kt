@@ -406,6 +406,8 @@ private fun LinuxContainerEditorBody(
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var tuSysmem by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM) == "1") }
+    var isolateGameGpu by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU) == "1") }
+    var prootMode by remember { mutableStateOf(editing?.getExtra(com.winlator.cmod.linux.LinuxProot.EXTRA)?.ifEmpty { "runtime" } ?: "runtime") }
     var prootEnabled by remember { mutableStateOf(LinuxSession.prootEnabled(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
     var bionic by remember { mutableStateOf(editing?.getExtra(LinuxBionicSession.EXTRA) == "1" && !prootEnabled) }
     var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
@@ -511,6 +513,8 @@ private fun LinuxContainerEditorBody(
         container.putExtra(LinuxFex.EXTRA_PRESET_VERSION, "2")
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
         container.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, if (tuSysmem) "1" else "")
+        container.putExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, if (isolateGameGpu) "1" else "0")
+        container.putExtra(com.winlator.cmod.linux.LinuxProot.EXTRA, prootMode)
         container.putExtra(LinuxSession.EXTRA_NO_PROOT, if (prootEnabled) "0" else "1")
         container.putExtra(LinuxBionicSession.EXTRA, if (bionic) "1" else "0")
         container.putExtra(LinuxFex.EXTRA_GL_32, if (fexGl32) "1" else "0")
@@ -645,6 +649,15 @@ private fun LinuxContainerEditorBody(
                     ) { chosenRuntimeId = it }
                 }
                 SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = false }
+                SettingsDivider()
+                SettingMappedChoice("PRoot runtime (experimental)", prootMode,
+                    linkedMapOf("runtime" to "Runtime default", "baseline" to "Source-matched rebuild",
+                        "filters" to "Selective syscall filters",
+                        "fastpath" to "Selective filters + filesystem fast path")) { prootMode = it }
+                Text("Filesystem fast path supports direct Box64 PRoot games. Steam and FEX keep normal filesystem tracing; symlinks, relative paths and writes always fall back.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                SettingsDivider()
                 SettingToggle("Run on Android's C library, without glibc (experimental, Box64)", bionic) { bionic = it; if (it) prootEnabled = false }
             }
         },
@@ -750,6 +763,11 @@ private fun LinuxContainerEditorBody(
                 }
                 SettingsDivider()
                 SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
+                SettingsDivider()
+                SettingToggle("Isolate Steam game GPU settings (experimental)", isolateGameGpu) { isolateGameGpu = it }
+                Text("New shortcuts can avoid inheriting the running launcher's TU_DEBUG. Per-game sysmem and explicit variables still apply.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 SettingsDivider()
                 LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 SettingsDivider()
