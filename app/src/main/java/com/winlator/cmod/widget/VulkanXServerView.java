@@ -195,6 +195,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetPostFXMode(long handle, int mode);
     private native void nativeSetSwapRB(long handle, boolean enabled);
     private native void nativeSetPresentMode(long handle, int mode);
+    private native void nativeSetFrameCoordination(long handle, int cap);
     private native int[] nativeGetSupportedPresentModes(long handle);
 
     private native void nativeInitRootWindow(long handle, long rootId, long contentId, int width, int height);
@@ -249,6 +250,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     } else {
 
                         nativeSetPresentMode(nativeHandle, pendingPresentMode);
+                        nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
                         nativeSetFilterMode(nativeHandle, pendingFilterMode);
                         nativeSetSwapRB(nativeHandle, pendingSwapRB);
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
@@ -276,6 +278,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                 if (nativeHandle != 0) {
                     com.winlator.cmod.linux.FramePipelineDiagnostics.renderer(this::pipelineDiagnostics);
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
+                    nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
@@ -912,6 +915,14 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setFpsLimit(int limit) {
         this.fpsLimit = Math.max(0, Math.min(1000, limit));
         updateDisplayFps(fpsLimit);
+        synchronized (lock) {
+            if (nativeHandle != 0)
+                nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
+        }
+    }
+    @Override public void setFrameCoordination(boolean enabled) {
+        super.setFrameCoordination(enabled);
+        setFpsLimit(fpsLimit);
     }
     public void setPipMode(boolean pip) { inPipMode = pip; }
     public int getSurfaceWidth() { return surfaceWidth; }

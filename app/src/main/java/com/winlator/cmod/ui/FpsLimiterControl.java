@@ -35,6 +35,7 @@ import java.io.File;
 public class FpsLimiterControl extends LinearLayout {
     private static final String EXTRA_ENABLED = "nativeFpsLimiterEnabled";
     private static final String EXTRA_LIMIT = "nativeFpsLimit";
+    private static final String EXTRA_COORDINATION = "experimentalFrameCoordination";
     private static final int SLIDER_MAX_FPS = 120;
     private static final int STEP_FPS = 5;
     private static final int CUSTOM_POSITION = SLIDER_MAX_FPS / STEP_FPS;
@@ -42,6 +43,7 @@ public class FpsLimiterControl extends LinearLayout {
     private final SeekBar slider;
     private final TextView valueLabel;
     private final NumericEditText customValue;
+    private final android.widget.CheckBox coordination;
 
     private boolean initializing = true;
     private boolean stateLoaded;
@@ -171,6 +173,14 @@ public class FpsLimiterControl extends LinearLayout {
             @Override public void afterTextChanged(Editable s) { }
         });
 
+        coordination = new android.widget.CheckBox(context);
+        coordination.setText("Frame coordination (experimental)\nVulkan: compositor cap + one GPU submission. EGL/DisplayX: overlays only.");
+        coordination.setTextColor(onSurfaceVariant);
+        coordination.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        addView(coordination, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        coordination.setOnCheckedChangeListener((button, checked) -> {
+            if (!initializing) saveAndApply();
+        });
         updateLimitUi();
         post(this::bindWhenReady);
     }
@@ -208,6 +218,9 @@ public class FpsLimiterControl extends LinearLayout {
         String oldEnabled;
 
         Shortcut shortcutStore = openShortcutStore(container);
+        coordination.setChecked("1".equals(shortcutStore != null
+                ? shortcutStore.getExtra(EXTRA_COORDINATION, container.getExtra(EXTRA_COORDINATION, "0"))
+                : container.getExtra(EXTRA_COORDINATION, "0")));
         if (shortcutStore != null) {
             savedLimit = shortcutStore.getExtra(EXTRA_LIMIT, "");
             oldPreset = shortcutStore.getExtra("graphicsFpsPreset", "");
@@ -257,16 +270,18 @@ public class FpsLimiterControl extends LinearLayout {
             if (shortcutStore != null) {
                 shortcutStore.putExtra(EXTRA_ENABLED, null);
                 shortcutStore.putExtra(EXTRA_LIMIT, String.valueOf(chosen));
+                shortcutStore.putExtra(EXTRA_COORDINATION, coordination.isChecked() ? "1" : "0");
                 shortcutStore.saveData();
             } else {
                 container.putExtra(EXTRA_ENABLED, null);
                 container.putExtra(EXTRA_LIMIT, String.valueOf(chosen));
+                container.putExtra(EXTRA_COORDINATION, coordination.isChecked() ? "1" : "0");
                 container.saveData();
             }
         }
 
         XServerRendererView renderer = activity.getXServerView();
-        if (renderer != null) renderer.setFpsLimit(chosen);
+        if (renderer != null) applyEffectiveLimit(renderer);
     }
 
     private void applyCurrentLimit() {
@@ -277,6 +292,7 @@ public class FpsLimiterControl extends LinearLayout {
     }
 
     private void applyEffectiveLimit(XServerRendererView renderer) {
+        renderer.setFrameCoordination(coordination.isChecked());
         renderer.setFpsLimit(getChosenLimit());
     }
 

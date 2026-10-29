@@ -414,6 +414,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPresentMode(
     if (r) r->setPresentMode((VkPresentModeKHR)mode);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetFrameCoordination(
+    JNIEnv*, jobject, jlong handle, jint cap)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setFrameCoordination(cap);
+}
+
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetSupportedPresentModes(
     JNIEnv* env, jobject, jlong handle)

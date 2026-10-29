@@ -208,6 +208,7 @@ public:
     void setSharpness(float s);
     void setSwapRB(bool enabled);
     void setPresentMode(VkPresentModeKHR mode);
+    void setFrameCoordination(int cap);
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
@@ -402,6 +403,8 @@ public:
     void rendererError(VkResult result, const char* stage);
     std::mutex        renderMutex;
     std::mutex        dirtyMutex;
+    std::atomic<int> coordinatedCap{0};
+    unsigned pacingVersion = 0;
     std::condition_variable dirtyCV;
     std::shared_mutex frameMutex;
 

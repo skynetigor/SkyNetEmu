@@ -1349,6 +1349,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 }
 
 void VulkanRendererContext::renderLoop() {
+    auto nextFrame = std::chrono::steady_clock::time_point::min();
+    unsigned version = 0;
     while (isRunning) {
         { std::unique_lock<std::mutex> lk(dirtyMutex);
            auto ready=[this]{ return !isRunning||(!rendererFailed.load()&&!surfaceDetached.load()&&
@@ -1357,6 +1359,22 @@ void VulkanRendererContext::renderLoop() {
            else dirtyCV.wait(lk,ready); }
         if (pipelineEnabled && displayTimingEnabled && !rendererFailed.load() && !surfaceDetached.load()) pollDisplayTiming();
         if (!isRunning) break;
+        {
+            std::unique_lock<std::mutex> lock(dirtyMutex);
+            if (version != pacingVersion) {
+                version = pacingVersion;
+                nextFrame = std::chrono::steady_clock::time_point::min();
+            }
+            int cap = coordinatedCap.load();
+            if (cap > 0) {
+                dirtyCV.wait_until(lock, nextFrame, [this, version] {
+                    return !isRunning || surfaceDetached.load() || pacingVersion != version;
+                });
+                if (!isRunning) break;
+                if (surfaceDetached.load() || version != pacingVersion) continue;
+                nextFrame = std::chrono::steady_clock::now() + std::chrono::nanoseconds(1000000000LL / cap);
+            }
+        }
         try { renderFrame(); }
         catch (const std::exception& e) {
             if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: %s",e.what());
@@ -1374,6 +1392,17 @@ void VulkanRendererContext::renderLoop() {
                 return !isRunning||surfaceDetached.load(); });
         }
     }
+}
+
+void VulkanRendererContext::setFrameCoordination(int cap) {
+    {
+        std::lock_guard<std::mutex> lock(dirtyMutex);
+        cap = std::max(0, std::min(1000, cap));
+        if (coordinatedCap.load() == cap) return;
+        coordinatedCap.store(cap);
+        ++pacingVersion;
+    }
+    dirtyCV.notify_all();
 }
 
 void VulkanRendererContext::flushDeleteQueue() {
@@ -1471,6 +1500,15 @@ void VulkanRendererContext::renderFrame() {
         return;
     }
     uint64_t frameSource=0, frameEpoch=0;
+    if (coordinatedCap.load() > 0) {
+        // Keep allocated slots, but do not submit while any previous composition is executing.
+        for (auto fence : inFlightFences) {
+            if (waitFrameFence(fence, "coordinated_frame") != VK_SUCCESS) {
+                swapchainRetryPending.store(true);
+                return;
+            }
+        }
+    }
     bool currentFenceWaited = false;
     VkResult fenceState=vk_.GetFenceStatus ? vk_.GetFenceStatus(device,inFlightFences[currentFrame]) : VK_NOT_READY;
     if (fenceState==VK_NOT_READY) {
@@ -2205,7 +2243,7 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         "updates=%llu accepted=%llu failed=%llu submits=%llu presents=%llu draws=%u submit_result=%d present_result=%d "
         "custom_driver=%d driver_id=%u driver_name=%.64s driver_info=%.128s output=%ux%u present_mode=%d "
         "dma_live=%zu dma_released_displayed=%zu retired_textures=%zu "
-        "renderer_failed=%d wait_stage=%s wait_result=%d stalls=%u",
+        "renderer_failed=%d wait_stage=%s wait_result=%d stalls=%u coordination_cap=%d submission_slots=%u",
         dmaDiagnostics.stage,(int)dmaDiagnostics.result,props.deviceName,props.vendorID,props.driverVersion,
         VK_VERSION_MAJOR(props.apiVersion),VK_VERSION_MINOR(props.apiVersion),VK_VERSION_PATCH(props.apiVersion),
         hasExternalMemoryFd,hasDmaBufExtension,vk_.GetMemoryFdPropertiesKHR!=nullptr,(int)VK_FORMAT_B8G8R8A8_UNORM,
@@ -2218,7 +2256,8 @@ std::string VulkanRendererContext::rendererDiagnostics() {
         (unsigned)driverProps.driverID,driverProps.driverName,driverProps.driverInfo,
         outputWidth.load(),outputHeight.load(),actualPresentMode.load(),
         dmaBufKeys.size(),releasedDmaBufs.size(),deleteQueue.size(),
-        rendererFailed.load(),rendererWaitStage.load(),rendererWaitResult.load(),rendererStalls.load());
+        rendererFailed.load(),rendererWaitStage.load(),rendererWaitResult.load(),rendererStalls.load(),
+        coordinatedCap.load(),coordinatedCap.load() > 0 ? 1u : MAX_FRAMES_IN_FLIGHT);
     std::string snapshot(text);
     auto appendTiming = [&](const char* name, const RendererTiming& timing) {
         char part[160];

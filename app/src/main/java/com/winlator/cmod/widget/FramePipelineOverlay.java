@@ -11,7 +11,15 @@ public final class FramePipelineOverlay extends android.widget.TextView {
     private final Runnable refresh=new Runnable() {
         @Override public void run() {
             if(!isAttachedToWindow() || !FramePipelineDiagnostics.enabled())return;
-            setText(FramePipelineDiagnostics.overlay());postDelayed(this,1000);
+            boolean coordinated = XServerRendererView.coordinatesOverlays(getContext());
+            if (coordinated && (!isShown() || getWindowVisibility() != VISIBLE)) {
+                return;
+            }
+            String text = FramePipelineDiagnostics.overlay();
+            if (!coordinated || !android.text.TextUtils.equals(getText(), text)) {
+                setText(text);
+            }
+            postDelayed(this,1000);
         }
     };
     public FramePipelineOverlay(Context context) {
@@ -21,6 +29,17 @@ public final class FramePipelineOverlay extends android.widget.TextView {
         int padding=Math.round(6*getResources().getDisplayMetrics().density);setPadding(padding,padding,padding,padding);
         setText("Frame pipeline: waiting");
     }
-    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();post(refresh);}
+    @Override protected void onAttachedToWindow(){super.onAttachedToWindow();removeCallbacks(refresh);post(refresh);}
     @Override protected void onDetachedFromWindow(){removeCallbacks(refresh);super.onDetachedFromWindow();}
+    @Override protected void onVisibilityChanged(android.view.View changed, int visibility) {
+        super.onVisibilityChanged(changed, visibility);
+        if (refresh == null) return;
+        if (isShown()) { removeCallbacks(refresh); post(refresh); }
+    }
+    @Override protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        if (refresh == null) return;
+        if (visibility == VISIBLE) { removeCallbacks(refresh); post(refresh); }
+        else if (XServerRendererView.coordinatesOverlays(getContext())) removeCallbacks(refresh);
+    }
 }

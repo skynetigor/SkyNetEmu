@@ -14,6 +14,28 @@ public abstract class XServerRendererView extends SurfaceView {
     public final ViewTransformation viewTransformation = new ViewTransformation();
     protected final XServer xServer;
     private final com.winlator.cmod.perf.DisplayFrameRate displayFrameRate;
+    private volatile boolean frameCoordination;
+
+    public void setFrameCoordination(boolean enabled) { frameCoordination = enabled; }
+    public final boolean isFrameCoordinationEnabled() { return frameCoordination; }
+
+    public static boolean coordinatesOverlays(Context context) {
+        XServerRendererView renderer = findRenderer(context);
+        return renderer != null && renderer.isFrameCoordinationEnabled();
+    }
+
+    public static int overlayUpdateIntervalMs(Context context, int normalIntervalMs) {
+        XServerRendererView renderer = findRenderer(context);
+        int cap = renderer != null && renderer.isFrameCoordinationEnabled() ? renderer.getFpsLimit() : 0;
+        return cap > 0 ? Math.max(normalIntervalMs, (1000 + cap - 1) / cap) : normalIntervalMs;
+    }
+
+    private static XServerRendererView findRenderer(Context context) {
+        while (context instanceof android.content.ContextWrapper && !(context instanceof com.winlator.cmod.XServerDisplayActivity))
+            context = ((android.content.ContextWrapper) context).getBaseContext();
+        return context instanceof com.winlator.cmod.XServerDisplayActivity
+                ? ((com.winlator.cmod.XServerDisplayActivity) context).getXServerView() : null;
+    }
 
     protected XServerRendererView(Context context, XServer xServer) {
         super(context);

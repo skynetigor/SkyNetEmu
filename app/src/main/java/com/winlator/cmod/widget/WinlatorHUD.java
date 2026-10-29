@@ -166,7 +166,8 @@ public class WinlatorHUD extends View {
     private boolean redrawScheduled = false;
 
     private HandlerThread statsThread = null;
-    private Handler statsHandler = null;
+    private volatile Handler statsHandler = null;
+    private volatile boolean coordinatedStatsHidden;
     private final Runnable statsRunnable = this::doStats;
 
     private final BatteryManager batteryManager;
@@ -179,9 +180,12 @@ public class WinlatorHUD extends View {
 
     private final Runnable redrawRunnable = () -> {
         redrawScheduled = false;
+        boolean coordinated = XServerRendererView.coordinatesOverlays(getContext());
+        if (coordinated && (!isAttachedToWindow() || !isShown() || getWindowVisibility() != VISIBLE)) return;
         try {
             snapshot();
-            invalidate();
+            if (coordinated) postInvalidateOnAnimation();
+            else invalidate();
         } catch (Exception ignored) {}
         if (getVisibility() == VISIBLE) scheduleRedraw();
     };
@@ -350,14 +354,19 @@ public class WinlatorHUD extends View {
     }
 
     private void doStats() {
+        Handler handler = statsHandler;
+        if (coordinatedStatsHidden || handler == null
+                || android.os.Looper.myLooper() != handler.getLooper()) return;
         try {
             readStats();
         } catch (Exception ignored) {}
 
-        if (userEnabled && statsHandler != null) {
-            statsHandler.postDelayed(statsRunnable, STATS_INTERVAL_MS);
+        if (userEnabled && !coordinatedStatsHidden && statsHandler == handler) {
+            handler.postDelayed(statsRunnable, STATS_INTERVAL_MS);
         }
-        uiHandler.post(this::invalidate);
+        uiHandler.post(() -> {
+            if (!XServerRendererView.coordinatesOverlays(getContext())) invalidate();
+        });
     }
 
     private void readStats() {
@@ -1009,6 +1018,7 @@ public class WinlatorHUD extends View {
         super.onAttachedToWindow();
         prefs.registerOnSharedPreferenceChangeListener(prefListener);
         if (userEnabled) {
+            if (XServerRendererView.coordinatesOverlays(getContext()) || coordinatedStatsHidden) startStatsThread();
             uiHandler.removeCallbacks(redrawRunnable);
             redrawScheduled = false;
             setVisibility(VISIBLE);
@@ -1026,6 +1036,12 @@ public class WinlatorHUD extends View {
     }
 
     private void startStatsThread() {
+        coordinatedStatsHidden = XServerRendererView.coordinatesOverlays(getContext())
+                && (!isAttachedToWindow() || !isShown() || getWindowVisibility() != VISIBLE);
+        if (coordinatedStatsHidden) {
+            stopStatsThread();
+            return;
+        }
         if (statsThread == null) {
             statsThread = new HandlerThread("WinlatorHUD-stats", Process.THREAD_PRIORITY_BACKGROUND);
             statsThread.start();
@@ -1081,15 +1097,19 @@ public class WinlatorHUD extends View {
     }
 
     private void scheduleRedraw() {
+        if (XServerRendererView.coordinatesOverlays(getContext())
+                && (!isAttachedToWindow() || !isShown() || getWindowVisibility() != VISIBLE)) return;
         if (!redrawScheduled) {
             redrawScheduled = true;
-            uiHandler.postDelayed(redrawRunnable, 400);
+            uiHandler.postDelayed(redrawRunnable, XServerRendererView.overlayUpdateIntervalMs(getContext(), 400));
         }
     }
 
     @Override
     protected void onVisibilityChanged(View changedView, int visibility) {
         super.onVisibilityChanged(changedView, visibility);
+        if (uiHandler == null) return;
+        if (userEnabled && (XServerRendererView.coordinatesOverlays(getContext()) || coordinatedStatsHidden)) startStatsThread();
         if (visibility == VISIBLE && userEnabled) {
             scheduleRedraw();
         } else {
@@ -1101,6 +1121,19 @@ public class WinlatorHUD extends View {
     @Override
     protected void onWindowVisibilityChanged(int visibility) {
         super.onWindowVisibilityChanged(visibility);
+        if (uiHandler == null) return;
+        if (XServerRendererView.coordinatesOverlays(getContext())) {
+            if (visibility != VISIBLE) {
+                coordinatedStatsHidden = true;
+                uiHandler.removeCallbacks(redrawRunnable);
+                redrawScheduled = false;
+                stopStatsThread();
+                return;
+            }
+            if (userEnabled) startStatsThread();
+        } else if (coordinatedStatsHidden && userEnabled) {
+            startStatsThread();
+        }
         if (visibility == VISIBLE && userEnabled) {
             uiHandler.removeCallbacks(redrawRunnable);
             redrawScheduled = false;
@@ -1413,4 +1446,3 @@ public class WinlatorHUD extends View {
         }
     }
 }
-
