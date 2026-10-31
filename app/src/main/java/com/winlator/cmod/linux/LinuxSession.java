@@ -1153,9 +1153,13 @@ public final class LinuxSession {
 
     /** Copies one of the app's own Linux binaries out of the APK into files/{@code dirName}. */
     static File stageAsset(Context context, String dirName, String name) {
+        return stageAsset(context, dirName, name, "linux/" + name);
+    }
+
+    static File stageAsset(Context context, String dirName, String name, String assetPath) {
         File dir = new File(context.getFilesDir(), dirName);
         File shim = new File(dir, name);
-        try (java.io.InputStream in = context.getAssets().open("linux/" + name)) {
+        try (java.io.InputStream in = context.getAssets().open(assetPath)) {
             byte[] data = in.readAllBytes();
             // The same size is not the same file (a rebuilt binary can come out as long as the last one): the bytes are compared.
             if (!shim.isFile() || shim.length() != data.length || !java.util.Arrays.equals(java.nio.file.Files.readAllBytes(shim.toPath()), data)) {

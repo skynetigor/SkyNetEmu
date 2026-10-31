@@ -2,6 +2,7 @@ package com.winlator.cmod.linux;
 
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
 import android.util.Log;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.core.Callback;
@@ -45,11 +46,13 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     private volatile boolean stopped;
     private volatile boolean suspended;
     private volatile ContainerProcess game;
+    private volatile ContainerProcess bionicServer;
     private volatile LocalSocket connection;
 
     public static boolean enabled(Container container, String[] command) {
         return "1".equals(container.getExtra(EXTRA))
-                && LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))
+                && (LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))
+                        || LinuxBionicSession.enabled(container))
                 && Arrays.asList(command).contains(LinuxSession.STEAM_MARKER);
     }
 
@@ -143,6 +146,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                     AtomicInteger status = new AtomicInteger(126);
                     synchronized (this) {
                         if (stopped) throw new IOException("Direct FEX session is stopping");
+                        if ("fex_bionic".equals(launch.executionMode)) startBionicServer(launch);
                         game = environment.startProcess(launch.argv, launch.hostEnv, launch.workingDir,
                                 code -> { status.set(code); exited.countDown(); }, output);
                         game.setSuspended(suspended);
@@ -165,6 +169,10 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                     if (!exited.await(24, TimeUnit.HOURS)) throw new IOException("Direct FEX launch deadline exceeded");
                     owned.requestStop();
                     if (!owned.awaitStop(7000)) throw new IOException("Direct FEX descendants remain alive");
+                    if (bionicServer != null) {
+                        bionicServer.requestStop();
+                        if (!bionicServer.awaitStop(7000)) throw new IOException("Android FEX server descendants remain alive");
+                    }
                     result.writeInt(status.get());
                     result.flush();
                 } catch (IOException | JSONException | IllegalArgumentException | IllegalStateException error) {
@@ -177,6 +185,8 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                 } finally {
                     if (game != null) game.requestStop();
                     game = null;
+                    if (bionicServer != null) bionicServer.requestStop();
+                    bionicServer = null;
                 }
             } catch (IOException error) {
                 if (!stopped) Log.e(TAG, "Direct FEX connection failed", error);
@@ -188,6 +198,30 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                 connection = null;
             }
         }
+    }
+
+    private void startBionicServer(LinuxSession.Launch launch) throws IOException, InterruptedException {
+        File executable = LinuxSession.stageAsset(environment.getContext(), "linux-fex-bionic", "FEXServer",
+                "linux-fex-bionic/FEXServer");
+        if (executable == null) throw new IOException("Cannot stage Android FEXServer");
+        AtomicInteger exit = new AtomicInteger(-1);
+        bionicServer = environment.startProcess(
+                new String[]{executable.getPath(), "--foreground", "--persistent", "15"},
+                launch.hostEnv, launch.workingDir, exit::set, output);
+        File endpoint = new File(executable.getParentFile(), "server");
+        long deadline = android.os.SystemClock.elapsedRealtime() + 5000;
+        IOException last = null;
+        while (!stopped && exit.get() == -1 && android.os.SystemClock.elapsedRealtime() < deadline) {
+            try (LocalSocket probe = new LocalSocket()) {
+                probe.connect(new LocalSocketAddress(endpoint.getPath(), LocalSocketAddress.Namespace.FILESYSTEM));
+                bionicServer.setSuspended(suspended);
+                return;
+            } catch (IOException error) {
+                last = error;
+                Thread.sleep(100);
+            }
+        }
+        throw new IOException("Android FEXServer did not become ready (exit=" + exit.get() + ")", last);
     }
 
     private LinuxSession.Launch prepare(List<String> command, Map<String, String> overrides)
@@ -203,7 +237,8 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             throw new IOException("Rise's installed x86-64 executable is unavailable");
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(environment.getContext(), container);
         LinuxRootfs.Installed rootfs = LinuxRootfs.resolve(environment.getContext(), container);
-        if (emulator == null || !LinuxEmulator.FEX.equals(emulator.emulator) || rootfs == null)
+        if (rootfs == null || (!LinuxBionicSession.enabled(container)
+                && (emulator == null || !LinuxEmulator.FEX.equals(emulator.emulator))))
             throw new IOException("Direct FEX requires the selected FEX and root filesystem");
         Map<String, String> env = new LinkedHashMap<>(sessionEnv);
         env.putAll(overrides);
@@ -225,12 +260,54 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             if (!source.isFile()) throw new IOException("Missing scout library: " + name);
             link(new File(legacy, name), source);
         }
+        if (LinuxBionicSession.enabled(container) && !LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) {
+            List<String> guestEnv = new ArrayList<>();
+            guestEnv.add("BOX64_DYNAREC=1");
+            guestEnv.add("BOX64_DYNAREC_STRONGMEM=1");
+            env.forEach((key, value) -> guestEnv.add(key + "=" + value));
+            String libraries = gameRoot + "/lib:" + gameRoot + "/bin:" + legacy + ":" + steam + "/linux64";
+            String custom = env.get("LD_LIBRARY_PATH");
+            if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
+            guestEnv.add("BOX64_LD_LIBRARY_PATH=" + libraries);
+            String preloads = env.get("BOX64_LD_PRELOAD");
+            guestEnv.add("BOX64_LD_PRELOAD=" + (preloads == null || preloads.isEmpty() ? "" : preloads + ":")
+                    + asset("libskysysv_x64.so").getPath());
+            List<String> explicit = new ArrayList<>();
+            for (String key : new String[]{"SteamAppId", "SteamGameId", "STEAM_COMPAT_APP_ID"})
+                explicit.add(key + "=391220");
+            explicit.add("BL_SYSV_DIR=" + new File(environment.getContext().getFilesDir(),
+                    "linux-session/shm/wnsysv").getPath());
+            List<String> bionicCommand = new ArrayList<>(Arrays.asList(
+                    "bannerlator-run", executable.getPath(), "box64", Integer.toString(explicit.size()), "0"));
+            bionicCommand.addAll(explicit);
+            bionicCommand.addAll(command.subList(1, command.size()));
+            LinuxSession.Launch bionic = LinuxBionicSession.build(environment.getContext(),
+                    environment.getImageFs(), container, bionicCommand.toArray(new String[0]), guestEnv, directHome);
+            if (bionic == null) throw new IOException("Rise requires the installed Android Box64 bionic runtime");
+            List<String> argv = new ArrayList<>(Arrays.asList(bionic.argv));
+            String cores = container.getCPUList();
+            if (cores != null && !cores.isEmpty()) {
+                int mask = com.winlator.cmod.core.ProcessHelper.getAffinityMask(cores);
+                if (mask == 0) throw new IOException("Bionic CPU affinity selects no cores");
+                argv.addAll(0, Arrays.asList("/system/bin/taskset", Integer.toHexString(mask)));
+            }
+            return new LinuxSession.Launch(argv.toArray(new String[0]), bionic.hostEnv,
+                    bionic.workingDir, bionic.executionMode);
+        }
         List<String> preloads = new ArrayList<>();
         for (String name : new String[]{"libskyplatform_x64.so", "libskysysv_x64.so",
                 "libskysockets_x64.so", "libskyshim_x64.so", "libcefnosb_x64.so"})
             preloads.add(asset(name).getPath());
         JSONObject config = new JSONObject(new String(Files.readAllBytes(new File(home,
                 ".skynet/steam-emulator/391220.fex.json").toPath()), StandardCharsets.UTF_8));
+        if (LinuxBionicSession.enabled(container)) {
+            String libraries = gameRoot + "/lib:" + gameRoot + "/bin:" + legacy + ":" + steam + "/linux64";
+            String custom = env.get("LD_LIBRARY_PATH");
+            if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
+            return LinuxFexBionicSession.build(environment.getContext(), environment.getImageFs(), container,
+                    emulator, rootfs, home, directHome, executable, command.subList(1, command.size()),
+                    env, libraries, preloads, config);
+        }
         config.getJSONObject("Config").put("Env", "LD_PRELOAD=" + String.join(":", preloads));
         File configFile = new File(directory, "Config.json");
         Files.write(configFile.toPath(), config.toString().getBytes(StandardCharsets.UTF_8));
@@ -300,6 +377,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     public synchronized void setSuspended(boolean value) {
         suspended = value;
         if (game != null) game.setSuspended(value);
+        if (bionicServer != null) bionicServer.setSuspended(value);
     }
 
     public int getPid() {
@@ -310,6 +388,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     @Override public synchronized void close() {
         stopped = true;
         if (game != null) game.requestStop();
+        if (bionicServer != null) bionicServer.requestStop();
         try {
             server.close();
         } catch (IOException error) {

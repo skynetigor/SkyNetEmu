@@ -64,52 +64,13 @@ public final class LinuxBionicSession {
 
         File box64 = LinuxSession.stageAsset(context, "linux-bionic", "box64-bionic");
         if (box64 == null) return null;
-        ensureGraphicsRuntime(context, imageFs);
-
-        String root = imageFs.getRootDir().getPath();
-        String homePath = home.getPath();
-        EnvVars env = new EnvVars();
-        env.put("HOME", homePath);
-        env.put("USER", "xuser");
-        env.put("LANG", "C.UTF-8");
-        env.put("TMPDIR", root + "/usr/tmp");
-        env.put("XDG_RUNTIME_DIR", root + "/usr/tmp");
-        env.put("XDG_DATA_DIRS", root + "/usr/share");
-        env.put("XDG_CONFIG_DIRS", root + "/usr/etc/xdg");
-        env.put("PATH", root + "/usr/bin:/system/bin");
-        env.put("DISPLAY", ":" + LinuxSession.displayNumber());
-        env.put("LD_LIBRARY_PATH", imageFs.getLibDir().getPath() + ":/system/lib64");
-        env.put("FONTCONFIG_PATH", root + "/usr/etc/fonts");
-        env.put("ALSA_CONFIG_PATH", root + "/usr/share/alsa/alsa.conf:" + root + "/usr/etc/alsa/conf.d/android_aserver.conf");
-        env.put("ALSA_PLUGIN_DIR", root + "/usr/lib/alsa-lib");
-        env.put("SSL_CERT_FILE", root + "/usr/etc/tls/cert.pem");
-        env.put("SSL_CERT_DIR", root + "/usr/etc/tls/certs");
-        env.put("PULSE_SERVER", root + UnixSocketConfig.PULSE_SERVER_PATH);
-        env.put("ANDROID_SYSVSHM_SERVER", root + UnixSocketConfig.SYSVSHM_SERVER_PATH);
-        File sysvshm = new File(imageFs.getLibDir(), "libandroid-sysvshm.so");
-        if (sysvshm.exists()) env.put("LD_PRELOAD", sysvshm.getPath());
-
-        // The GPU, as Wine has it: the wrapper ICD in front of the adrenotools driver the container names.
-        File icd = writeIcd(context, imageFs);
-        if (icd != null) env.put("VK_ICD_FILENAMES", icd.getPath());
-        env.put("VK_LAYER_PATH", root + "/usr/share/vulkan/implicit_layer.d:" + root + "/usr/share/vulkan/explicit_layer.d");
-        env.put("WRAPPER_LAYER_PATH", root + "/usr/lib");
-        env.put("WRAPPER_CACHE_PATH", root + "/usr/var/cache");
-        HashMap<String, String> graphics = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(container.getGraphicsDriverConfig());
-        String driverId = graphics.get("version");
-        AdrenotoolsManager drivers = new AdrenotoolsManager(context);
-        // An Adreno 8xx (Gen8) GPU hangs on a game's 3D world with a driver built for the older generations: an installed Turnip for a8xx (the Drivers screen
-        // installs "Turnip Gen8 ...") is preferred over what the container names.
-        for (String installed : drivers.enumarateInstalledDrivers()) {
-            String name = drivers.getDriverName(installed);
-            if (name != null && (name.contains("Gen8") || name.contains("a8xx"))) driverId = installed;
+        File parent = LinuxSession.stageAsset(context, "linux-bionic", "bionic-launch-parent");
+        if (parent == null) {
+            LinuxFail.w(TAG, "Android Box64 launch parent is unavailable");
+            return null;
         }
-        if (driverId != null && !driverId.isEmpty() && !"System".equals(driverId)) drivers.setDriverById(env, imageFs, driverId);
-        env.put("WRAPPER_VK_VERSION", "1.3.289");
-        env.put("WRAPPER_RESOURCE_TYPE", valueOr(graphics.get("resourceType"), "auto"));
-        env.put("WRAPPER_DISABLE_PRESENT_WAIT", valueOr(graphics.get("disablePresentWait"), "0"));
-        env.put("WRAPPER_EMULATE_BCN", "1");
-        env.put("MESA_VK_WSI_PRESENT_MODE", valueOr(graphics.get("presentMode"), "mailbox"));
+        String homePath = home.getPath();
+        EnvVars env = nativeEnvironment(context, imageFs, container, home);
 
         // What the glibc session decided for the program: Box64's settings, the shims it preloads, the game's own variables.
         String libs = "";
@@ -131,7 +92,8 @@ public final class LinuxBionicSession {
             }
             else if (key.startsWith("BOX64_") || key.startsWith("SKY_") && !key.startsWith("SKY_FEX") && !key.equals("SKY_X86_EMULATOR") && !key.equals("SKY_X86_32_EMULATOR")
                     && !key.equals("SKY_ROOT") && !key.equals("SKY_PATHMAP") && !key.equals("SKY_LIBPATH") && !key.equals("SKY_LOADER") && !key.equals("SKY_SELF")
-                    || key.equals("TZ") || key.startsWith("SDL_") || key.startsWith("GDK_") || key.startsWith("QT_QPA")) {
+                    || key.equals("TZ") || key.startsWith("SDL_") || key.startsWith("GDK_") || key.startsWith("QT_QPA")
+                    || key.startsWith("TU_") || key.startsWith("MESA_")) {
                 env.put(key, value);
             }
         }
@@ -220,14 +182,15 @@ public final class LinuxBionicSession {
         }
 
         java.util.ArrayList<String> argv = new java.util.ArrayList<>();
-        // The shell reports how the program ended (a signal shows as 128 + its number), which the process status alone does not.
-        argv.add("/system/bin/sh");
-        argv.add("-c");
         // Debugging: SKY_BIONIC_PIPE (Winlator/linux-bionic.env) is a command the program's output is piped through (grep -B for a trace).
         String pipe = env.get("SKY_BIONIC_PIPE");
-        argv.add(pipe != null && !pipe.isEmpty() ? "\"$@\" 2>&1 | " + pipe + "; echo \"piped\" >&2"
-                : "\"$@\"; s=$?; echo \"exit status $s\" >&2; exit $s");
-        argv.add("sh");
+        if (pipe != null && !pipe.isEmpty()) {
+            argv.add("/system/bin/sh");
+            argv.add("-c");
+            argv.add("\"$@\" 2>&1 | " + pipe + "; echo \"piped\" >&2");
+            argv.add("sh");
+        }
+        argv.add(parent.getPath());
         argv.add(box64.getPath());
         argv.add(hostProgram.getPath());
         for (int i = first + nenv + nwrap; i < guestCommand.length; i++) argv.add(guestCommand[i].replace("/root", homePath));
@@ -272,6 +235,46 @@ public final class LinuxBionicSession {
 
     private static String valueOr(String value, String fallback) {
         return value == null || value.isEmpty() ? fallback : value;
+    }
+
+    static EnvVars nativeEnvironment(Context context, ImageFs imageFs, Container container, File home) {
+        ensureGraphicsRuntime(context, imageFs);
+        String root = imageFs.getRootDir().getPath();
+        EnvVars env = new EnvVars();
+        env.put("HOME", home.getPath());
+        env.put("USER", "xuser");
+        env.put("LANG", "C.UTF-8");
+        env.put("TMPDIR", root + "/usr/tmp");
+        env.put("XDG_RUNTIME_DIR", root + "/usr/tmp");
+        env.put("XDG_DATA_DIRS", root + "/usr/share");
+        env.put("XDG_CONFIG_DIRS", root + "/usr/etc/xdg");
+        env.put("PATH", root + "/usr/bin:/system/bin");
+        env.put("DISPLAY", ":" + LinuxSession.displayNumber());
+        env.put("LD_LIBRARY_PATH", imageFs.getLibDir().getPath() + ":/system/lib64");
+        env.put("FONTCONFIG_PATH", root + "/usr/etc/fonts");
+        env.put("ALSA_CONFIG_PATH", root + "/usr/share/alsa/alsa.conf:" + root + "/usr/etc/alsa/conf.d/android_aserver.conf");
+        env.put("ALSA_PLUGIN_DIR", root + "/usr/lib/alsa-lib");
+        env.put("SSL_CERT_FILE", root + "/usr/etc/tls/cert.pem");
+        env.put("SSL_CERT_DIR", root + "/usr/etc/tls/certs");
+        env.put("PULSE_SERVER", root + UnixSocketConfig.PULSE_SERVER_PATH);
+        env.put("ANDROID_SYSVSHM_SERVER", root + UnixSocketConfig.SYSVSHM_SERVER_PATH);
+        File sysvshm = new File(imageFs.getLibDir(), "libandroid-sysvshm.so");
+        if (sysvshm.exists()) env.put("LD_PRELOAD", sysvshm.getPath());
+        File icd = writeIcd(context, imageFs);
+        if (icd != null) env.put("VK_ICD_FILENAMES", icd.getPath());
+        env.put("VK_LAYER_PATH", root + "/usr/share/vulkan/implicit_layer.d:" + root + "/usr/share/vulkan/explicit_layer.d");
+        env.put("WRAPPER_LAYER_PATH", root + "/usr/lib");
+        env.put("WRAPPER_CACHE_PATH", root + "/usr/var/cache");
+        HashMap<String, String> graphics = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(container.getGraphicsDriverConfig());
+        String driverId = graphics.get("version");
+        AdrenotoolsManager drivers = new AdrenotoolsManager(context);
+        if (driverId != null && !driverId.isEmpty() && !"System".equals(driverId)) drivers.setDriverById(env, imageFs, driverId);
+        env.put("WRAPPER_VK_VERSION", "1.3.289");
+        env.put("WRAPPER_RESOURCE_TYPE", valueOr(graphics.get("resourceType"), "auto"));
+        env.put("WRAPPER_DISABLE_PRESENT_WAIT", valueOr(graphics.get("disablePresentWait"), "0"));
+        env.put("WRAPPER_EMULATE_BCN", "1");
+        env.put("MESA_VK_WSI_PRESENT_MODE", valueOr(graphics.get("presentMode"), "mailbox"));
+        return env;
     }
 
     /** The wrapper library and layers Wine's first boot installs into the imagefs (the Linux sessions never needed them). */

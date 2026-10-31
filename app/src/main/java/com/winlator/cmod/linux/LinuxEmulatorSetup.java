@@ -49,7 +49,7 @@ public final class LinuxEmulatorSetup {
             for (String name : EXTRAS) own.put(name, shortcut.getExtra(name));
             return session(container.copyWithExtras(own), shortcut);
         }
-        if (!overrides(shortcut)) return container;
+        if (!overrides(shortcut) && shortcut.getExtra("graphicsDriverConfig").isEmpty()) return container;
         Map<String, String> over = new LinkedHashMap<>();
         String emulator = shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR);
         boolean switched = !emulator.isEmpty() && !emulator.equals(LinuxEmulator.choice(container));
@@ -74,6 +74,8 @@ public final class LinuxEmulatorSetup {
         copy.setEnvVars(env.toString());
         String cpu = shortcut.getExtra("cpuList");
         if (!cpu.isEmpty()) copy.setCPUList(cpu);
+        String graphics = shortcut.getExtra("graphicsDriverConfig");
+        if (!graphics.isEmpty()) copy.setGraphicsDriverConfig(graphics);
         return copy;
     }
 }
