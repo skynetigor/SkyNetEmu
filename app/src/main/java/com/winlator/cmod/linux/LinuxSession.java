@@ -203,7 +203,9 @@ public final class LinuxSession {
         }
         File program = hostFile(context, container, path);
         if (runsOnFex && program != null
-                && LinuxProgramPaths.isWithin(Environment.getExternalStorageDirectory(), program)) {
+                && LinuxProgramPaths.isWithin(Environment.getExternalStorageDirectory(), program)
+                && !(machine == 62 && LinuxBionicSession.enabled(container)
+                && LinuxExecutableStaging.isBeamNG(program))) {
             // FEX maps a program and its libraries as executable, which shared storage (mounted noexec) refuses.
             return refusal((machine == 3 ? "This 32-bit program is run by FEX (Box64 cannot run it), and " : "") + "FEX cannot run a program from shared storage. Copy the program into the container (add it with \"Program only\" "
                     + "or \"Whole game\"), or choose Box64 for this shortcut.");
@@ -505,6 +507,13 @@ public final class LinuxSession {
         for (String part : guestCommand) argv.add(part);
 
         if (LinuxBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
+            if (LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) {
+                try {
+                    return LinuxFexBionicSession.buildDirect(context, imageFs, container, guestCommand, guestEnv, home);
+                } catch (java.io.IOException | org.json.JSONException e) {
+                    throw new IllegalStateException("Cannot prepare Android FEX direct launch", e);
+                }
+            }
             Launch bionic = LinuxBionicSession.build(context, imageFs, container, guestCommand, guestEnv, home);
             if (bionic != null) return bionic;
         }

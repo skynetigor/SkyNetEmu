@@ -244,7 +244,14 @@ public class ContainerManager {
         FileUtils.writeString(file, text.toString());
         // What the game's registry profile asks for comes over the container's settings.
         try {
-            com.winlator.cmod.linux.LinuxShortcutDefaults.applyProfile(context, container, new Shortcut(container, file));
+            Shortcut shortcut = new Shortcut(container, file);
+            com.winlator.cmod.linux.LinuxShortcutDefaults.applyProfile(context, container, shortcut);
+            // Keep an explicitly selected execution mode over the generic game recommendation.
+            String noProot = extras != null ? extras.get(com.winlator.cmod.linux.LinuxSession.EXTRA_NO_PROOT) : null;
+            if (noProot != null && !noProot.isEmpty()) {
+                shortcut.putExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_NO_PROOT, noProot);
+                shortcut.saveData();
+            }
         }
         catch (RuntimeException ignored) {}
         return file;

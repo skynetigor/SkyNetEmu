@@ -201,27 +201,8 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     }
 
     private void startBionicServer(LinuxSession.Launch launch) throws IOException, InterruptedException {
-        File executable = LinuxSession.stageAsset(environment.getContext(), "linux-fex-bionic", "FEXServer",
-                "linux-fex-bionic/FEXServer");
-        if (executable == null) throw new IOException("Cannot stage Android FEXServer");
-        AtomicInteger exit = new AtomicInteger(-1);
-        bionicServer = environment.startProcess(
-                new String[]{executable.getPath(), "--foreground", "--persistent", "15"},
-                launch.hostEnv, launch.workingDir, exit::set, output);
-        File endpoint = new File(executable.getParentFile(), "server");
-        long deadline = android.os.SystemClock.elapsedRealtime() + 5000;
-        IOException last = null;
-        while (!stopped && exit.get() == -1 && android.os.SystemClock.elapsedRealtime() < deadline) {
-            try (LocalSocket probe = new LocalSocket()) {
-                probe.connect(new LocalSocketAddress(endpoint.getPath(), LocalSocketAddress.Namespace.FILESYSTEM));
-                bionicServer.setSuspended(suspended);
-                return;
-            } catch (IOException error) {
-                last = error;
-                Thread.sleep(100);
-            }
-        }
-        throw new IOException("Android FEXServer did not become ready (exit=" + exit.get() + ")", last);
+        bionicServer = LinuxFexBionicSession.startServer(environment, launch, output);
+        bionicServer.setSuspended(suspended);
     }
 
     private LinuxSession.Launch prepare(List<String> command, Map<String, String> overrides)

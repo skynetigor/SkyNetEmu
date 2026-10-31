@@ -33,6 +33,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     public int getPid() { synchronized (lock) { return pid; } }
     private com.winlator.cmod.core.ContainerProcess process;
     private com.winlator.cmod.linux.LinuxDirectFexBridge directFex;
+    private volatile com.winlator.cmod.core.ContainerProcess bionicServer;
     private long startedAt;
     private volatile String executionMode = "not_built";
 
@@ -110,9 +111,21 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
                 }
             }
             executionMode = launch.executionMode + (directFex != null ? "+direct_fex" : "");
+            if ("fex_bionic".equals(launch.executionMode)) {
+                try {
+                    bionicServer = com.winlator.cmod.linux.LinuxFexBionicSession.startServer(
+                            environment, launch, outputCallback);
+                } catch (IOException e) {
+                    throw new IllegalStateException("Cannot start Android FEX server", e);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Android FEX server startup interrupted", e);
+                }
+            }
             startupStage("build_complete");
         }
         catch (RuntimeException e) {
+            if (bionicServer != null) bionicServer.requestStop();
             if (directFex != null) directFex.close();
             phase = "build_failed";
             com.winlator.cmod.telemetry.ErrorReporter.report("linux_session_build", e, "skynet.linux.setup", setupDescription());
@@ -123,6 +136,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         startupStage(phase);
         synchronized (lock) {
             process = environment.startProcess(launch.argv, launch.hostEnv, launch.workingDir, status -> {
+                if (bionicServer != null) bionicServer.requestStop();
                 synchronized (lock) {
                     pid = -1;
                     phase = "exited";
@@ -135,6 +149,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
             if (pid > 0) phase = "running";
             startupStage(phase);
             if (pid == -1) {
+                if (bionicServer != null) bionicServer.requestStop();
                 phase = "spawn_failed";
                 Log.e(TAG, "The Linux session did not start");
                 com.winlator.cmod.telemetry.ErrorReporter.linux("session_start", "The Linux session did not start (" + setupDescription() + ")", null);
@@ -260,6 +275,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     public void stop() {
         phase = "stopping";
         if (directFex != null) directFex.close();
+        if (bionicServer != null) bionicServer.requestStop();
         synchronized (lock) {
             if (process != null) process.requestStop();
             pid = -1;
@@ -273,6 +289,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
 
     public void suspendProcess() {
         if (directFex != null) directFex.setSuspended(true);
+        if (bionicServer != null) bionicServer.setSuspended(true);
         synchronized (lock) {
             if (process != null) process.setSuspended(true);
         }
@@ -280,6 +297,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
 
     public void resumeProcess() {
         if (directFex != null) directFex.setSuspended(false);
+        if (bionicServer != null) bionicServer.setSuspended(false);
         synchronized (lock) {
             if (process != null) process.setSuspended(false);
         }
