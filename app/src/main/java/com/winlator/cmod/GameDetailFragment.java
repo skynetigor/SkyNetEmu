@@ -152,7 +152,7 @@ public class GameDetailFragment extends Fragment {
                             return;
                         }
                         ContentDialog.confirm(requireContext(), R.string.do_you_want_to_remove_this_shortcut, () -> {
-                            if (shortcut.file.delete()) getParentFragmentManager().popBackStack();
+                            if (shortcut.remove(requireContext())) getParentFragmentManager().popBackStack();
                         });
                     }
                 }

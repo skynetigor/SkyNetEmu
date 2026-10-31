@@ -280,6 +280,22 @@ public class Shortcut {
         if (from.exists() && !to.exists()) from.renameTo(to);
     }
 
+    public boolean remove(Context context) {
+        return remove(context, container, file);
+    }
+
+    public static boolean remove(Context context, Container container, File file) {
+        try {
+            Files.delete(file.toPath());
+        } catch (IOException error) {
+            Log.e("Shortcut", "Cannot remove shortcut: " + file, error);
+            android.widget.Toast.makeText(context, "Could not remove shortcut.", android.widget.Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        if (container.isLinux()) com.winlator.cmod.linux.LinuxStagingCleanup.schedule(context);
+        return true;
+    }
+
     public boolean cloneToContainer(Container newContainer) {
         if (container.isLinux() || newContainer.isLinux()) return false;
         try {

@@ -796,7 +796,7 @@ public class ShortcutsFragment extends Fragment {
                 return;
             }
             ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_shortcut, () -> {
-                boolean fileDeleted = shortcut.file.delete();
+                boolean fileDeleted = shortcut.remove(context);
                 try {
                     String basePath = shortcut.file.getPath().substring(0, shortcut.file.getPath().lastIndexOf("."));
                     new File(basePath + ".lnk").delete();

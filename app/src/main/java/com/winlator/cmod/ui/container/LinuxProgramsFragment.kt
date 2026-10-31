@@ -421,8 +421,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                             if (!LinuxSession.isSteam(program.path)) IconButton(onClick = {
                                 if (copiedFolder(container, program.path) != null) removing = program
                                 else {
-                                    program.file.delete()
-                                    tick++
+                                    if (com.winlator.cmod.container.Shortcut.remove(context, container, program.file)) tick++
                                 }
                             }) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
                             Surface(
@@ -647,14 +646,12 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                     if (!shared && folder != null) {
                         TextButton(onClick = {
                             removing = null
-                            program.file.delete()
-                            deleteFolders(listOf(folder))
+                            if (com.winlator.cmod.container.Shortcut.remove(context, container, program.file)) deleteFolders(listOf(folder))
                         }) { Text("Remove and delete files") }
                     }
                     TextButton(onClick = {
                         removing = null
-                        program.file.delete()
-                        tick++
+                        if (com.winlator.cmod.container.Shortcut.remove(context, container, program.file)) tick++
                     }) { Text(if (shared) "Remove" else "Keep files") }
                 }
             },
