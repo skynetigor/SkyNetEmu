@@ -2001,7 +2001,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         renderer.setOnGameZoomChanged(() -> touchpadView.post(touchpadView::onScreenResized));
         if (zoomGameWindow) renderer.setGameWindowZoom(true);
 
-        if (shouldStretch) {
+        // Linux "Fit to screen" uses the renderer's aspect-preserving default.
+        // Fullscreen is the legacy stretch-to-fill transform, not a fit operation.
+        if (shouldStretch && !linuxSession) {
 
             renderer.toggleFullscreen();
             touchpadView.toggleFullscreen();
