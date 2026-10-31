@@ -57,6 +57,8 @@ public class DrawableManager extends XResourceManager implements XResourceManage
 
         drawable.setOnDrawListener(null);
         drawables.remove(id);
+        // DMA-BUF imports use their descriptor in the renderer, not this allocated CPU backing store.
+        if (drawable.dmaBufStride > 0) drawable.releaseDmaBufBackingStore();
     }
 
 

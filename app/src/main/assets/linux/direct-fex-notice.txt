@@ -1,0 +1,17 @@
+Direct FEX platform support
+
+libskysysv_x64.so is built from Bannerlator's System V IPC compatibility layer:
+https://github.com/The412Banner/Bannerlator/blob/main/tools/linuxfs/preload/sysv.c
+Source Git blob: 5571e8178a5a3d69febb28094e587a750ff48f0c
+License: GNU General Public License version 3.
+License text: https://github.com/The412Banner/Bannerlator/blob/main/LICENSE
+
+This layer uses file-backed IPC shared with the native Steam runtime.
+Its multi-operation semaphores are not atomic and SEM_UNDO is not implemented.
+It is not a general replacement for kernel System V IPC.
+
+libskyaccept.so uses the real accept4 operation instead of unavailable accept.
+libskyplatform_x64.so returns ENOSYS for unavailable x86-64 set_robust_list
+using an additional restrictive guest filter. It does not disable Android
+security restrictions or report fake syscall success.
+libskysockets_x64.so maps guest X11, temporary and home Unix socket paths.

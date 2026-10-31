@@ -48,7 +48,14 @@ public final class GameProfileCatalog {
     public static List<IndexEntry> index(Context context, boolean allowNetwork, long ttlMs) {
         List<IndexEntry> entries = new ArrayList<>();
         String text = RegistryCache.get(context, INDEX, ttlMs, allowNetwork);
-        if (text == null) return entries;
+        appendIndex(entries, text);
+        String bundled = RegistryCache.bundledCopy(context, INDEX);
+        if (bundled != null && !bundled.equals(text)) appendIndex(entries, bundled);
+        return entries;
+    }
+
+    private static void appendIndex(List<IndexEntry> entries, String text) {
+        if (text == null) return;
         try {
             JSONArray games = new JSONObject(text).optJSONArray("games");
             for (int i = 0; games != null && i < games.length(); i++) {
@@ -59,13 +66,21 @@ public final class GameProfileCatalog {
                 // Only games/<id>.json: nothing the index says can name another file.
                 if (!id.matches("[A-Za-z0-9][A-Za-z0-9._-]*") || !config.equals("games/" + id + ".json")) continue;
                 long appId = game.optLong("steamAppId", 0);
-                entries.add(new IndexEntry(id, game.optString("name", id), appId == 0 ? "" : String.valueOf(appId), config));
+                String steamAppId = appId == 0 ? "" : String.valueOf(appId);
+                boolean exists = false;
+                for (IndexEntry entry : entries) {
+                    if (entry.id.equals(id) || (!steamAppId.isEmpty() && entry.steamAppId.equals(steamAppId))) {
+                        exists = true;
+                        break;
+                    }
+                }
+                // New bundled games remain discoverable before the remote registry catches up; remote choices win.
+                if (!exists) entries.add(new IndexEntry(id, game.optString("name", id), steamAppId, config));
             }
         }
         catch (org.json.JSONException e) {
             Log.w(TAG, "Bad game index", e);
         }
-        return entries;
     }
 
     public static IndexEntry entry(Context context, String id, boolean allowNetwork) {

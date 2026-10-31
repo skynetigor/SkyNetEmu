@@ -535,6 +535,11 @@ Java_com_winlator_cmod_xserver_Drawable_lockBuffer(JNIEnv *env, jclass obj, jlon
 }
 
 JNIEXPORT void JNICALL
+Java_com_winlator_cmod_xserver_Drawable_releaseBuffer(JNIEnv *env, jclass obj, jlong ahb) {
+    if (ahb) AHardwareBuffer_release((AHardwareBuffer *)ahb);
+}
+
+JNIEXPORT void JNICALL
 Java_com_winlator_cmod_xserver_Drawable_unlockBuffer(JNIEnv *env, jclass obj, jlong ahb) {
     int ret;
     void *addr;

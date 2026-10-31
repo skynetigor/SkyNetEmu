@@ -50,6 +50,18 @@ public class WindowAttributes {
         return backgroundTile;
     }
 
+    void setBackgroundTile(Drawable tile) {
+        if (backgroundTile == tile) return;
+        if (tile != null) tile.retainDmaBufBackground();
+        Drawable previous = backgroundTile;
+        backgroundTile = tile;
+        if (previous != null) previous.releaseDmaBufBackground();
+    }
+
+    void releaseBackgroundTile() {
+        setBackgroundTile(null);
+    }
+
     public boolean isBackgroundParentRelative() {
         return backgroundParentRelative;
     }
@@ -137,7 +149,7 @@ public class WindowAttributes {
                 case FLAG_BACKGROUND_PIXEL:
                     backgroundPixel = inputStream.readInt();
                     hasBackgroundPixel = true;
-                    backgroundTile = null;
+                    setBackgroundTile(null);
                     backgroundParentRelative = false;
                     window.getContent().fillColor(backgroundPixel);
                     break;
@@ -145,7 +157,7 @@ public class WindowAttributes {
                     int pixmapId = inputStream.readInt();
                     backgroundParentRelative = pixmapId == 1;
                     Pixmap pixmap = pixmapId > 1 ? client.xServer.pixmapManager.getPixmap(pixmapId) : null;
-                    backgroundTile = pixmap != null ? pixmap.drawable : null;
+                    setBackgroundTile(pixmap != null ? pixmap.drawable : null);
                     hasBackgroundPixel = false;
                     break;
                 }

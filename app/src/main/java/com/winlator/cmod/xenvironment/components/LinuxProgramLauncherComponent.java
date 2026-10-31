@@ -32,6 +32,7 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private int pid = -1;
     public int getPid() { synchronized (lock) { return pid; } }
     private com.winlator.cmod.core.ContainerProcess process;
+    private com.winlator.cmod.linux.LinuxDirectFexBridge directFex;
     private long startedAt;
     private volatile String executionMode = "not_built";
 
@@ -98,10 +99,21 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
             phase = "building";
             startupStage(phase);
             launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
-            executionMode = launch.executionMode;
+            if (com.winlator.cmod.linux.LinuxDirectFexBridge.enabled(container, guestCommand)) {
+                try {
+                    directFex = new com.winlator.cmod.linux.LinuxDirectFexBridge(
+                            environment, container, runtime, outputCallback);
+                    launch = directFex.attach(launch, guestCommand);
+                } catch (IOException error) {
+                    if (directFex != null) directFex.close();
+                    throw new IllegalStateException("Cannot start direct FEX Steam bridge", error);
+                }
+            }
+            executionMode = launch.executionMode + (directFex != null ? "+direct_fex" : "");
             startupStage("build_complete");
         }
         catch (RuntimeException e) {
+            if (directFex != null) directFex.close();
             phase = "build_failed";
             com.winlator.cmod.telemetry.ErrorReporter.report("linux_session_build", e, "skynet.linux.setup", setupDescription());
             throw e;
@@ -226,7 +238,9 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     /** Called off the UI thread only, with telemetry enabled. Does not inspect unrelated process command lines. */
     public String processSnapshot() {
         if (!com.winlator.cmod.telemetry.Telemetry.isEnabled()) return "";
-        return processes.snapshot(lastPid);
+        String snapshot = processes.snapshot(lastPid);
+        int directPid = directFex != null ? directFex.getPid() : -1;
+        return directPid > 0 ? snapshot + "\nDirect FEX:\n" + processes.snapshot(directPid) : snapshot;
     }
 
     public String crashEvidence() {
@@ -237,12 +251,15 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private java.util.Set<Integer> sessionPids() {
         java.util.Set<Integer> pids = processes.knownPids();
         if (lastPid > 0) pids.add(lastPid);
+        int directPid = directFex != null ? directFex.getPid() : -1;
+        if (directPid > 0) pids.add(directPid);
         return pids;
     }
 
     @Override
     public void stop() {
         phase = "stopping";
+        if (directFex != null) directFex.close();
         synchronized (lock) {
             if (process != null) process.requestStop();
             pid = -1;
@@ -255,12 +272,14 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     }
 
     public void suspendProcess() {
+        if (directFex != null) directFex.setSuspended(true);
         synchronized (lock) {
             if (process != null) process.setSuspended(true);
         }
     }
 
     public void resumeProcess() {
+        if (directFex != null) directFex.setSuspended(false);
         synchronized (lock) {
             if (process != null) process.setSuspended(false);
         }

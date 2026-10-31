@@ -12,6 +12,9 @@ add_subdirectory(adrenotools)
 add_executable(libcontainer_supervisor.so winlator/container_supervisor.c)
 target_compile_options(libcontainer_supervisor.so PRIVATE -Wall -Wextra -Werror)
 
+add_executable(libdirect_fex_client.so winlator/direct_fex_client.c)
+target_compile_options(libdirect_fex_client.so PRIVATE -Wall -Wextra -Werror)
+
 # Add Winlator shared library
 add_library(winlator SHARED
         xr/engine.c

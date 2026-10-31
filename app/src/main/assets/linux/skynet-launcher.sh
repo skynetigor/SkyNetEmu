@@ -95,6 +95,18 @@ if [ "$game32" = 1 ]; then
     libs="${libs:+$libs:}$extra"
     export LD_LIBRARY_PATH="$libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
+if [ "$app_id" = 391220 ] && [ "$game32" != 1 ]; then
+    # Rise's old CEF needs GConf, removed from modern root filesystems. Do not expose scout's libc/libgcc to Mesa.
+    extra="$HOME/.skynet/lib64/$app_id"
+    scout="${scout:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime}"
+    mkdir -p "$extra" || fail "Cannot prepare Rise's legacy library directory."
+    for name in libgconf-2.so.4 libdbus-glib-1.so.2; do
+        source="$scout/usr/lib/x86_64-linux-gnu/$name"
+        [ -f "$source" ] || fail "Rise needs $name from the installed Steam Linux Runtime (scout)."
+        ln -sfn "$source" "$extra/$name" || fail "Cannot link Rise's $name."
+    done
+    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$extra"
+fi
 # A 32-bit game finds Steam's client library at ~/.steam/sdk32 (the session links sdk64 for 64-bit ones).
 steam_root="${XDG_DATA_HOME:-$HOME/.local/share}/Steam"
 if [ -f "$steam_root/linux32/steamclient.so" ]; then
@@ -173,6 +185,17 @@ sky_feral_resolution() {
         "$prefs" && echo "SkyNetEmu: Feral resolution ${w}x${h}"
 }
 sky_feral_resolution
+if [ "$app_id" = 391220 ] && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
+    [ "$game32" != 1 ] || fail "Direct FEX supports only Rise's native 64-bit port."
+    [ "${#sky_wrap[@]}" = 0 ] || fail "Direct FEX does not support command wrappers."
+    [ -x "${SKY_DIRECT_FEX_CLIENT:-}" ] || fail "Direct FEX launch client is unavailable."
+    [ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
+    "$SKY_DIRECT_FEX_CLIENT" "${cmd[@]}" &
+    game=$!
+    trap 'cancelled=1; kill -TERM "$game" 2>/dev/null' TERM INT
+    wait "$game"
+    exit $?
+fi
 [ "${#sky_wrap[@]}" -gt 0 ] && cmd=("${sky_wrap[@]}" "${cmd[@]}")
 [ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
 {

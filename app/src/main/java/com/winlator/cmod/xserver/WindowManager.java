@@ -110,6 +110,7 @@ public class WindowManager extends XResourceManager {
         window.sendEvent(Event.STRUCTURE_NOTIFY, new DestroyNotify(window, window));
         parent.sendEvent(Event.SUBSTRUCTURE_NOTIFY, new DestroyNotify(parent, window));
         windows.remove(window.id);
+        window.attributes.releaseBackgroundTile();
         if (window.isInputOutput()) drawableManager.removeDrawable(window.getContent().id);
         triggerOnFreeResourceListener(window);
         if (window == focusedWindow) revertFocus();

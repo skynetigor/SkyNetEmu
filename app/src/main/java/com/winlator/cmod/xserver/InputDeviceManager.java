@@ -62,11 +62,11 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
     }
 
     /**
-     * A desktop's toolkits care about where the focus moved: GTK puts the focus on a hidden child of its window, and the window itself
+     * Toolkits care about where the focus moved: GTK puts the focus on a hidden child of its window, and the window itself
      * must hear "focus moved into me" (Virtual / Inferior), not "I lost it" (Nonlinear), or it takes itself for unfocused and ignores typing.
      * The events are the ones the X protocol defines for a focus change between two windows of the tree.
      */
-    private void onFocusChangedDesktop(Window oldFocus, Window newFocus) {
+    private void onFocusChangedInTree(Window oldFocus, Window newFocus) {
         Window root = xServer.windowManager.rootWindow;
         if (oldFocus == null) oldFocus = root;
         if (newFocus == null) newFocus = root;
@@ -98,8 +98,12 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
 
     private void onFocusChanged(Window oldFocus, Window newFocus) {
         if (!sendsFocusAndCrossing()) return;
-        if (xServer.desktopSession) {
-            onFocusChangedDesktop(oldFocus, newFocus);
+        if (oldFocus == newFocus) return;
+        Window root = xServer.windowManager.rootWindow;
+        if (xServer.desktopSession || oldFocus != null && newFocus != null
+                && oldFocus != root && newFocus != root) {
+            onFocusChangedInTree(oldFocus, newFocus);
+            if (!xServer.desktopSession && newFocus.attributes.isEnabled()) repeatFocusIn(newFocus);
             return;
         }
         if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {

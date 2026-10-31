@@ -184,6 +184,18 @@ int main(int argc, char **argv) {
         perror("ContainerSupervisor suspension signals");
         return 125;
     }
+    /* ART worker threads can launch us with the control signals blocked. */
+    sigset_t controls, inherited;
+    sigemptyset(&controls);
+    sigaddset(&controls, SIGTERM);
+    sigaddset(&controls, SIGINT);
+    sigaddset(&controls, SIGHUP);
+    sigaddset(&controls, SIGUSR1);
+    sigaddset(&controls, SIGUSR2);
+    if (sigprocmask(SIG_UNBLOCK, &controls, &inherited)) {
+        perror("ContainerSupervisor control signal mask");
+        return 125;
+    }
     /* The Android owner may disappear with its output pipe before cleanup finishes. */
     signal(SIGPIPE, SIG_IGN);
     pid_t root = fork();
@@ -198,6 +210,10 @@ int main(int argc, char **argv) {
         signal(SIGPIPE, SIG_DFL);
         signal(SIGUSR1, SIG_DFL);
         signal(SIGUSR2, SIG_DFL);
+        if (sigprocmask(SIG_SETMASK, &inherited, NULL)) {
+            perror("ContainerSupervisor guest signal mask");
+            _exit(125);
+        }
         restore_loader_environment();
         execvp(argv[2], argv + 2);
         perror("ContainerSupervisor exec");

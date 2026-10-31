@@ -142,6 +142,14 @@ public final class LinuxSession {
                 }
                 return directCommand(context, container, profile.executableGuest, options);
             }
+            if ("391220".equals(appId)) {
+                try {
+                    selectRiseNativeTool(container);
+                } catch (java.io.IOException | IllegalArgumentException e) {
+                    LinuxFail.w(TAG, "Cannot configure Rise's native Steam compatibility tool", e);
+                    return refusal("Cannot configure the native Steam compatibility tool: " + e.getMessage());
+                }
+            }
             // A Steam game starts the client without its window unless the shortcut asks for the whole client.
             writeSteamLaunchOptions(container, appId, options);
             return steamCommand(appId, !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL)), false);
@@ -234,7 +242,7 @@ public final class LinuxSession {
     /** The program of a shortcut for a game installed in the container's Steam: started through the client. */
     public static final String STEAM_GAME_PREFIX = "steam://rungameid/";
     /** The word after the script of a Steam session's command: what tells {@link #build} that the session runs the Steam client. */
-    private static final String STEAM_MARKER = "bannerlator-steam";
+    static final String STEAM_MARKER = "bannerlator-steam";
 
     public static boolean isSteamGame(String path) {
         return path != null && path.startsWith(STEAM_GAME_PREFIX) && path.length() > STEAM_GAME_PREFIX.length();
@@ -242,6 +250,34 @@ public final class LinuxSession {
 
     public static String steamAppId(String path) {
         return path.substring(STEAM_GAME_PREFIX.length());
+    }
+
+    private static void selectRiseNativeTool(Container container) throws java.io.IOException {
+        LinuxSteamGames.Game game = LinuxSteamGames.installed(container).get("391220");
+        if (game == null) return;
+        File binary = new File(game.library, "steamapps/common/" + game.installDir + "/bin/RiseOfTheTombRaider");
+        if (elfMachine(binary) != 62) return;
+        File config = new File(LinuxSteamGames.steamRoot(container), "config/config.vdf");
+        String text = new String(java.nio.file.Files.readAllBytes(config.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+        String updated = SteamCompatConfig.selectNativeTool(text, game.appId);
+        if (text.equals(updated)) return;
+        File pidFile = new File(LinuxSteamGames.steamRoot(container), "steam.pid");
+        if (pidFile.isFile()) {
+            String pid = new String(java.nio.file.Files.readAllBytes(pidFile.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            if (pid.matches("[0-9]+") && new File("/proc/" + pid).exists())
+                throw new java.io.IOException("Close Steam before selecting the native game tool");
+        }
+        File backup = new File(config.getPath() + ".skynet-native.bak");
+        if (!backup.exists()) java.nio.file.Files.copy(config.toPath(), backup.toPath());
+        File temporary = new File(config.getPath() + ".skynet-native.tmp");
+        try {
+            java.nio.file.Files.write(temporary.toPath(), updated.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            java.nio.file.Files.move(temporary.toPath(), config.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            java.nio.file.Files.deleteIfExists(temporary.toPath());
+        }
     }
 
     /**
@@ -532,7 +568,7 @@ public final class LinuxSession {
      * @param proot the arguments the session would have given proot: its -b options are the table
      * @return null when libskypath cannot be had (the session then runs under proot)
      */
-    private static Launch noProotLaunch(Context context, File rt, File home, List<String> proot, List<String> guestEnv, String[] guestCommand) {
+    static Launch noProotLaunch(Context context, File rt, File home, List<String> proot, List<String> guestEnv, String[] guestCommand) {
         File skypath = stageAsset(context, "libskypath.so");
         if (skypath == null || guestCommand.length == 0) return null;
         if (!new File(rt, "usr/lib/ld-linux-aarch64.so.1").exists()) return null;

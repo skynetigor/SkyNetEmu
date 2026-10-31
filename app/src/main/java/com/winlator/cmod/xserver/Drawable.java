@@ -23,6 +23,8 @@ public class Drawable extends XResource {
     
     private GPUImage gpuImage = null;
     private boolean directScanout;
+    private int dmaBufBackgroundReferences;
+    private boolean dmaBufBackingStoreFreed;
     /** A frame a Linux client rendered into a dma-buf (DRI3): the descriptor, kept open while the pixmap lives. */
     public int dmaBufFd = -1;
     private static final java.util.concurrent.atomic.AtomicLong nextDmaBufKey =
@@ -90,6 +92,34 @@ public class Drawable extends XResource {
     
     public GPUImage getGPUImage() {
         return this.gpuImage;
+    }
+
+    public void releaseDmaBufBackingStore() {
+        synchronized (renderLock) {
+            if (dmaBufStride <= 0 || gpuImage != null)
+                throw new IllegalStateException("Only a DMA-BUF pixmap owns this CPU backing store");
+            dmaBufBackingStoreFreed = true;
+            if (dmaBufBackgroundReferences == 0 && backingAHB != 0) {
+                releaseBuffer(backingAHB);
+                backingAHB = 0;
+            }
+        }
+    }
+
+    void retainDmaBufBackground() {
+        synchronized (renderLock) {
+            if (dmaBufStride > 0) ++dmaBufBackgroundReferences;
+        }
+    }
+
+    void releaseDmaBufBackground() {
+        synchronized (renderLock) {
+            if (dmaBufStride <= 0) return;
+            if (dmaBufBackgroundReferences == 0)
+                throw new IllegalStateException("DMA-BUF background released without a reference");
+            --dmaBufBackgroundReferences;
+            if (dmaBufBackingStoreFreed) releaseDmaBufBackingStore();
+        }
     }
 
     public void setDirectScanout(boolean directScanout) {
@@ -237,6 +267,7 @@ public class Drawable extends XResource {
     private static native void drawLine(short x0, short y0, short x1, short y1, int color, short lineWidth, short stride, long dstAHB);
     
     private native long allocate(int width, int height, int format);
+    private static native void releaseBuffer(long ahb);
 
     public native ByteBuffer lockBuffer(long ahb);
 
