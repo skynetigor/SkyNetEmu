@@ -95,15 +95,27 @@ if [ "$game32" = 1 ]; then
     libs="${libs:+$libs:}$extra"
     export LD_LIBRARY_PATH="$libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-if [ "$app_id" = 391220 ] && [ "$game32" != 1 ]; then
-    # Rise's old CEF needs GConf, removed from modern root filesystems. Do not expose scout's libc/libgcc to Mesa.
+legacy64=""
+case "$app_id" in
+    391220)
+        legacy_game=Rise
+        legacy64="usr/lib/x86_64-linux-gnu/libgconf-2.so.4 usr/lib/x86_64-linux-gnu/libdbus-glib-1.so.2"
+        ;;
+    383150)
+        legacy_game="Dead Island Definitive Edition"
+        legacy64="lib/x86_64-linux-gnu/libpng12.so.0 usr/lib/x86_64-linux-gnu/libGLEW.so.1.10"
+        ;;
+esac
+if [ -n "$legacy64" ] && [ "$game32" != 1 ]; then
+    # Keep only required legacy SONAMEs on the path, not scout's libc/libgcc alongside modern Mesa.
     extra="$HOME/.skynet/lib64/$app_id"
     scout="${scout:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime}"
-    mkdir -p "$extra" || fail "Cannot prepare Rise's legacy library directory."
-    for name in libgconf-2.so.4 libdbus-glib-1.so.2; do
-        source="$scout/usr/lib/x86_64-linux-gnu/$name"
-        [ -f "$source" ] || fail "Rise needs $name from the installed Steam Linux Runtime (scout)."
-        ln -sfn "$source" "$extra/$name" || fail "Cannot link Rise's $name."
+    mkdir -p "$extra" || fail "Cannot prepare $legacy_game's legacy library directory."
+    for relative in $legacy64; do
+        name="${relative##*/}"
+        source="$scout/$relative"
+        [ -f "$source" ] || fail "$legacy_game needs $name from the installed Steam Linux Runtime (scout)."
+        ln -sfn "$source" "$extra/$name" || fail "Cannot link $legacy_game's $name."
     done
     export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$extra"
 fi
