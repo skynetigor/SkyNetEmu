@@ -105,6 +105,15 @@ case "$app_id" in
         legacy_game="Dead Island Definitive Edition"
         legacy64="lib/x86_64-linux-gnu/libpng12.so.0 usr/lib/x86_64-linux-gnu/libGLEW.so.1.10"
         ;;
+    214490)
+        legacy_game="Alien: Isolation"
+        legacy64="lib/x86_64-linux-gnu/libpcre.so.3"
+        for name in libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0 libidn.so.11 librtmp.so.0 liblber-2.4.so.2 libldap_r-2.4.so.2 \
+                libhogweed.so.4 libnettle.so.6 libgssapi.so.3 libheimntlm.so.0 libkrb5.so.26 libhcrypto.so.4 libasn1.so.8 \
+                libheimbase.so.1 libwind.so.0 libhx509.so.5 libroken.so.18; do
+            legacy64="$legacy64 usr/lib/x86_64-linux-gnu/$name"
+        done
+        ;;
 esac
 if [ -n "$legacy64" ] && [ "$game32" != 1 ]; then
     # Keep only required legacy SONAMEs on the path, not scout's libc/libgcc alongside modern Mesa.
@@ -117,6 +126,7 @@ if [ -n "$legacy64" ] && [ "$game32" != 1 ]; then
         [ -f "$source" ] || fail "$legacy_game needs $name from the installed Steam Linux Runtime (scout)."
         ln -sfn "$source" "$extra/$name" || fail "Cannot link $legacy_game's $name."
     done
+    legacy_extra="$extra"
     export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$extra"
 fi
 # A 32-bit game finds Steam's client library at ~/.steam/sdk32 (the session links sdk64 for 64-bit ones).
@@ -176,6 +186,13 @@ fi
 # shortcut editor win over launch-option assignments too (LinuxSession.writeSteamLaunchOptions merges them).
 sky_wrap=(); sky_args=()
 [ -f "$HOME/.skynet/steam-emulator/$app_id.launch" ] && . "$HOME/.skynet/steam-emulator/$app_id.launch"
+# The shortcut's own LD_LIBRARY_PATH (set by that file) replaces the one above: keep the game's legacy libraries on it.
+if [ -n "${legacy_extra:-}" ]; then
+    case ":${LD_LIBRARY_PATH:-}:" in
+        *":$legacy_extra:"*) ;;
+        *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$legacy_extra" ;;
+    esac
+fi
 if [ -f "${SKY_GPU_MEMORY_SCRIPT:-}" ]; then
     . "$SKY_GPU_MEMORY_SCRIPT"
     sky_gpu_memory_apply || exit 1

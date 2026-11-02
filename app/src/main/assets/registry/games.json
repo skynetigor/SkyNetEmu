@@ -24,6 +24,18 @@
    "name": "Shadow of the Tomb Raider",
    "steamAppId": 750920,
    "config": "games/shadow-of-the-tomb-raider.json"
+  },
+  {
+   "id": "alien-isolation",
+   "name": "Alien: Isolation",
+   "steamAppId": 214490,
+   "config": "games/alien-isolation.json"
+  },
+  {
+   "id": "dead-island-definitive-edition",
+   "name": "Dead Island Definitive Edition",
+   "steamAppId": 383150,
+   "config": "games/dead-island-definitive-edition.json"
   }
  ]
 }
