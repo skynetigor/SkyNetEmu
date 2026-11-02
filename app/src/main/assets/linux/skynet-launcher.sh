@@ -110,7 +110,7 @@ case "$app_id" in
         legacy64="lib/x86_64-linux-gnu/libpcre.so.3"
         for name in libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0 libidn.so.11 librtmp.so.0 liblber-2.4.so.2 libldap_r-2.4.so.2 \
                 libhogweed.so.4 libnettle.so.6 libgssapi.so.3 libheimntlm.so.0 libkrb5.so.26 libhcrypto.so.4 libasn1.so.8 \
-                libheimbase.so.1 libwind.so.0 libhx509.so.5 libroken.so.18; do
+                libheimbase.so.1 libwind.so.0 libhx509.so.5 libroken.so.18 libjpeg.so.8; do
             legacy64="$legacy64 usr/lib/x86_64-linux-gnu/$name"
         done
         ;;
@@ -213,6 +213,89 @@ sky_feral_resolution() {
         -e "s#(<value name=\"(FullscreenHeight|UserWindowHeight|WindowHeight|ScreenH)\" type=\"integer\">)[0-9]+#\\1$h#" \
         "$prefs" && echo "SkyNetEmu: Feral resolution ${w}x${h}"
 }
+# A Feral game opens its Chromium launcher (the options window, or the "previous run crashed" report) before the game when its
+# preferences say so, and that window dies under FEX ("pure virtual method called") or ignores touch. Steam Cloud restores the
+# account's saved preferences just before this launch, so the state is fixed here and not earlier: no crash pending, the usage
+# statistics question answered with "do not send", the hardware notices acknowledged and the options window off.
+# Sets (or, with keep, only adds) an integer or string value in the first "Setup" key of the preferences file.
+sky_feral_value() {
+    local key="$1" type="$2" value="$3" keep="${4:-}" needle tmp="$prefs.skynet"
+    needle="<value name=\"$key\" type=\""
+    if grep -qF "$needle" "$prefs"; then
+        [ -z "$keep" ] || return 0
+        awk -v n="$needle" -v k="$key" -v t="$type" -v v="$value" \
+            'index($0, n) { i = index($0, "<"); $0 = substr($0, 1, i - 1) "<value name=\"" k "\" type=\"" t "\">" v "</value>" } { print }' \
+            "$prefs" > "$tmp" && mv "$tmp" "$prefs"
+    else
+        awk -v k="$key" -v t="$type" -v v="$value" \
+            '{ print } !done && index($0, "<key name=\"Setup\">") { i = index($0, "<"); print substr($0, 1, i - 1) "    <value name=\"" k "\" type=\"" t "\">" v "</value>"; done = 1 }' \
+            "$prefs" > "$tmp" && mv "$tmp" "$prefs"
+    fi
+}
+sky_feral_launcher_state() {
+    local settings="$game_dir/config/game-settings.sh" dir prefs name key gpu variant alert ver v1 v2 vname
+    [ -f "$settings" ] || return 0
+    dir="$(sed -n 's/^FERAL_PREFERENCES_DIR="\([^"]*\)".*/\1/p' "$settings" | head -n 1)"
+    [ -n "$dir" ] || return 0
+    prefs="${XDG_DATA_HOME:-$HOME/.local/share}/$dir/preferences"
+    name="${dir##*/}"
+    mkdir -p "${prefs%/*}" || return 0
+    if [ ! -s "$prefs" ]; then
+        cat > "$prefs" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<registry>
+    <key name="HKEY_CURRENT_USER">
+        <key name="Software">
+            <key name="Feral Interactive">
+                <key name="$name">
+                    <key name="Setup">
+                    </key>
+                </key>
+            </key>
+        </key>
+    </key>
+</registry>
+EOF
+        echo "SkyNetEmu: Feral launcher state created"
+    fi
+    if ! grep -qF 'name="SpecificationAlerts"' "$prefs"; then
+        awk '{ print } !done && index($0, "<key name=\"Setup\">") { i = index($0, "<"); p = substr($0, 1, i - 1) "    ";
+            print p "<key name=\"SpecificationAlerts\">"; print p "    <value name=\"DriverOrHardwareUnsupported\" type=\"integer\">1</value>";
+            print p "    <value name=\"LnxCPUGovernorSubOptimal\" type=\"integer\">1</value>"; print p "</key>"; done = 1 }' \
+            "$prefs" > "$prefs.skynet" && mv "$prefs.skynet" "$prefs"
+    fi
+    for key in AllowSendUsageData=0 AllowSendCrashReports=0 CrashCounter=0 DoneMinOS=1 DonePromotional=1 DoneUnsupported=1 \
+            GameOptionsDialogShouldShow=0 GameOptionsDialogShouldShowBigPicture=0 GameOptionsDialogShown=1; do
+        sky_feral_value "${key%=*}" integer "${key#*=}"
+    done
+    # The options window also opens for a build whose "installed version" the preferences do not know yet, and on the first
+    # specification check. Rise 1.0.4 and Shadow 1.0.3 (the builds with a game profile) are recorded as already seen.
+    case "$app_id" in
+        391220) ver="16778240 17072128 Rise of the Tomb Raider™ v1.0.4" ;;
+        750920) ver="16777984 17006592 Shadow of the Tomb Raider v1.0.3" ;;
+        *) ver="" ;;
+    esac
+    if [ -n "$ver" ]; then
+        read -r v1 v2 vname <<< "$ver"
+        sky_feral_value GameInstallVersion integer "$v1" keep
+        sky_feral_value GameInstallVersionWithStages integer "$v2" keep
+        sky_feral_value GameVersionNew integer "$v1" keep
+        sky_feral_value GameInstallVersionString string "$vname" keep
+        sky_feral_value GameVersionString string "$vname" keep
+        sky_feral_value SpecificationFirstLaunchCheck integer 1 keep
+    fi
+    # Hardware notices are remembered per renderer name; the Vulkan driver and its OpenGL wrapper each have their own.
+    gpu="${SKY_GPU_RENDERER//(TM) /}"
+    if [ -n "$gpu" ]; then
+        for variant in "$gpu Vulkan unknown" "Wrapper($gpu) Vulkan unknown"; do
+            for alert in BaselineDefaultSettings HighHardwareDefaultPreset LowHardwareDefaultPreset MediumHardwareDefaultPreset; do
+                sky_feral_value "SeenSpecificationAlertUUID$alert$variant" integer 1 keep
+            done
+        done
+    fi
+    echo "SkyNetEmu: Feral launcher state cleared"
+}
+sky_feral_launcher_state
 sky_feral_resolution
 if [ "$app_id" = 391220 ] && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
     [ "$game32" != 1 ] || fail "Direct FEX supports only Rise's native 64-bit port."

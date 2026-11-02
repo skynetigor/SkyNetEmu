@@ -267,7 +267,72 @@
       "channel": "prerelease",
       "tags": ["Linux", "BeamNG 0.39", "FEX", "bionic", "Experimental"],
       "testedOn": ["Samsung Galaxy Z Fold8 Ultra (SM-F976B), BeamNG 0.39.4"]
+    },
+    {
+      "id": "alien-isolation-linux-fex-performance",
+      "name": "Linux, FEX Performance + TSO",
+      "platform": "linux",
+      "file": "containers/alien-isolation-linux-fex-performance.wcfg",
+      "description": "Alien: Isolation, native x86-64 Steam build 4940658. FEX 2610 Performance with TSO enabled, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, NVIDIA vendor override, Zink and Turnip 26.3 for Adreno 8xx, 1280x720. Menu and first-person gameplay checked on SM-F976B (2026-11-02); long-session stability is untested. Keep the game in the container's internal storage.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "64-bit",
+        "TSO",
+        "Vulkan",
+        "Turnip"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
+      "id": "dead-island-definitive-edition-linux-fex-performance",
+      "name": "Linux, FEX Performance",
+      "platform": "linux",
+      "file": "containers/dead-island-definitive-edition-linux-fex-performance.wcfg",
+      "description": "Dead Island Definitive Edition, native x86-64 Steam build 1837542. FEX 2610 Performance, Ubuntu 24.04 rootfs, Zink and Turnip 26.3 for Adreno 8xx, 1280x720 with the fit mode. Menu and gameplay checked on SM-F976B (2026-11-02); long-session stability is untested. Keep the game in the container's internal storage.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "64-bit",
+        "Zink",
+        "Turnip"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
+    },
+    {
+      "id": "rise-of-the-tomb-raider-linux-fex-performance",
+      "name": "Linux, FEX",
+      "platform": "linux",
+      "file": "containers/rise-of-the-tomb-raider-linux-fex-performance.wcfg",
+      "description": "Rise of the Tomb Raider, native x86-64 Steam build 9575745. FEX 2610 under PRoot with the Performance preset, TSO on, full x87 precision, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, Turnip 26.3 for Adreno 8xx with sysmem, native Vulkan output, 1280x720. Checked through to gameplay on a fresh install (SM-F976B, 2026-11-02). The Android-bionic direct path crashes in Feral's launcher on a fresh install and is not the default.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "bionic",
+        "64-bit",
+        "Vulkan",
+        "Turnip"
+      ],
+      "testedOn": [
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
+      ]
     }
   ],
-  "revision": 10
+  "revision": 13
 }

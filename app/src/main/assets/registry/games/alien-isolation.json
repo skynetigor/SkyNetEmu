@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 1,
+  "revision": 2,
   "id": "alien-isolation",
   "name": "Alien: Isolation",
   "steam": {
@@ -36,14 +36,22 @@
           "from": 4940658,
           "until": 4940659
         }
-      }
+      },
+      "containers": [
+        "alien-isolation-linux-fex-performance"
+      ],
+      "preferredContainer": "alien-isolation-linux-fex-performance"
     },
     {
       "id": "default",
       "label": "Other Linux builds",
       "status": "untested",
       "notes": "Only Steam Linux build 4940658 was checked. These defaults are not verification of other builds or emulators.",
-      "default": true
+      "default": true,
+      "containers": [
+        "alien-isolation-linux-fex-performance"
+      ],
+      "preferredContainer": "alien-isolation-linux-fex-performance"
     }
   ]
 }

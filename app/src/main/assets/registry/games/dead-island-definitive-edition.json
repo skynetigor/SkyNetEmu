@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 1,
+  "revision": 2,
   "id": "dead-island-definitive-edition",
   "name": "Dead Island Definitive Edition",
   "steam": {
@@ -35,14 +35,22 @@
           "from": 1837542,
           "until": 1837543
         }
-      }
+      },
+      "containers": [
+        "dead-island-definitive-edition-linux-fex-performance"
+      ],
+      "preferredContainer": "dead-island-definitive-edition-linux-fex-performance"
     },
     {
       "id": "default",
       "label": "Other Linux builds",
       "status": "untested",
       "notes": "Only Steam Linux build 1837542 was checked. These defaults are not verification of other builds or emulators.",
-      "default": true
+      "default": true,
+      "containers": [
+        "dead-island-definitive-edition-linux-fex-performance"
+      ],
+      "preferredContainer": "dead-island-definitive-edition-linux-fex-performance"
     }
   ]
 }

@@ -142,11 +142,13 @@ public final class LinuxSession {
                 }
                 return directCommand(context, container, profile.executableGuest, options);
             }
-            if ("391220".equals(appId)) {
+            if (profile != null && !profile.profile.linuxExecutables.isEmpty()) {
+                // A native Linux game with a profile must start through this app's tool (Valve's own ones fail in this
+                // container); a fresh Steam has no tool chosen for it.
                 try {
-                    selectRiseNativeTool(container);
+                    selectNativeTool(container, appId, profile.profile.linuxExecutables);
                 } catch (java.io.IOException | IllegalArgumentException e) {
-                    LinuxFail.w(TAG, "Cannot configure Rise's native Steam compatibility tool", e);
+                    LinuxFail.w(TAG, "Cannot configure the native Steam compatibility tool of " + appId, e);
                     return refusal("Cannot configure the native Steam compatibility tool: " + e.getMessage());
                 }
             }
@@ -254,11 +256,20 @@ public final class LinuxSession {
         return path.substring(STEAM_GAME_PREFIX.length());
     }
 
-    private static void selectRiseNativeTool(Container container) throws java.io.IOException {
-        LinuxSteamGames.Game game = LinuxSteamGames.installed(container).get("391220");
+    /** Selects this app's compatibility tool for an installed Steam game that ships a native x86 Linux program (listed by its profile). */
+    private static void selectNativeTool(Container container, String appId, List<String> executables) throws java.io.IOException {
+        LinuxSteamGames.Game game = LinuxSteamGames.installed(container).get(appId);
         if (game == null) return;
-        File binary = new File(game.library, "steamapps/common/" + game.installDir + "/bin/RiseOfTheTombRaider");
-        if (elfMachine(binary) != 62) return;
+        File installed = new File(game.library, "steamapps/common/" + game.installDir);
+        boolean native86 = false;
+        for (String relative : executables) {
+            int machine = elfMachine(new File(installed, relative));
+            if (machine == 62 || machine == 3) {
+                native86 = true;
+                break;
+            }
+        }
+        if (!native86) return;
         File config = new File(LinuxSteamGames.steamRoot(container), "config/config.vdf");
         String text = new String(java.nio.file.Files.readAllBytes(config.toPath()), java.nio.charset.StandardCharsets.UTF_8);
         String updated = SteamCompatConfig.selectNativeTool(text, game.appId);
@@ -863,6 +874,12 @@ public final class LinuxSession {
             env.put("GALLIUM_DRIVER", "llvmpipe");
         }
         env.put("PULSE_SERVER", "unix:" + new File(imageFsRoot, UnixSocketConfig.PULSE_SERVER_PATH).getPath());
+        try {
+            // Feral games key their "hardware notice seen" preferences by the renderer's name (skynet-launcher.sh).
+            String renderer = com.winlator.cmod.core.GPUInformation.getRenderer(null, context);
+            if (renderer != null && !renderer.trim().isEmpty() && !renderer.contains("\n")) env.put("SKY_GPU_RENDERER", renderer.trim());
+        } catch (Throwable ignored) {
+        }
         // The Steam client's web helper draws on the GPU through this taskset stand-in unless the container turns that off.
         File steamTaskset = stageAsset(context, "steam-taskset.sh");
         if (steamTaskset != null) env.put("SKY_STEAM_TASKSET", steamTaskset.getPath());

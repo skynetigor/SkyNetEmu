@@ -8,6 +8,10 @@ import com.winlator.cmod.container.ContainerManager;
 import com.winlator.cmod.container.Shortcut;
 import com.winlator.cmod.core.FileUtils;
 import com.winlator.cmod.gameprofile.GameProfileCatalog;
+import com.winlator.cmod.contents.ContainerConfigCatalog;
+import com.winlator.cmod.core.DeviceInfo;
+import com.winlator.cmod.gameprofile.ConfigChooser;
+import com.winlator.cmod.gameprofile.GameProfile;
 import com.winlator.cmod.gameprofile.GameProfiles;
 
 import java.io.File;
@@ -263,6 +267,7 @@ public final class LinuxSteamGames {
                 GameProfileCatalog.IndexEntry entry = GameProfileCatalog.bySteamAppId(context, game.appId);
                 if (entry != null) {
                     shortcut.putExtra(GameProfiles.EXTRA_PROFILE, entry.id);
+                    applyPreferredConfig(context, container, shortcut);
                     changed = true;
                 }
             }
@@ -274,6 +279,36 @@ public final class LinuxSteamGames {
         }
         catch (RuntimeException e) {
             LinuxFail.w(TAG, "Cannot set up the shortcut of " + game.name, e);
+        }
+    }
+
+    /**
+     * The container preset the game's profile prefers for this device (the emulator, FEX preset, thunks and driver it was tested with,
+     * as in the "Add game" list), written into a shortcut made from Steam's library. Without it such a shortcut runs the way the
+     * container does (Box64), which cannot start the native games that need FEX's root filesystem. The profile's own settings,
+     * written afterwards, stay on top.
+     */
+    private static void applyPreferredConfig(Context context, Container container, Shortcut shortcut) {
+        GameProfiles.Effective effective = GameProfiles.resolve(context, container, shortcut);
+        if (effective == null || effective.version == null) return;
+        java.util.Map<String, ContainerConfigCatalog.Config> all = ContainerConfigCatalog.all(context, false);
+        ConfigChooser.Choice choice = ConfigChooser.choose(effective.version, DeviceInfo.soc(context).family, all, GameProfile.Platform.LINUX);
+        String configId = choice == null ? null : choice.configId;
+        // A processor the presets were not made for still gets the profile's first one: Box64, the alternative, cannot start these games.
+        if (configId == null) for (String id : effective.version.containers) if (all.containsKey(id)) { configId = id; break; }
+        if (configId == null) return;
+        try {
+            org.json.JSONObject data = new org.json.JSONObject(ContainerConfigCatalog.profileText(context, all.get(configId), false))
+                    .getJSONObject("container");
+            for (java.util.Map.Entry<String, String> entry : LinuxShortcutDefaults
+                    .fromData(context, new com.winlator.cmod.container.ContainerManager(context), data).entrySet()) {
+                if (entry.getValue() != null && !entry.getValue().isEmpty() && !entry.getValue().contains("\n"))
+                    shortcut.putExtra(entry.getKey(), entry.getValue());
+            }
+            shortcut.putExtra("containerConfig", configId);
+        }
+        catch (org.json.JSONException | RuntimeException e) {
+            LinuxFail.w(TAG, "Cannot apply the preferred container preset " + configId, e);
         }
     }
 

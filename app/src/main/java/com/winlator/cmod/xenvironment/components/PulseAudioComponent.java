@@ -124,8 +124,9 @@ public class PulseAudioComponent extends EnvironmentComponent {
         } else {
             FileUtils.writeString(configFile, String.join("\n",
                     "load-module module-native-protocol-unix auth-anonymous=1 auth-cookie-enabled=0 socket=\"" + socketConfig.path + "\"",
-                    "load-module module-aaudio-sink volume=1.0",
-                    "set-default-sink AAudioSink"
+                    "load-module module-aaudio-sink",
+                    "set-default-sink AAudioSink",
+                    "set-sink-volume AAudioSink 65536"
             ));
         }
 

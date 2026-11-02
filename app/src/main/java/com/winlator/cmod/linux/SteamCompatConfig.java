@@ -17,7 +17,14 @@ public final class SteamCompatConfig {
         for (; index < path.length; index++) {
             Node child = parent.child(path[index]);
             if (child == null) break;
-            if (child.children == null) throw new IllegalArgumentException("Steam mapping path is not an object");
+            if (child.children == null) {
+                // Steam writes an empty string for a game that has no tool chosen yet; that is not a choice.
+                if (index == path.length - 1 && child.value.isEmpty()) {
+                    String entry = "\"" + appId + "\"\n{\n\"name\" \"skynet-linux\"\n\"config\" \"\"\n\"priority\" \"250\"\n}\n";
+                    return text.substring(0, child.start) + entry + text.substring(child.end);
+                }
+                throw new IllegalArgumentException("Steam mapping path is not an object");
+            }
             parent = child;
         }
         // An explicit choice (including Proton) belongs to the user.
@@ -33,11 +40,22 @@ public final class SteamCompatConfig {
         final String key;
         final List<Node> children;
         final int close;
+        /** A plain value (children null): its text and where "key" "value" starts and ends in the file. */
+        final String value;
+        final int start;
+        final int end;
 
         Node(String key, List<Node> children, int close) {
+            this(key, children, close, null, -1, -1);
+        }
+
+        Node(String key, List<Node> children, int close, String value, int start, int end) {
             this.key = key;
             this.children = children;
             this.close = close;
+            this.value = value;
+            this.start = start;
+            this.end = end;
         }
 
         Node child(String name) {
@@ -73,14 +91,15 @@ public final class SteamCompatConfig {
                     position++;
                     return new Node(key, children, start);
                 }
+                int entryStart = position;
                 String name = token();
                 skip();
                 if (position < text.length() && text.charAt(position) == '{') {
                     position++;
                     children.add(object(name));
                 } else {
-                    token();
-                    children.add(new Node(name, null, -1));
+                    String value = token();
+                    children.add(new Node(name, null, -1, value, entryStart, position));
                 }
             }
         }
