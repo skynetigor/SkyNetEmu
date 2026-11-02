@@ -79,6 +79,7 @@ public final class LinuxFexBionicSession {
         File configFile = new File(directory, appId != null ? "Rise.json" : "Direct.json");
         Files.write(configFile.toPath(), config.toString().getBytes(StandardCharsets.UTF_8));
         nativeEnv.remove("LD_PRELOAD");
+        nativeEnv.put("LD_LIBRARY_PATH", platformTlsDirectory(directory).getPath() + ":" + nativeEnv.get("LD_LIBRARY_PATH"));
         guestEnv.forEach((key, value) -> {
             if (key.startsWith("FEX_") || key.startsWith("TU_") || key.startsWith("MESA_"))
                 nativeEnv.put(key, value);
@@ -182,6 +183,24 @@ public final class LinuxFexBionicSession {
                 throw new IOException("BeamNG game data root is unavailable: " + gameRoot);
         }
         return new LinuxSession.Launch(launch.argv, launch.hostEnv, workingDirectory, launch.executionMode);
+    }
+
+    /**
+     * The imagefs ships OpenSSL 3 as libcrypto.so/libssl.so ahead of /system/lib64, so Android's own libsqlite (loaded while the
+     * host Vulkan thunk starts) binds to it and fails on OpenSSL_add_all_algorithms: the game then sees no Vulkan driver.
+     * Only these two names are pointed back at the platform's libraries; the imagefs's other libraries keep priority.
+     */
+    private static File platformTlsDirectory(File directory) throws IOException {
+        File links = new File(directory, "platform-tls");
+        Files.createDirectories(links.toPath());
+        for (String name : new String[]{"libcrypto.so", "libssl.so"}) {
+            java.nio.file.Path link = new File(links, name).toPath();
+            java.nio.file.Path target = java.nio.file.Paths.get("/system/lib64", name);
+            if (Files.isSymbolicLink(link) && Files.readSymbolicLink(link).equals(target)) continue;
+            Files.deleteIfExists(link);
+            Files.createSymbolicLink(link, target);
+        }
+        return links;
     }
 
     static int validateDirectCommand(String[] command) throws IOException {

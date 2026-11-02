@@ -230,7 +230,7 @@ public final class LinuxSession {
                 String.valueOf(options.env.size()), String.valueOf(options.wrapper.size())));
         for (Map.Entry<String, String> entry : options.env.entrySet()) command.add(entry.getKey() + "=" + entry.getValue());
         command.addAll(options.wrapper);
-        command.addAll(options.args);
+        command.addAll(LinuxBeamNgLuaJit.arguments(container, program, runsOnFex, options));
         return command.toArray(new String[0]);
     }
 

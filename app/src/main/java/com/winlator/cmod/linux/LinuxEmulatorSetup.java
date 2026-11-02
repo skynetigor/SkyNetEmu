@@ -3,6 +3,7 @@ package com.winlator.cmod.linux;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.Shortcut;
 
+import java.io.File;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -41,6 +42,30 @@ public final class LinuxEmulatorSetup {
      * shortcut's settings. Choosing another emulator drops the container's build and preset (they name builds of the other one).
      */
     public static Container of(Container container, Shortcut shortcut) {
+        return stagedBeamNG(settings(container, shortcut), shortcut);
+    }
+
+    /**
+     * FEX cannot map programs from noexec shared storage. For BeamNG there it is not refused: the direct Android FEX session stages
+     * the game's ELF files internally (see {@link LinuxExecutableStaging}), which needs bionic and no PRoot, so those are chosen
+     * for the session whatever the shortcut says. The shortcut itself is not changed.
+     */
+    private static Container stagedBeamNG(Container effective, Shortcut shortcut) {
+        if (effective == null || shortcut == null || !effective.isLinux()
+                || !LinuxEmulator.FEX.equals(LinuxEmulator.choice(effective)) || LinuxBionicSession.enabled(effective)) return effective;
+        String path = shortcut.path;
+        File program = path != null && path.startsWith("/") ? new File(path)
+                : new File(shortcut.getExtra("gameRoot"), "BinLinux/BeamNG.drive.x64");
+        if (!LinuxExecutableStaging.isBeamNG(program)
+                || !LinuxProgramPaths.isWithin(android.os.Environment.getExternalStorageDirectory(), program)
+                || LinuxSession.elfMachine(program) != 62) return effective;
+        Map<String, String> over = new LinkedHashMap<>();
+        over.put(LinuxBionicSession.EXTRA, "1");
+        over.put(LinuxSession.EXTRA_NO_PROOT, "1");
+        return effective.copyWithExtras(over);
+    }
+
+    private static Container settings(Container container, Shortcut shortcut) {
         if (container == null || !container.isLinux() || shortcut == null) return container;
         // A shortcut with its own settings decides all of them, an empty one included (no driver of its own, say, means the
         // runtime's, not the container's).
