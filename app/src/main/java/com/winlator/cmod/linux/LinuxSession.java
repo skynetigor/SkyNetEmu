@@ -123,7 +123,10 @@ public final class LinuxSession {
             command.add("/usr/bin/env");
             for (Map.Entry<String, String> e : options.env.entrySet()) command.add(e.getKey() + "=" + e.getValue());
             command.addAll(options.wrapper);
-            command.addAll(java.util.Arrays.asList(steamCommand("", false, true)));
+            // A version download types into the client's console, which needs the desktop client (its console is a window of its own),
+            // not Big Picture (the session sets this extra in memory only).
+            boolean bigPicture = !"1".equals(shortcut.getExtra("steamDownload", "0"));
+            command.addAll(java.util.Arrays.asList(steamCommand("", false, bigPicture)));
             command.addAll(options.args);
             return command.toArray(new String[0]);
         }

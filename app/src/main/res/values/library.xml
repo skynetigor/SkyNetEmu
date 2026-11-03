@@ -21,4 +21,5 @@
     <string name="library_vertical_mode">Vertical mode</string>
     <string name="library_horizontal_mode">Horizontal mode</string>
     <string name="library_controller_hints">D-pad / stick: Move · A / Cross: Open · X / Square: Actions · B / Circle: Back</string>
+    <string name="library_download_version">Download game version</string>
 </resources>

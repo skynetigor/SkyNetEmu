@@ -104,6 +104,7 @@ object LibraryComposeHost {
     const val ACTION_FAVORITE = "favorite"
     const val ACTION_ENTER = "enter"
     const val ACTION_SAVES = "saves"
+    const val ACTION_DOWNLOAD_VERSION = "download_version"
 
     @JvmStatic
     @JvmOverloads

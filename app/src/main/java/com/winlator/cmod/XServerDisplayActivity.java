@@ -475,6 +475,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
             steamClientSession = linuxSession && LinuxSession.isSteam(shortcut.path);
             steamSession = steamClientSession || (linuxSession && LinuxSession.isSteamGame(shortcut.path));
+            // A version download: the same client, the desktop one, with the download's own screen over it.
+            if (steamClientSession && getIntent().getStringExtra(com.winlator.cmod.ui.library.GameVersionDownloadDialog.EXTRA_JOB) != null)
+                shortcut.putExtra("steamDownload", "1");
         }
         boolean legacyController = "legacy".equals(shortcut != null
                 ? shortcut.getExtra("controllerTransport") : container.getExtra("controllerTransport"))
@@ -1207,6 +1210,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return value == null || value.isEmpty() ? null : value;
     }
 
+    /** The version download of a job: the downloader types into this session's Steam console, the overlay shows how far it is. */
+    private void startVersionDownload(String jobKey) {
+        com.winlator.cmod.linux.SteamPaths paths = new com.winlator.cmod.linux.SteamPaths(container.getLinuxHomeDir());
+        com.winlator.cmod.linux.SteamDownloadJob job = com.winlator.cmod.linux.SteamDownloadJob.load(paths.jobsDir(), jobKey);
+        if (job == null) {
+            Toast.makeText(this, "The download job is missing.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        downloadTitle = job.gameName + " " + job.versionLabel;
+        downloadOverlay = new com.winlator.cmod.ui.library.SteamDownloadOverlay(this, downloadTitle,
+                () -> { if (versionDownloader != null) versionDownloader.cancel(); }, this::exit);
+        // "steam_download_no_overlay" (debugging): the client's own window stays visible to watch its console.
+        if (!getIntent().getBooleanExtra("steam_download_no_overlay", false)) runOnUiThread(downloadOverlay::show);
+        versionDownloader = new com.winlator.cmod.linux.SteamVersionDownloader(job, container.getLinuxHomeDir(),
+                (finished, folder) -> com.winlator.cmod.linux.GameVersionShortcut.create(this, finished, folder, message -> { }),
+                status -> {
+                    downloadOverlay.update(status);
+                    com.winlator.cmod.linux.DownloadNotification.update(this, downloadTitle, status);
+                    if (status.state == com.winlator.cmod.linux.SteamDownloadJob.State.CANCELLED) exit();
+                });
+        versionDownloader.start();
+    }
+
     private void exit() {
         if (!exiting.compareAndSet(false, true)) return;
         if (xServerView != null) xServerView.setDisplayRateActive(false);
@@ -1665,6 +1691,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private com.winlator.cmod.linux.SteamGameLaunchMonitor steamGameLaunchMonitor;
     private com.winlator.cmod.linux.SteamConsoleBridge steamConsoleBridge;
+    private com.winlator.cmod.linux.SteamVersionDownloader versionDownloader;
+    private com.winlator.cmod.ui.library.SteamDownloadOverlay downloadOverlay;
+    private String downloadTitle = "";
 
     /** A Linux program ended: a failure is explained to the user before the session is closed. */
     private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
@@ -1787,6 +1816,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (steamClientSession) {
             steamConsoleBridge = new com.winlator.cmod.linux.SteamConsoleBridge(xServer, container.getLinuxHomeDir());
             steamConsoleBridge.start();
+            String jobKey = getIntent().getStringExtra(com.winlator.cmod.ui.library.GameVersionDownloadDialog.EXTRA_JOB);
+            if (jobKey != null) startVersionDownload(jobKey);
         }
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.

@@ -21,4 +21,5 @@
     <string name="library_vertical_mode">Вертикальный режим</string>
     <string name="library_horizontal_mode">Горизонтальный режим</string>
     <string name="library_controller_hints">Крестовина / стик: Выбор · A / Cross: Открыть · X / Square: Действия · B / Circle: Назад</string>
+    <string name="library_download_version">Скачать версию игры</string>
 </resources>

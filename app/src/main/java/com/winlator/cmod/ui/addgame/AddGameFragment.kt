@@ -491,22 +491,13 @@ class AddGameFragment : Fragment() {
             Telemetry.event("skynet.funnel", "container_created", "skynet.game.id", game?.game?.id)
             phase = Phase.Working("Adding the game…")
             val settings = game?.game?.effective(game.version, platform)
-            val extras = LinkedHashMap<String, String?>()
-            extras.putAll(linuxSettings)
-            if (settings != null) extras.putAll(settings.extras)
-            // Execution mode belongs to the selected Linux preset, not the game's generic defaults.
-            linuxSettings["linuxNoProot"]?.takeIf { it.isNotEmpty() }?.let { extras["linuxNoProot"] = it }
-            extras[com.winlator.cmod.container.Shortcut.EXTRA_LIBRARY_ORIGIN] = com.winlator.cmod.container.Shortcut.ORIGIN_MANUAL
+            val extras = com.winlator.cmod.linux.GameVersionShortcut.buildExtras(
+                linuxSettings, settings?.extras, game?.game, game?.version, (pick as? Pick.Registry)?.config?.id)
             // The native BeamNG preset has an explicit cache choice; retain it over the game's
             // generic Windows default. The shortcut remains editable after it has been created.
             if (nativeArm64 && game?.game?.id == "beamng-drive") {
                 container.getExtra("fileCache").takeIf { it.isNotEmpty() }?.let { extras["fileCache"] = it }
             }
-            if (game != null) {
-                extras[GameProfiles.EXTRA_PROFILE] = game.game.id
-                game.version?.let { extras[GameProfiles.EXTRA_VERSION] = it.id }
-            }
-            (pick as? Pick.Registry)?.let { extras["containerConfig"] = it.config.id }
             val name = ShortcutWriter.freeName(container, game?.game?.name ?: ShortcutWriter.smartName(exe))
             val desktop: File? = if (container.isLinux) {
                 addLinuxProgram(context, container, name, game, extras)

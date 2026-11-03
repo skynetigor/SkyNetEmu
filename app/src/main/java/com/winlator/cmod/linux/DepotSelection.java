@@ -30,6 +30,10 @@ public final class DepotSelection {
     private DepotSelection() {
     }
 
+    public static Pick pick(long depot, String manifest, long size) {
+        return new Pick(depot, manifest, size, 0);
+    }
+
     /**
      * @param platform  {@code windows} or {@code linux}
      * @param language  Steam language name such as {@code english}; depots for other languages are left out

@@ -131,6 +131,25 @@ public final class GameProfile {
         }
     }
 
+    /**
+     * Where a version's files come from on Steam: a branch of the app (its manifests are in the client's appinfo) and/or manifest ids
+     * for single depots (a build the client no longer offers as a branch). Either may be empty.
+     */
+    public static final class SteamSource {
+        public final String branch;
+        /** Depot id to manifest id. */
+        public final Map<Long, String> manifests;
+
+        SteamSource(String branch, Map<Long, String> manifests) {
+            this.branch = branch == null ? "" : branch;
+            this.manifests = Collections.unmodifiableMap(manifests);
+        }
+
+        public boolean isEmpty() {
+            return branch.isEmpty() && manifests.isEmpty();
+        }
+    }
+
     public static final class Version {
         public final String id;
         public final String label;
@@ -151,10 +170,23 @@ public final class GameProfile {
         public final String preferredContainer;
         /** Processor family (socs.json) to the config that suits it best. */
         public final Map<String, String> preferredBySoc;
+        /** Steam source for both platforms and for each one; see {@link #steamSource}. Null when the version names none. */
+        private final SteamSource steamAll, steamWindows, steamLinux;
+
+        /** The Steam branch and manifests of this version on a platform (the platform's own entry wins), or null when it has none. */
+        public SteamSource steamSource(Platform platform) {
+            SteamSource own = platform == Platform.LINUX ? steamLinux : steamWindows;
+            if (own != null && !own.isEmpty()) return own;
+            return steamAll != null && !steamAll.isEmpty() ? steamAll : null;
+        }
 
         Version(String id, String label, String status, String notes, String testedOn, boolean isDefault, Match match, Settings settings,
                 Settings windowsSettings, Settings linuxSettings,
-                List<String> containers, String preferredContainer, Map<String, String> preferredBySoc) {
+                List<String> containers, String preferredContainer, Map<String, String> preferredBySoc,
+                SteamSource steamAll, SteamSource steamWindows, SteamSource steamLinux) {
+            this.steamAll = steamAll;
+            this.steamWindows = steamWindows;
+            this.steamLinux = steamLinux;
             this.id = id;
             this.label = label;
             this.status = status;
@@ -300,7 +332,31 @@ public final class GameProfile {
         return new Version(id, object.optString("label", id), status, object.optString("notes", ""), object.optString("testedOn", ""),
                 object.optBoolean("default", false), match(object.optJSONObject("match")), settings(object),
                 settings(object.optJSONObject("windows")), settings(object.optJSONObject("linux")),
-                ids(object.optJSONArray("containers")), configId(object.optString("preferredContainer", "")), preferred(object.optJSONObject("preferredBySoc")));
+                ids(object.optJSONArray("containers")), configId(object.optString("preferredContainer", "")), preferred(object.optJSONObject("preferredBySoc")),
+                steamSource(object.optJSONObject("steam")), steamSource(steamNode(object, "windows")), steamSource(steamNode(object, "linux")));
+    }
+
+    private static JSONObject steamNode(JSONObject version, String platform) {
+        JSONObject platformNode = version.optJSONObject(platform);
+        return platformNode == null ? null : platformNode.optJSONObject("steam");
+    }
+
+    /** {"branch": "public", "manifests": {"284161": "7188555249273500625"}}; unusable entries are dropped. */
+    private static SteamSource steamSource(JSONObject object) {
+        if (object == null) return null;
+        String branch = object.optString("branch", "");
+        if (!branch.matches("[A-Za-z0-9][A-Za-z0-9._ -]{0,63}")) branch = "";
+        Map<Long, String> manifests = new LinkedHashMap<>();
+        JSONObject node = object.optJSONObject("manifests");
+        if (node != null) {
+            Iterator<String> keys = node.keys();
+            while (keys.hasNext()) {
+                String depot = keys.next();
+                String manifest = node.optString(depot, "");
+                if (depot.matches("[0-9]{1,10}") && manifest.matches("[0-9]{1,20}")) manifests.put(Long.parseLong(depot), manifest);
+            }
+        }
+        return new SteamSource(branch, manifests);
     }
 
     private static String configId(String id) {

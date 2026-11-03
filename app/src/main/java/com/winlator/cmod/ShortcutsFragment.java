@@ -782,6 +782,9 @@ public class ShortcutsFragment extends Fragment {
         else if (LibraryComposeHost.ACTION_STORAGE.equals(action)) {
             com.winlator.cmod.ui.library.GameStorageComposeDialog.show(this, shortcut, this::loadShortcutsList);
         }
+        else if (LibraryComposeHost.ACTION_DOWNLOAD_VERSION.equals(action)) {
+            com.winlator.cmod.ui.library.GameVersionDownloadDialog.show(this, shortcut, this::loadShortcutsList);
+        }
         else if (LibraryComposeHost.ACTION_CONTAINER.equals(action)) {
             startActivity(new Intent(requireContext(), com.winlator.cmod.ui.settings.ContainersSettingsActivity.class)
                     .putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_EDIT_CONTAINER, shortcut.container.id));

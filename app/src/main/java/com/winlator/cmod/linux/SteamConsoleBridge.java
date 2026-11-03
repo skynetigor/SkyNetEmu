@@ -2,6 +2,8 @@ package com.winlator.cmod.linux;
 
 import android.util.Log;
 
+import com.winlator.cmod.xserver.Pointer;
+import com.winlator.cmod.xserver.Window;
 import com.winlator.cmod.xserver.XKeycode;
 import com.winlator.cmod.xserver.XServer;
 
@@ -23,11 +25,15 @@ import java.util.List;
 public final class SteamConsoleBridge {
     private static final String TAG = "SteamConsole";
     private static final long KEY_DELAY_MS = 12;
-    private static final long CONSOLE_SETTLE_MS = 2500;
+    private static final long CONSOLE_SETTLE_MS = 8000;
+    private static final long CONSOLE_WAIT_MS = 90_000;
+    /** Where the console's input line is, as a fraction of the client window's height from its top. */
+    private static final double INPUT_LINE_AT = 0.895;
 
     private final XServer xServer;
     private final File input;
     private final File pipe;
+    private final File consoleLog;
     private volatile boolean running;
     private Thread thread;
     private boolean consoleOpened;
@@ -36,6 +42,7 @@ public final class SteamConsoleBridge {
         this.xServer = xServer;
         this.input = new File(linuxHome, ".skynet/steam-console.in");
         this.pipe = new File(linuxHome, ".steam/steam.pipe");
+        this.consoleLog = new SteamPaths(linuxHome).consoleLog();
     }
 
     /** Adds a command for the bridge of the session that runs in the container whose home is given. */
@@ -90,11 +97,19 @@ public final class SteamConsoleBridge {
 
     private void run(String command) throws InterruptedException {
         if (!consoleOpened) {
+            long offset = consoleLog.length();
             openConsole();
             consoleOpened = true;
+            // A client that is still starting takes the URL seconds later: its log says when it has (the tab needs a moment more).
+            long waited = 0;
+            while (waited < CONSOLE_WAIT_MS && !SteamVersionDownloader.readFrom(consoleLog, offset).contains("steam://open/console")) {
+                Thread.sleep(500);
+                waited += 500;
+            }
             Thread.sleep(CONSOLE_SETTLE_MS);
         }
         Log.i(TAG, "typing: " + command);
+        clickInput();
         typeLine(command);
     }
 
@@ -112,6 +127,59 @@ public final class SteamConsoleBridge {
         writer.start();
     }
 
+    /**
+     * The console's input line takes keys only once it has been clicked (opened by the pipe, it shows but is not focused): a click on
+     * the bottom of the client's window, where the line is. The client's window is the biggest one on the screen.
+     */
+    private void clickInput() throws InterruptedException {
+        Window client = null;
+        long area = 0;
+        try {
+            for (Window window : xServer.windowManager.rootWindow.getChildren()) {
+                if (!window.isMappedTopLevel()) continue;
+                long size = (long) window.getWidth() * window.getHeight();
+                if (size > area) {
+                    area = size;
+                    client = window;
+                }
+            }
+        }
+        catch (RuntimeException e) {
+            Log.w(TAG, "Cannot look for the client's window", e);
+        }
+        if (client == null) {
+            Log.w(TAG, "No client window to click");
+            return;
+        }
+        // The client's text field takes keys only while its window has the focus as far as the web view knows: the window is given the
+        // focus anew (FocusOut, FocusIn), and the click that follows puts the caret in the field.
+        com.winlator.cmod.xserver.WindowManager manager = xServer.windowManager;
+        // The window the client's text goes to: the one that has the focus if it is part of the client's main window, else the main window
+        // (a second window of the client, the friends list for one, may have taken the focus when it appeared).
+        Window focused = manager.getFocusedWindow();
+        Window target = client;
+        for (Window w = focused; w != null; w = w.getParent()) {
+            if (w == client) {
+                target = focused;
+                break;
+            }
+        }
+        manager.setFocus(manager.rootWindow, com.winlator.cmod.xserver.WindowManager.FocusRevertTo.POINTER_ROOT);
+        Thread.sleep(200);
+        manager.setFocus(target, com.winlator.cmod.xserver.WindowManager.FocusRevertTo.POINTER_ROOT);
+        Thread.sleep(500);
+        int x = client.getRootX() + client.getWidth() / 2;
+        int y = client.getRootY() + (int) (client.getHeight() * INPUT_LINE_AT);
+        Log.i(TAG, "click " + x + "," + y + " window " + client.id + " " + client.getWidth() + "x" + client.getHeight());
+        xServer.injectPointerMove(x, y);
+        Thread.sleep(80);
+        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT);
+        Thread.sleep(60);
+        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+        Thread.sleep(600);
+        Log.i(TAG, "clicked");
+    }
+
     private void typeLine(String text) throws InterruptedException {
         for (char c : text.toCharArray()) {
             XKeycode key = keyFor(c);
@@ -121,7 +189,9 @@ public final class SteamConsoleBridge {
             }
             boolean shift = c == '_' || Character.isUpperCase(c);
             if (shift) xServer.injectKeyPress(XKeycode.KEY_SHIFT_L);
-            xServer.injectKeyPress(key, c);
+            // No keysym: the server's own keymap names the key. With one the server rewrites its map and tells the client (MappingNotify)
+            // at every key, and the client's text field then ignores the keys.
+            xServer.injectKeyPress(key);
             Thread.sleep(KEY_DELAY_MS);
             xServer.injectKeyRelease(key);
             if (shift) xServer.injectKeyRelease(XKeycode.KEY_SHIFT_L);
@@ -130,6 +200,7 @@ public final class SteamConsoleBridge {
         xServer.injectKeyPress(XKeycode.KEY_ENTER);
         Thread.sleep(KEY_DELAY_MS);
         xServer.injectKeyRelease(XKeycode.KEY_ENTER);
+        Log.i(TAG, "typed");
     }
 
     /** The characters of a console command: letters, digits, space, '_' and '-'. */
