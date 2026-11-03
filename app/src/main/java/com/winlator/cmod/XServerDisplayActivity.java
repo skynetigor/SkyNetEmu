@@ -180,6 +180,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private WinlatorHUD modernHud = null;
     private Runnable editInputControlsCallback;
     private Shortcut shortcut;
+    /** The session runs the Steam client itself (Big Picture): no side panel, the on-screen gamepad stands in for a missing one. */
+    private boolean steamClientSession;
+    /** The session runs the Steam client or a game started through it. */
+    private boolean steamSession;
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
     private HashMap<String, String> graphicsDriverConfig;
     private String audioDriver = Container.DEFAULT_AUDIO_DRIVER;
@@ -469,6 +473,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
             if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
+            steamClientSession = linuxSession && LinuxSession.isSteam(shortcut.path);
+            steamSession = steamClientSession || (linuxSession && LinuxSession.isSteamGame(shortcut.path));
         }
         boolean legacyController = "legacy".equals(shortcut != null
                 ? shortcut.getExtra("controllerTransport") : container.getExtra("controllerTransport"))
@@ -1307,6 +1313,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
+        // The Steam client has no side panel; leaving it is Steam's own "Exit Steam".
+        if (steamClientSession) return;
         if (environment != null) {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
                 drawerLayout.openDrawer(GravityCompat.START);
@@ -1921,6 +1929,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setMouseEnabled(!isMouseDisabled);
         watchRealMouse();
         touchpadView.setFourFingersTapCallback(() -> {
+            if (steamClientSession) return;
             if (!drawerLayout.isDrawerOpen(GravityCompat.START))
                 drawerLayout.openDrawer(GravityCompat.START);
         });
@@ -2015,6 +2024,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 ControlsProfile profile = inputControlsManager.getProfile(Integer.parseInt(controlsProfile));
                 if (profile != null)
                     showInputControls(profile);
+            } else if (steamSession) {
+                showDefaultVirtualGamepad();
             }
 
             String simTouchScreen = shortcut.getExtra("simTouchScreen");
@@ -3224,6 +3235,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
             timeoutHandler.removeCallbacks(hideControlsRunnable);
             touchpadView.setOnTouchListener(null);
         }
+    }
+
+    /**
+     * Big Picture and the games started through Steam are played with a gamepad: with none connected, the on-screen one is shown
+     * (the shortcut's own controls profile, when it names one, is used instead).
+     */
+    private void showDefaultVirtualGamepad() {
+        if (!ExternalController.getControllers().isEmpty()) return;
+        ControlsProfile gamepad = null;
+        for (ControlsProfile profile : inputControlsManager.getProfiles(true)) {
+            if ("Virtual Gamepad".equals(profile.getName())) {
+                gamepad = profile;
+                break;
+            }
+        }
+        if (gamepad == null) gamepad = inputControlsManager.getProfile(3);
+        if (gamepad == null) return;
+        inputControlsView.setShowTouchscreenControls(true);
+        showInputControls(gamepad);
     }
 
     private void showInputControls(ControlsProfile profile) {
