@@ -115,7 +115,7 @@
       "name": "Linux, FEX Performance",
       "platform": "linux",
       "file": "containers/shadow-of-the-tomb-raider-linux-fex-performance.wcfg",
-      "description": "Shadow of the Tomb Raider, native x86-64 Steam build 11668867. FEX 2610 Performance, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, NVIDIA vendor override, Zink and Turnip 26.3 for Adreno 8xx, native Vulkan output, 1280x800. Gameplay, gamepad and memory fixes checked on SM-F976B; long-session stability is untested. Keep the game in the container's internal storage.",
+      "description": "Reports a 2 GB GPU memory budget so the game picks its Medium preset on a first run: about 3.3 GB of GPU memory and 35 FPS in the Peruvian Jungle, against 5.8 GB, 94% RAM and 10-17 FPS on the Highest preset. Shadow of the Tomb Raider, native x86-64 Steam build 11668867. FEX 2610 Performance, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, NVIDIA vendor override, Zink and Turnip 26.3 for Adreno 8xx, native Vulkan output, 1280x800. Gameplay, gamepad and memory fixes checked on SM-F976B; long-session stability is untested. Keep the game in the container's internal storage.",
       "socs": [
         "snapdragon-8-elite-gen-5"
       ],
@@ -334,5 +334,5 @@
       ]
     }
   ],
-  "revision": 13
+  "revision": 14
 }
