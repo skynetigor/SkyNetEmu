@@ -163,6 +163,8 @@ Java_com_winlator_cmod_xconnector_ClientSocket_recvAncillaryMsg(JNIEnv *env, job
     };
 
     int size = recvmsg(clientFd, &msg, 0);
+    if (size < 0) __android_log_print(ANDROID_LOG_WARN, "XConnector", "recvmsg fd=%d failed: errno=%d (%s)", clientFd, errno, strerror(errno));
+    else if (msg.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) __android_log_print(ANDROID_LOG_WARN, "XConnector", "recvmsg fd=%d truncated flags=0x%x", clientFd, msg.msg_flags);
 
     if (size >= 0) {
         struct cmsghdr *cmsg;
