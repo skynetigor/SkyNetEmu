@@ -1278,6 +1278,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (winHandler != null && !exiting.get()) winHandler.stop();
         com.winlator.cmod.perf.GameModeSignal.report(this, false);
         if (steamGameLaunchMonitor != null) steamGameLaunchMonitor.stop();
+        if (steamConsoleBridge != null) steamConsoleBridge.stop();
         if (!isChangingConfigurations() && environment != null)
             environment.stopEnvironmentComponents();
         if (inputControlsView != null) inputControlsView.cancelNativeInput();
@@ -1663,6 +1664,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private com.winlator.cmod.linux.SteamGameLaunchMonitor steamGameLaunchMonitor;
+    private com.winlator.cmod.linux.SteamConsoleBridge steamConsoleBridge;
 
     /** A Linux program ended: a failure is explained to the user before the session is closed. */
     private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
@@ -1782,6 +1784,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         .setPositiveButton(android.R.string.ok, null).show();
         });
         steamGameLaunchMonitor.start();
+        if (steamClientSession) {
+            steamConsoleBridge = new com.winlator.cmod.linux.SteamConsoleBridge(xServer, container.getLinuxHomeDir());
+            steamConsoleBridge.start();
+        }
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.
         launcher.setTerminationCallback((status) -> runOnUiThread(
