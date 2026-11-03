@@ -131,7 +131,8 @@ public final class SteamConsoleBridge {
      * The console's input line takes keys only once it has been clicked (opened by the pipe, it shows but is not focused): a click on
      * the bottom of the client's window, where the line is. The client's window is the biggest one on the screen.
      */
-    private void clickInput() throws InterruptedException {
+    /** The client's main window: the biggest mapped top-level window of the screen; null while it has none. */
+    private Window findClient() {
         Window client = null;
         long area = 0;
         try {
@@ -146,6 +147,16 @@ public final class SteamConsoleBridge {
         }
         catch (RuntimeException e) {
             Log.w(TAG, "Cannot look for the client's window", e);
+        }
+        return client;
+    }
+
+    private void clickInput() throws InterruptedException {
+        // A client that is still starting has no window yet: keys typed then would go nowhere.
+        Window client = findClient();
+        for (long waited = 0; client == null && waited < CONSOLE_WAIT_MS; waited += 1000) {
+            Thread.sleep(1000);
+            client = findClient();
         }
         if (client == null) {
             Log.w(TAG, "No client window to click");

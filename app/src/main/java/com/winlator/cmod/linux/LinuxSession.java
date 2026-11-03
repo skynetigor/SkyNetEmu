@@ -115,6 +115,11 @@ public final class LinuxSession {
      * "without Steam" runs its own executable straight away; otherwise it is started through the client.
      */
     public static String[] programCommand(Context context, Container container, com.winlator.cmod.container.Shortcut shortcut) {
+        return programCommand(context, container, shortcut, false);
+    }
+
+    /** @param steamDownload the session is a version download: the Steam client starts as the desktop client, not Big Picture */
+    public static String[] programCommand(Context context, Container container, com.winlator.cmod.container.Shortcut shortcut, boolean steamDownload) {
         String path = shortcut.path;
         if (isSteam(path)) {
             LinuxLaunchOptions options = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA),
@@ -123,10 +128,8 @@ public final class LinuxSession {
             command.add("/usr/bin/env");
             for (Map.Entry<String, String> e : options.env.entrySet()) command.add(e.getKey() + "=" + e.getValue());
             command.addAll(options.wrapper);
-            // A version download types into the client's console, which needs the desktop client (its console is a window of its own),
-            // not Big Picture (the session sets this extra in memory only).
-            boolean bigPicture = !"1".equals(shortcut.getExtra("steamDownload", "0"));
-            command.addAll(java.util.Arrays.asList(steamCommand("", false, bigPicture)));
+            // A version download types into the client's console, which needs the desktop client, not Big Picture.
+            command.addAll(java.util.Arrays.asList(steamCommand("", false, !steamDownload)));
             command.addAll(options.args);
             return command.toArray(new String[0]);
         }

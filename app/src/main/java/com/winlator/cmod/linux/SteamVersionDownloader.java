@@ -70,6 +70,8 @@ public final class SteamVersionDownloader {
     private final Listener listener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean cancelled;
+    /** Set when the Steam session ended under the job: the job fails (and can be resumed), its files are kept. */
+    private volatile String lostReason;
     private Thread thread;
     private volatile Status status;
 
@@ -99,6 +101,20 @@ public final class SteamVersionDownloader {
     public void cancel() {
         cancelled = true;
         if (thread != null) thread.interrupt();
+    }
+
+    /** The session that runs the client has ended (it crashed, or was closed): a download in progress fails so it can be resumed. */
+    public void sessionEnded(String why) {
+        SteamDownloadJob.State state = job.state;
+        if (state == SteamDownloadJob.State.DONE || state == SteamDownloadJob.State.FAILED || state == SteamDownloadJob.State.CANCELLED) return;
+        lostReason = why;
+        if (thread != null) thread.interrupt();
+    }
+
+    /** True once the job has reached its end, one way or the other. */
+    public boolean over() {
+        SteamDownloadJob.State state = job.state;
+        return state == SteamDownloadJob.State.DONE || state == SteamDownloadJob.State.FAILED || state == SteamDownloadJob.State.CANCELLED;
     }
 
     /** The message to show instead of starting, or null when the files fit (the sum of the depots and a tenth more). */
@@ -143,7 +159,8 @@ public final class SteamVersionDownloader {
             download();
         }
         catch (InterruptedException e) {
-            finishCancelled();
+            if (lostReason != null) fail(lostReason);
+            else finishCancelled();
         }
         catch (Exception e) {
             Log.w(TAG, "Download failed", e);

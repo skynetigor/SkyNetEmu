@@ -475,9 +475,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (linuxSession) com.winlator.cmod.linux.LinuxShortcutDefaults.snapshot(this, container, shortcut);
             steamClientSession = linuxSession && LinuxSession.isSteam(shortcut.path);
             steamSession = steamClientSession || (linuxSession && LinuxSession.isSteamGame(shortcut.path));
-            // A version download: the same client, the desktop one, with the download's own screen over it.
-            if (steamClientSession && getIntent().getStringExtra(com.winlator.cmod.ui.library.GameVersionDownloadDialog.EXTRA_JOB) != null)
-                shortcut.putExtra("steamDownload", "1");
         }
         boolean legacyController = "legacy".equals(shortcut != null
                 ? shortcut.getExtra("controllerTransport") : container.getExtra("controllerTransport"))
@@ -1698,6 +1695,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     /** A Linux program ended: a failure is explained to the user before the session is closed. */
     private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
         int status = launcher.guestStatus(prootStatus);
+        if (versionDownloader != null && !versionDownloader.over() && !exiting.get()) {
+            // The Steam client the download runs in has gone: the download fails (it can be resumed) and its screen says so.
+            versionDownloader.sessionEnded(status == 0 ? "Steam was closed before the download finished."
+                    : "Steam stopped (" + (status > 128 ? "signal " + (status - 128) : "code " + status) + "). Start the download again.");
+            return;
+        }
         if (status == 0 || exiting.get() || isFinishing() || isDestroyed()) {
             exit();
             return;
@@ -1803,7 +1806,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         Container linuxContainer = desktopSession ? container : com.winlator.cmod.linux.LinuxEmulatorSetup.of(container, shortcut);
         if (desktopSession) com.winlator.cmod.linux.LinuxDesktop.prepareLaunchers(this, container);
         String[] command = desktopSession ? com.winlator.cmod.linux.LinuxDesktop.command(this, com.winlator.cmod.linux.LinuxDesktop.scaleFor(xServer.screenInfo.width))
-                : LinuxSession.programCommand(this, linuxContainer, shortcut);
+                : LinuxSession.programCommand(this, linuxContainer, shortcut,
+                        // A version download: the same client, the desktop one, with the download's own screen over it.
+                        steamClientSession && getIntent().getStringExtra(com.winlator.cmod.ui.library.GameVersionDownloadDialog.EXTRA_JOB) != null);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(linuxContainer, linuxRuntime, command);
         steamGameLaunchMonitor = new com.winlator.cmod.linux.SteamGameLaunchMonitor(container.getLinuxHomeDir(), (appId, code) -> {
             if (!exiting.get() && !isFinishing() && !isDestroyed())

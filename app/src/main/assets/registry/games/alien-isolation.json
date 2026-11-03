@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 2,
+  "revision": 3,
   "id": "alien-isolation",
   "name": "Alien: Isolation",
   "steam": {
@@ -28,6 +28,9 @@
     {
       "id": "steam-4940658",
       "label": "Steam Linux (build 4940658)",
+      "steam": {
+        "branch": "public"
+      },
       "status": "works",
       "testedOn": "SM-F976B, Adreno 840, Android 17 (2026-11-02)",
       "notes": "Native x86-64 Feral port, started through Steam with FEX 2610 (glibc/PRoot route), Ubuntu 24.04, Bannerlator r9, Zink and Turnip 26.3 for Adreno 8xx at 1280x720. Keep FEX_TSOENABLED=1: a Performance/TSO-off trial left the game waiting on a forked process. Select SkyNetEmu Linux rather than Valve's pressure-vessel tool (bwrap cannot read /proc/sys/kernel/overflowuid). The launcher links the game's legacy libraries (libpcre, SDL2_image/ttf, krb5/heimdal, ldap, nettle, ...) from the installed Steam Linux Runtime (scout) into ~/.skynet/lib64/214490; without them Feral's message window cannot start. Feral shows an \"unsupported graphics card or driver\" advisory on every start: choose Continue Anyway. Checked 2026-11-02: start from the shortcut, advisory, intro, main menu, Continue Game from an existing campaign save (Emergency save terminal in first person) and forward movement with W, about 80-120 FPS. Not checked: long sessions, performance benchmarks, a clean exit (a standard window-close request previously ended in 'pure virtual method called' and a stuck fork; close the app instead) and other builds. Never choose Start Game with an existing campaign: it overwrites the save.",
