@@ -45,6 +45,9 @@ public final class LinuxFexBionicSession {
         Files.createDirectories(new File(rootfs.dir, "dev/shm").toPath());
         for (String name : new String[]{"tmp", "shm", "data", "config", "cache"})
             Files.createDirectories(new File(directory, name).toPath());
+        // FEXServer makes its socket folder with a plain mkdir: on a fresh install data/fex-emu was not there yet and the first
+        // launch died with "Couldn't create server pipe folder".
+        Files.createDirectories(new File(directory, "data/fex-emu/Server").toPath());
         File configDirectory = new File(directory, "config/fex-emu");
         Files.createDirectories(configDirectory.toPath());
         Files.copy(new File(emulator.dir, "share/fex-emu/ThunksDB.json").toPath(),
