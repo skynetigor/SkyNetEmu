@@ -64,6 +64,23 @@ case "${cmd[0]}" in
                 "${cmd[0]}" > "$HOME/.skynet/cs2/cs2.sh" || fail "Cannot write the Counter-Strike 2 start script."
             chmod 755 "$HOME/.skynet/cs2/cs2.sh"
             cmd[0]="$HOME/.skynet/cs2/cs2.sh"
+            # The game is built against the sniper runtime's C++ runtime; Box64's own copy crashed inside it (see
+            # docs/linux-game-fixes.md). Box64 looks in BOX64_LD_LIBRARY_PATH first, so the two libraries go there.
+            for sniper_lib in "${cs2_root%/*/*}"/SteamLinuxRuntime_sniper/sniper_platform_*/files/lib/x86_64-linux-gnu; do
+                [ -f "$sniper_lib/libstdc++.so.6.0.28" ] || continue
+                mkdir -p "$HOME/.skynet/cs2/sniper-libs"
+                ln -sfn "$sniper_lib/libstdc++.so.6.0.28" "$HOME/.skynet/cs2/sniper-libs/libstdc++.so.6"
+                ln -sfn "$sniper_lib/libgcc_s.so.1" "$HOME/.skynet/cs2/sniper-libs/libgcc_s.so.1"
+                # The game ships its own patched pango, fontconfig, freetype and cairo (Valve's pango_ft2_new_face_substitute and
+                # others), which need the libraries below; they come from the sniper runtime.
+                for sniper_name in libfribidi.so.0 libthai.so.0 libdatrie.so.1 libharfbuzz.so.0 libgraphite2.so.3 libpixman-1.so.0; do
+                    for sniper_file in "$sniper_lib/$sniper_name".*; do
+                        [ -e "$sniper_file" ] && ln -sfn "$sniper_file" "$HOME/.skynet/cs2/sniper-libs/$sniper_name"
+                    done
+                done
+                cs2_sniper_libs="$HOME/.skynet/cs2/sniper-libs"
+                break
+            done
         fi
         ;;
 esac
@@ -72,6 +89,11 @@ esac
 export SKY_GPU_MEMORY_MB=0
 [ -f "$HOME/.skynet/steam-emulator/$app_id.env" ] && . "$HOME/.skynet/steam-emulator/$app_id.env"
 [ -z "${SKY_GAME_SETUP_ERROR:-}" ] || fail "$SKY_GAME_SETUP_ERROR"
+if [ -n "${cs2_sniper_libs:-}" ] && [ -n "${BOX64_LD_LIBRARY_PATH:-}" ]; then
+    export BOX64_LD_LIBRARY_PATH="$cs2_sniper_libs:$BOX64_LD_LIBRARY_PATH"
+    # Box64 stands in its native pango, fontconfig, freetype and cairo for libraries of those names; the game's patched ones must run.
+    export BOX64_EMULATED_LIBS="libpango-1.0.so.0:libpangoft2-1.0.so.0:libfontconfig.so.1:libfreetype.so.6:libcairo.so${BOX64_EMULATED_LIBS:+:$BOX64_EMULATED_LIBS}"
+fi
 # The Steam runtime wraps every x86 game, 32-bit or 64-bit: what the game needs depends on the class of its executables
 # (game32 = it has 32-bit ones and no 64-bit one).
 game32=""
