@@ -71,7 +71,8 @@ esac
 # may be running with the ones of another game's session.
 export SKY_GPU_MEMORY_MB=0
 [ -f "$HOME/.skynet/steam-emulator/$app_id.env" ] && . "$HOME/.skynet/steam-emulator/$app_id.env"
-[ -z "${SKY_GAME_SETUP_ERROR:-}" ] || fail "$SKY_GAME_SETUP_ERROR"# The Steam runtime wraps every x86 game, 32-bit or 64-bit: what the game needs depends on the class of its executables
+[ -z "${SKY_GAME_SETUP_ERROR:-}" ] || fail "$SKY_GAME_SETUP_ERROR"
+# The Steam runtime wraps every x86 game, 32-bit or 64-bit: what the game needs depends on the class of its executables
 # (game32 = it has 32-bit ones and no 64-bit one).
 game32=""
 game_dir="$(dirname "${cmd[0]}")"
