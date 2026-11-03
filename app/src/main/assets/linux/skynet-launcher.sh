@@ -52,6 +52,21 @@ while [ "${#cmd[@]}" -gt 0 ]; do
     esac
 done
 [ "${#cmd[@]}" -gt 0 ] || fail "Steam supplied no game command."
+# Counter-Strike 2's start script stops unless /etc/os-release says "sniper" (Valve's container runtime). The root filesystem is the
+# container here and has the libraries the game needs, so a copy of the script without that check starts the game. The copy also
+# fixes GAMEROOT, which the script derives from a path that has spaces (the game's folder is "Counter-Strike Global Offensive").
+case "${cmd[0]}" in
+    */game/cs2.sh)
+        if grep -q 'VERSION_CODENAME" != "sniper"' "${cmd[0]}"; then
+            cs2_root="$(dirname "${cmd[0]}")"
+            mkdir -p "$HOME/.skynet/cs2" || fail "Cannot prepare the Counter-Strike 2 start script."
+            sed -e "s#^GAMEROOT=.*#GAMEROOT='$cs2_root'#" -e 's#\[ "\$VERSION_CODENAME" != "sniper" \]#false#' -e 's#^ulimit -Ss 2048#:#' \
+                "${cmd[0]}" > "$HOME/.skynet/cs2/cs2.sh" || fail "Cannot write the Counter-Strike 2 start script."
+            chmod 755 "$HOME/.skynet/cs2/cs2.sh"
+            cmd[0]="$HOME/.skynet/cs2/cs2.sh"
+        fi
+        ;;
+esac
 # The emulator of this game: the shortcut that started it left the variables (LinuxSession.writeSteamEmulatorEnv); the Steam client
 # may be running with the ones of another game's session.
 export SKY_GPU_MEMORY_MB=0
