@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 15,
+  "revision": 16,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -32,7 +32,8 @@
   "defaults": {
     "args": [],
     "extras": {
-      "fileCache": "1"
+      "fileCache": "1",
+      "graphicsFilterMode": "3"
     }
   },
   "versions": [
