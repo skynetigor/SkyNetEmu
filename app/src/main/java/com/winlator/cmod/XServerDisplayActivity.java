@@ -2030,8 +2030,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 ControlsProfile profile = inputControlsManager.getProfile(Integer.parseInt(controlsProfile));
                 if (profile != null)
                     showInputControls(profile);
-            } else if (steamSession) {
-                showDefaultVirtualGamepad();
             }
 
             String simTouchScreen = shortcut.getExtra("simTouchScreen");
@@ -2902,7 +2900,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
             return;
         }
-        if (!"0".equals(linuxSetting(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
+        if (steamSession) {
+            // Steam draws its own keyboard: the corner button shows and hides the on-screen gamepad instead of opening Android's.
+            android.widget.ImageButton pad = new android.widget.ImageButton(this);
+            pad.setImageResource(R.drawable.ic_gamepad_toggle);
+            android.graphics.drawable.GradientDrawable padShape = new android.graphics.drawable.GradientDrawable();
+            padShape.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            padShape.setColor(0xcc202428);
+            pad.setBackground(padShape);
+            pad.setColorFilter(0xffffffff);
+            pad.setAlpha(0.6f);
+            pad.setContentDescription("Gamepad");
+            int padSize = (int) (52 * getResources().getDisplayMetrics().density);
+            int padMargin = (int) (14 * getResources().getDisplayMetrics().density);
+            FrameLayout.LayoutParams padParams = new FrameLayout.LayoutParams(padSize, padSize, android.view.Gravity.BOTTOM | android.view.Gravity.END);
+            padParams.setMargins(padMargin, padMargin, padMargin, padMargin);
+            pad.setOnClickListener(v -> {
+                boolean shown = inputControlsView.getVisibility() == View.VISIBLE && inputControlsView.getProfile() != null;
+                if (shown) hideInputControls();
+                else showDefaultVirtualGamepad();
+                pad.setAlpha(shown ? 0.6f : 1f);
+            });
+            rootView.addView(pad, padParams);
+        }
+        else if (!"0".equals(linuxSetting(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
             android.widget.ImageButton button = new android.widget.ImageButton(this);
             button.setImageResource(android.R.drawable.ic_menu_edit);
             android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
@@ -3244,11 +3265,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     /**
-     * Big Picture and the games started through Steam are played with a gamepad: with none connected, the on-screen one is shown
-     * (the shortcut's own controls profile, when it names one, is used instead).
+     * The on-screen gamepad of a Steam session, shown by its toggle button (Steam is played with a gamepad, but the pad covers
+     * Steam's own keyboard, so it starts hidden).
      */
     private void showDefaultVirtualGamepad() {
-        if (!ExternalController.getControllers().isEmpty()) return;
         ControlsProfile gamepad = null;
         for (ControlsProfile profile : inputControlsManager.getProfiles(true)) {
             if ("Virtual Gamepad".equals(profile.getName())) {
