@@ -59,6 +59,8 @@ case "${cmd[0]}" in
     */game/cs2.sh)
         if grep -q 'VERSION_CODENAME" != "sniper"' "${cmd[0]}"; then
             cs2_root="$(dirname "${cmd[0]}")"
+            # The shim fails the game's oversized MAP_32BIT probe at once, as the kernel does (see skyshim.c).
+            export SKY_MMAP32_GUARD=1
             mkdir -p "$HOME/.skynet/cs2" || fail "Cannot prepare the Counter-Strike 2 start script."
             sed -e "s#^GAMEROOT=.*#GAMEROOT='$cs2_root'#" -e 's#\[ "\$VERSION_CODENAME" != "sniper" \]#false#' -e 's#^ulimit -Ss 2048#:#' \
                 "${cmd[0]}" > "$HOME/.skynet/cs2/cs2.sh" || fail "Cannot write the Counter-Strike 2 start script."
@@ -277,6 +279,9 @@ sky_feral_launcher_state() {
     prefs="${XDG_DATA_HOME:-$HOME/.local/share}/$dir/preferences"
     name="${dir##*/}"
     mkdir -p "${prefs%/*}" || return 0
+    # A crash dump left by an earlier run (a game killed with the session, or a crash at exit) makes the next start say "Previous run
+    # didn't quit gracefully" and run the crash reporter, which dies under FEX (exit 11 or 6): every later launch then fails.
+    rm -f "${prefs%/*}/crashes/"*.dmp
     if [ ! -s "$prefs" ]; then
         cat > "$prefs" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

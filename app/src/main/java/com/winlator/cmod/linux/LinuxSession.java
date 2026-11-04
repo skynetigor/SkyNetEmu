@@ -355,9 +355,13 @@ public final class LinuxSession {
                         + "if [ -n \"$game\" ] && [ \"$minimal\" = 1 ] && grep -qs '\"RememberPassword\"[[:space:]]*\"1\"' "
                         + "\"$steam_root/config/loginusers.vdf\"; then extra=\"$extra -silent -no-browser\"; fi; "
                         + "echo \"== steam launch: game=$game minimal=$minimal flags=$extra\"; "
-                        + "for try in 1 2 3 4; do sky_stage client_attempt_$try; \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
+                        // The client also crashes now and then within seconds of starting (a segmentation fault, exit 139, before any game ran): that
+                        // is started again like an update restart. A crash later (a game ran, or the person used the client) ends the session.
+                        + "for try in 1 2 3 4; do sky_stage client_attempt_$try; began=$(date +%s); "
+                        + "\"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
                         + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game} \"${@:4}\"; code=$?; "
-                        + "sky_stage client_exit_$code; [ \"$code\" = 42 ] || break; done; exit $code",
+                        + "sky_stage client_exit_$code; [ \"$code\" = 42 ] && continue; "
+                        + "[ \"$code\" = 139 ] && [ $(( $(date +%s) - began )) -lt 45 ] && continue; break; done; exit $code",
                 STEAM_MARKER, appId, minimal ? "1" : "0", bigPicture ? "1" : "0"};
     }
 
