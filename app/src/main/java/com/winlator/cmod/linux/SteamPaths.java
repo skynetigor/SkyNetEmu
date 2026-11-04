@@ -38,17 +38,19 @@ public final class SteamPaths {
         return new File[]{new File(steamRoot(), "steamapps/content"), new File(steamRoot(), "steamrtarm64/steamapps/content")};
     }
 
-    /** Folder of the downloaded Linux versions; each one is a folder named like the shortcut. */
-    public File versionsRoot() {
-        return new File(home, "games-versions");
+    /** Where a downloaded version is put together and kept, for either platform: visible on shared storage. */
+    public static final File GAMES_ROOT = new File("/storage/emulated/0/SkyNetEmu/Games");
+
+    public File versionsRoot(String platform) {
+        return GAMES_ROOT;
     }
 
     /**
-     * Where a version is put together: inside the container's home for a Linux game, on shared storage for a Windows one (a Wine container
-     * reaches the phone's storage through a drive letter, not the Linux container's private home).
+     * The container's own folder for versions: a Linux version is moved here when the environment that runs it needs executable files
+     * (FEX), which shared storage does not allow; Box64 and Wine read it where it is.
      */
-    public File versionsRoot(String platform) {
-        return "windows".equals(platform) ? new File("/storage/emulated/0/SkyNetEmu/Games") : versionsRoot();
+    public File containerVersionsRoot() {
+        return new File(home, "games-versions");
     }
 
     public File jobsDir() {

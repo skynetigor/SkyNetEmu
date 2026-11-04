@@ -108,8 +108,18 @@ object GameVersionShortcut {
             val configured = container.copyWithExtras(extras.filterValues { it != null }.mapValues { it.value!! })
             val refusal = LinuxProgramSupport.refusal(context, configured, kind)
             if (refusal != null) throw IllegalStateException("This container cannot run this program: $refusal.")
-            if (LinuxProgramInstaller.needsCopy(configured, exe)) throw IllegalStateException("The downloaded files are not inside the container.")
-            val guest = LinuxProgramInstaller.guestPath(configured, exe)
+            var program = exe
+            if (LinuxProgramInstaller.needsCopy(configured, exe)) {
+                // The environment needs executable files (FEX), which shared storage does not allow: the version moves into the container.
+                progress.status("Moving the game into the container…")
+                val root = SteamPaths(container.linuxHomeDir).containerVersionsRoot()
+                val moved = File(root, SteamDepotMerger.freeFolderName(root, folder.name))
+                SteamDepotMerger.moveInto(folder, moved)
+                program = File(moved, exe.relativeTo(folder).path)
+                if (!program.isFile) throw IllegalStateException("The game's program was lost on the way into the container.")
+                if (LinuxProgramInstaller.needsCopy(configured, program)) throw IllegalStateException("The downloaded files are not inside the container.")
+            }
+            val guest = LinuxProgramInstaller.guestPath(configured, program)
             val root = game.linuxExecutables.firstOrNull { rel -> guest.endsWith("/$rel") }?.let { rel -> guest.removeSuffix("/$rel") }
             extras[GameProfiles.EXTRA_ROOT] = root.orEmpty()
             LinuxProgramInstaller.addShortcut(context, container, name, guest, extras)

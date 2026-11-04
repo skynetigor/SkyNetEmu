@@ -271,10 +271,10 @@ private fun DownloadPanel(shortcut: Shortcut, onClose: () -> Unit, onStart: (Ste
                                     FilterChip(selected = language == l, onClick = { language = l }, label = { Text(l.replaceFirstChar { it.uppercase() }) })
                                 }
                             }
-                            if (platform == GameProfile.Platform.WINDOWS) {
-                                Text("Windows builds are copied to the phone's storage (SkyNetEmu/Games) and need a Windows environment; experimental.",
-                                    style = MaterialTheme.typography.bodySmall)
-                            }
+                            Text(if (platform == GameProfile.Platform.WINDOWS)
+                                "The files are kept in SkyNetEmu/Games on the phone's storage (Windows builds need a Windows environment; experimental)."
+                            else "The files are kept in SkyNetEmu/Games on the phone's storage; an environment that cannot run them there gets them moved into the container.",
+                                style = MaterialTheme.typography.bodySmall)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { step = Step.GAMES }) { Text("Back") }
                                 Button(onClick = { showVersions(); step = Step.VERSIONS }) { Text("Next") }

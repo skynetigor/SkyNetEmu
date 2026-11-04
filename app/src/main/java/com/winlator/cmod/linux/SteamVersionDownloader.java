@@ -117,12 +117,14 @@ public final class SteamVersionDownloader {
         return state == SteamDownloadJob.State.DONE || state == SteamDownloadJob.State.FAILED || state == SteamDownloadJob.State.CANCELLED;
     }
 
-    /** The message to show instead of starting, or null when the files fit (the sum of the depots and a tenth more). */
+    /** The message to show instead of starting, or null when the files fit (the depots twice, and a tenth more). */
     public static String spaceProblem(File linuxHome, long bytes) {
         File check = linuxHome;
         while (check != null && !check.exists()) check = check.getParentFile();
         if (check == null || bytes <= 0) return null;
-        long need = (long) (bytes * SPACE_MARGIN), free = check.getUsableSpace();
+        // Steam writes the depots in the container's home, and they are then moved to shared storage (a copy across file systems,
+        // so for a while the files exist twice); a Linux version may be moved once more into the container.
+        long need = (long) (bytes * (1 + SPACE_MARGIN)), free = check.getUsableSpace();
         if (free >= need) return null;
         return "There is not enough room: " + mb(need) + " MB are needed and " + mb(free) + " MB are free.";
     }
