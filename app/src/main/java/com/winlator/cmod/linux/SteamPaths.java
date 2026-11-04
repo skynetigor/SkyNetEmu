@@ -48,7 +48,7 @@ public final class SteamPaths {
      * reaches the phone's storage through a drive letter, not the Linux container's private home).
      */
     public File versionsRoot(String platform) {
-        return "windows".equals(platform) ? new File("/storage/emulated/0/Winlator/Games") : versionsRoot();
+        return "windows".equals(platform) ? new File("/storage/emulated/0/SkyNetEmu/Games") : versionsRoot();
     }
 
     public File jobsDir() {

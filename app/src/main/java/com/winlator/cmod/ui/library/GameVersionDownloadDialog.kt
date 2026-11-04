@@ -272,7 +272,7 @@ private fun DownloadPanel(shortcut: Shortcut, onClose: () -> Unit, onStart: (Ste
                                 }
                             }
                             if (platform == GameProfile.Platform.WINDOWS) {
-                                Text("Windows builds are copied to the phone's storage (Winlator/Games) and need a Windows environment; experimental.",
+                                Text("Windows builds are copied to the phone's storage (SkyNetEmu/Games) and need a Windows environment; experimental.",
                                     style = MaterialTheme.typography.bodySmall)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
