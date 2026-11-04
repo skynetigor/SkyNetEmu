@@ -180,6 +180,13 @@ public final class SteamVersionDownloader {
         job.state = SteamDownloadJob.State.DOWNLOADING;
         job.error = "";
         saveJob();
+        boolean allDone = true;
+        for (SteamDownloadJob.Depot depot : job.depots) allDone &= depot.done;
+        if (allDone) {
+            // Resumed after the files came down but the shortcut did not get made: Steam is not needed.
+            merge();
+            return;
+        }
         File log = paths.consoleLog();
         long sessionStart = log.length();
         publish(job.state, "Waiting for Steam to sign in…", doneBytes(null, 0), 0, 0, "");

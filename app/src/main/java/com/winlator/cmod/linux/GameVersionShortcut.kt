@@ -80,10 +80,15 @@ object GameVersionShortcut {
                 }.getOrDefault(!nativeArm64)
             }
         }
-        val choice = ConfigChooser.choose(version, soc.family, all, platform)
+        // The registry's pick for this processor; on a device the registry does not know (no family) nothing is "recommended", and the
+        // version's own list (the order the registry gives it) supplies the preset, as the tiles of "Add game" would.
+        val chosenId = ConfigChooser.choose(version, soc.family, all, platform)?.configId
+            ?: version?.containers?.firstOrNull { all.containsKey(it) }
+            // None of the version's presets is made for this device: any preset made for this device and platform (a generic one).
+            ?: all.keys.firstOrNull()
             ?: throw IllegalStateException("No environment preset of the registry is made for this version on this device " +
                 "(version ${version?.id}, it lists ${version?.containers?.size ?: 0}; ${all.size} presets suit this device and platform; processor family ${soc.family}).")
-        val config = all.getValue(choice.configId)
+        val config = all.getValue(chosenId)
 
         progress.status("Getting the environment…")
         val manager = ContainerManager(context)
