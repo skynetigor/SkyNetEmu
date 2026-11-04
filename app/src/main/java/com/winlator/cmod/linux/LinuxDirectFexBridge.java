@@ -37,21 +37,24 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     /** A Steam game this bridge may start: its install folder, its x86-64 executable and the old libraries it needs from scout. */
     private static final class Game {
         final String appId, folder, executable;
+        /** Whether the game sees the Steam client's shared memory (/dev/shm); without it the game's Steam API fails to start and the game runs without Steam. */
+        final boolean steamIpc;
         final List<String> legacyLibraries;
 
-        Game(String appId, String folder, String executable, String... legacyLibraries) {
+        Game(String appId, String folder, String executable, boolean steamIpc, String... legacyLibraries) {
             this.appId = appId;
             this.folder = folder;
             this.executable = executable;
+            this.steamIpc = steamIpc;
             this.legacyLibraries = Arrays.asList(legacyLibraries);
         }
     }
 
     private static final Map<String, Game> GAMES = new LinkedHashMap<>();
     static {
-        GAMES.put("391220", new Game("391220", "Rise of the Tomb Raider", "RiseOfTheTombRaider",
+        GAMES.put("391220", new Game("391220", "Rise of the Tomb Raider", "RiseOfTheTombRaider", false,
                 "libgconf-2.so.4", "libdbus-glib-1.so.2"));
-        GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "ShadowOfTheTombRaider"));
+        GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "ShadowOfTheTombRaider", true));
     }
 
     private final XEnvironment environment;
@@ -302,7 +305,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         if (LinuxBionicSession.enabled(container)) {
             preloads.add(asset("libskypathmap_x64.so").getPath());
             env.put("SKY_PATHMAP_TMP", new File(rt, "tmp").getPath());
-            env.put("SKY_PATHMAP_SHM", LinuxSession.sessionDirectory(environment.getContext(), "shm").getPath());
+            if (game.steamIpc) env.put("SKY_PATHMAP_SHM", LinuxSession.sessionDirectory(environment.getContext(), "shm").getPath());
         }
         for (String name : new String[]{"libskyplatform_x64.so", "libskysysv_x64.so",
                 "libskysockets_x64.so", "libskyshim_x64.so", "libcefnosb_x64.so"})
