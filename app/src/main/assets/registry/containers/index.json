@@ -339,11 +339,38 @@
       ]
     },
     {
+      "id": "rise-of-the-tomb-raider-linux-fex-bionic",
+      "name": "Linux, FEX + bionic, no PRoot (experimental)",
+      "platform": "linux",
+      "file": "containers/rise-of-the-tomb-raider-linux-fex-bionic.wcfg",
+      "description": "Rise of the Tomb Raider, native x86-64 Steam build 9575745, run by Android FEX 2610 (Performance preset, TSO on, full x87 precision) directly, with no PRoot around the game; the Steam client stays on the glibc runtime. Android Vulkan thunks, the DD-Turnip v0.1.1 driver, Turnip sysmem, native Vulkan output, 1280x720. The game does not get a working Steam API in this mode (its Steam IPC is left off: with it the game exits on a broken pipe to the client). Reaches the main menu on a RedMagic Astra 2 (Android 16, Adreno 840): 2 of 3 launches stayed up, the third exited 139 early. Gameplay, FPS and the black rendering artifacts known from the PRoot config are not checked in this mode. Needs the app build with the direct FEX bridge and its /tmp path mapping. The PRoot preset is the fallback.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "gpus": [
+        "Adreno 840"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "bionic",
+        "no PRoot",
+        "64-bit",
+        "Vulkan",
+        "Turnip",
+        "Experimental"
+      ],
+      "testedOn": [
+        "RedMagic Astra 2 Gaming Tablet (SM8850P), Android 16"
+      ]
+    },
+    {
       "id": "rise-of-the-tomb-raider-linux-fex-performance",
       "name": "Linux, FEX",
       "platform": "linux",
       "file": "containers/rise-of-the-tomb-raider-linux-fex-performance.wcfg",
-      "description": "Rise of the Tomb Raider, native x86-64 Steam build 9575745. FEX 2610 under PRoot with the Performance preset, TSO on, full x87 precision, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, Turnip 26.3 for Adreno 8xx with sysmem, native Vulkan output, 1280x720. Checked through to gameplay on a fresh install (SM-F976B, 2026-11-02). The Android-bionic direct path crashes in Feral's launcher on a fresh install and is not the default.",
+      "description": "Rise of the Tomb Raider, native x86-64 Steam build 9575745. FEX 2610 under PRoot with the Performance preset, TSO on, full x87 precision, Ubuntu 24.04 rootfs, 64-bit Vulkan thunks, Turnip 26.3 for Adreno 8xx with sysmem, native Vulkan output, 1280x720. Checked through to gameplay on a fresh install (SM-F976B, 2026-11-02). The Android-bionic direct path has its own preset, which is the preferred config.",
       "socs": [
         "snapdragon-8-elite-gen-5"
       ],
@@ -361,5 +388,5 @@
       ]
     }
   ],
-  "revision": 16
+  "revision": 17
 }
