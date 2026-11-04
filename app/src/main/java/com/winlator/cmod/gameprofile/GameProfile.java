@@ -172,6 +172,8 @@ public final class GameProfile {
         public final Map<String, String> preferredBySoc;
         /** Steam source for both platforms and for each one; see {@link #steamSource}. Null when the version names none. */
         private final SteamSource steamAll, steamWindows, steamLinux;
+        /** The platform this version runs best on ("preferredPlatform" of the version), or null when the profile does not say. */
+        public final Platform preferredPlatform;
 
         /** The Steam branch and manifests of this version on a platform (the platform's own entry wins), or null when it has none. */
         public SteamSource steamSource(Platform platform) {
@@ -183,7 +185,8 @@ public final class GameProfile {
         Version(String id, String label, String status, String notes, String testedOn, boolean isDefault, Match match, Settings settings,
                 Settings windowsSettings, Settings linuxSettings,
                 List<String> containers, String preferredContainer, Map<String, String> preferredBySoc,
-                SteamSource steamAll, SteamSource steamWindows, SteamSource steamLinux) {
+                SteamSource steamAll, SteamSource steamWindows, SteamSource steamLinux, Platform preferredPlatform) {
+            this.preferredPlatform = preferredPlatform;
             this.steamAll = steamAll;
             this.steamWindows = steamWindows;
             this.steamLinux = steamLinux;
@@ -333,7 +336,8 @@ public final class GameProfile {
                 object.optBoolean("default", false), match(object.optJSONObject("match")), settings(object),
                 settings(object.optJSONObject("windows")), settings(object.optJSONObject("linux")),
                 ids(object.optJSONArray("containers")), configId(object.optString("preferredContainer", "")), preferred(object.optJSONObject("preferredBySoc")),
-                steamSource(object.optJSONObject("steam")), steamSource(steamNode(object, "windows")), steamSource(steamNode(object, "linux")));
+                steamSource(object.optJSONObject("steam")), steamSource(steamNode(object, "windows")), steamSource(steamNode(object, "linux")),
+                "linux".equals(object.optString("preferredPlatform")) ? Platform.LINUX : "windows".equals(object.optString("preferredPlatform")) ? Platform.WINDOWS : null);
     }
 
     private static JSONObject steamNode(JSONObject version, String platform) {

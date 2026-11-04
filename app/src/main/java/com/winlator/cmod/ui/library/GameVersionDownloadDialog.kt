@@ -143,6 +143,8 @@ private fun size(bytes: Long): String = when {
 
 private enum class Step { GAMES, PLATFORM, VERSIONS, CONFIRM }
 
+private fun platformName(p: GameProfile.Platform) = if (p == GameProfile.Platform.LINUX) "Linux" else "Windows"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DownloadPanel(shortcut: Shortcut, onClose: () -> Unit, onStart: (SteamDownloadJob) -> Unit) {
@@ -287,7 +289,8 @@ private fun DownloadPanel(shortcut: Shortcut, onClose: () -> Unit, onStart: (Ste
                                 OutlinedButton(onClick = { entry = e; step = Step.CONFIRM }, modifier = Modifier.fillMaxWidth()) {
                                     Column(Modifier.fillMaxWidth()) {
                                         Text(e.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("${e.detail}, ${size(e.size())}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        val best = if (e.preferredPlatform == platform) ", best on ${platformName(platform)}" else ""
+                                        Text("${e.detail}, ${size(e.size())}$best", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }
@@ -308,9 +311,19 @@ private fun DownloadPanel(shortcut: Shortcut, onClose: () -> Unit, onStart: (Ste
                         Step.CONFIRM -> {
                             val chosen = entry
                             if (chosen != null) {
-                                Text("${game?.name}: ${chosen.label}", style = MaterialTheme.typography.titleMedium)
+                                Text("${game?.name}: ${chosen.label} (${platformName(platform)})", style = MaterialTheme.typography.titleMedium)
                                 Text("${chosen.picks.size} depots, ${size(chosen.size())} to download. Steam opens, signs in and fetches the files; " +
                                     "you can leave the app meanwhile. A shortcut is made when it is done. Your installed copy is not touched.")
+                                // The profile knows which runtime this version runs best on: a different pick is offered a one-tap switch.
+                                val better = chosen.preferredPlatform
+                                if (better != null && better != platform && game?.supports(better) == true) {
+                                    Text("${platformName(better)} is the better runtime for this version.", color = MaterialTheme.colorScheme.tertiary)
+                                    OutlinedButton(onClick = {
+                                        platform = better
+                                        showVersions()
+                                        entry = entries.firstOrNull { it.label == chosen.label } ?: entry
+                                    }, enabled = !working) { Text("Use ${platformName(better)}") }
+                                }
                                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TextButton(onClick = { step = Step.VERSIONS; error = null }, enabled = !working) { Text("Back") }

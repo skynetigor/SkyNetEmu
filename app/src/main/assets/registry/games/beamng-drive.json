@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 17,
+  "revision": 18,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -40,6 +40,7 @@
     {
       "id": "0.40",
       "label": "0.40.x",
+      "preferredPlatform": "linux",
       "status": "works",
       "default": true,
       "notes": "Native Linux 0.40.1 x86-64: startup, CEF UI and Smallgrid rendering verified with published Box64 0.4.4-r4 on Snapdragon 8 Elite Gen 5. Main plus seven CEF helpers shared one read-only libcef code-cache inode; r4 is required for ELF caching, and existing shortcuts must select it explicitly. The preset keeps its legacy r3 identifier for compatibility but selects r4. BOX64_DYNAREC_STRONGMEM=1 retains limited x86 memory ordering: three consecutive cached menu launches passed with this setting after an intermittent CEF renderer crash under PERFORMANCE/STRONGMEM=0; this is a tested mitigation, not proof of the crash's root cause or long-run stability. Existing shortcuts must also apply this environment setting explicitly. Earlier Automation Test Track loading was verified on r3. Long-run performance is not established; uncapped testing reached Android thermal limits. Windows ARM64: retain Proton 9 ARM64EC with DD-Turnip native Vulkan and the current device GPU identity. Disable windows.ui in the ARM64 preset DLL overrides to avoid UISettings text-scaling recursion and a startup stack overflow; the 0.40.1 first-run UI was verified with this workaround. Proton 9 previously loaded GridMapv2; standard Proton 11 and CachyOS 11 failed during Vulkan device creation on the test device. The ARM64 profile remains experimental.",
@@ -78,6 +79,7 @@
     {
       "id": "0.39",
       "label": "0.39.x",
+      "preferredPlatform": "linux",
       "status": "untested",
       "notes": "Optional Linux FEX + bionic preset: 0.39.4 menus, Gridmap and West Coast driving checked on SM-F976B / Adreno 840. Uses direct FEX 2610, Vulkan thunks, sysmem, 1280x720, scalar TSO off and full x87 precision. TSO off relaxes x86 memory ordering; performance varies and freezes remain. Long-session stability and other devices are unverified. Requires an app build containing the FEX+bionic BeamNG fixes and executable-only shared-storage staging; an older app cannot gain these fixes from a registry refresh. Box64 recommendations are unchanged.",
       "match": {
@@ -107,6 +109,7 @@
     {
       "id": "0.34",
       "label": "0.34.x",
+      "preferredPlatform": "linux",
       "steam": {
         "branch": "0.34.2_win7_no_updates"
       },
@@ -138,6 +141,7 @@
     {
       "id": "0.31",
       "label": "0.31.x",
+      "preferredPlatform": "linux",
       "status": "untested",
       "match": {
         "versionFile": {
@@ -165,6 +169,7 @@
     {
       "id": "0.28",
       "label": "0.28.x",
+      "preferredPlatform": "linux",
       "status": "works",
       "match": {
         "versionFile": {
@@ -197,6 +202,7 @@
     {
       "id": "0.20",
       "label": "0.20.x",
+      "preferredPlatform": "windows",
       "status": "works",
       "match": {
         "versionFile": {

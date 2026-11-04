@@ -19,6 +19,7 @@ import com.winlator.cmod.gameprofile.ConfigChooser
 import com.winlator.cmod.gameprofile.GameMatcher
 import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfiles
+import com.winlator.cmod.ui.addgame.StandardLinuxContainer
 import java.io.File
 
 /**
@@ -86,23 +87,35 @@ object GameVersionShortcut {
             ?: version?.containers?.firstOrNull { all.containsKey(it) }
             // None of the version's presets is made for this device: any preset made for this device and platform (a generic one).
             ?: all.keys.firstOrNull()
-            ?: throw IllegalStateException("No environment preset of the registry is made for this version on this device " +
-                "(version ${version?.id}, it lists ${version?.containers?.size ?: 0}; ${all.size} presets suit this device and platform; processor family ${soc.family}).")
-        val config = all.getValue(chosenId)
+        val config = chosenId?.let { all.getValue(it) }
 
         progress.status("Getting the environment…")
         val manager = ContainerManager(context)
         val contents = ContentsManager(context).apply { syncContents() }
-        val result = EnvironmentProvider.ensure(context, manager, contents, config, null, progress)
-        val container: Container = result.container
-            ?: throw IllegalStateException(result.warnings.joinToString("\n").ifEmpty { "The environment could not be made." })
+        val linuxSettings: Map<String, String>
+        val container: Container
+        if (config != null) {
+            val result = EnvironmentProvider.ensure(context, manager, contents, config, null, progress)
+            container = result.container
+                ?: throw IllegalStateException(result.warnings.joinToString("\n").ifEmpty { "The environment could not be made." })
+            linuxSettings = result.linuxSettings
+        } else if (kind.isLinux) {
+            // No registry preset suits this device (its processor is not in the registry): the app's standard Linux environment, as "Add game" offers.
+            val warnings = mutableListOf<String>()
+            linuxSettings = StandardLinuxContainer.shortcutSettings(context, kind)
+            container = StandardLinuxContainer.ensure(context, manager, contents, kind, progress, warnings)
+                ?: throw IllegalStateException(warnings.joinToString("\n").ifEmpty { "The environment could not be made." })
+        } else {
+            throw IllegalStateException("No environment preset of the registry is made for this version on this device " +
+                "(version ${version?.id}, it lists ${version?.containers?.size ?: 0}; ${all.size} presets suit this device and platform; processor family ${soc.family}).")
+        }
         if (nativeArm64 && (!isNativeContainer(container) || !WineInfo.fromIdentifier(context, contents, container.wineVersion).supportsNativeArm64())) {
             throw IllegalStateException("This environment does not support native Windows ARM64 games.")
         }
 
         progress.status("Adding the game…")
         val settings = game.effective(version, platform)
-        val extras = buildExtras(result.linuxSettings, settings?.extras, game, version, config.id)
+        val extras = buildExtras(linuxSettings, settings?.extras, game, version, config?.id)
         val name = ShortcutWriter.freeName(container, job.folderName)
         val desktop: File? = if (container.isLinux) {
             val configured = container.copyWithExtras(extras.filterValues { it != null }.mapValues { it.value!! })

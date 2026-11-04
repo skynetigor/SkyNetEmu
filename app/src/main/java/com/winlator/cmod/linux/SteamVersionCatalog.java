@@ -20,8 +20,12 @@ public final class SteamVersionCatalog {
         public final String branch;
         public final Map<Long, String> manifests;
         public final List<DepotSelection.Pick> picks;
+        /** The platform the profile says this version runs best on, or null (a plain branch, or a profile that does not say). */
+        public final GameProfile.Platform preferredPlatform;
 
-        Entry(String label, String detail, String versionId, String branch, Map<Long, String> manifests, List<DepotSelection.Pick> picks) {
+        Entry(String label, String detail, String versionId, String branch, Map<Long, String> manifests, List<DepotSelection.Pick> picks,
+              GameProfile.Platform preferredPlatform) {
+            this.preferredPlatform = preferredPlatform;
             this.label = label;
             this.detail = detail;
             this.versionId = versionId;
@@ -73,14 +77,14 @@ public final class SteamVersionCatalog {
             if (picks.isEmpty()) continue;
             if (!source.branch.isEmpty()) usedBranches.add(source.branch);
             entries.add(new Entry(version.label, source.branch.isEmpty() ? "Selected builds" : "Steam branch " + source.branch, version.id,
-                    source.branch, new LinkedHashMap<>(source.manifests), picks));
+                    source.branch, new LinkedHashMap<>(source.manifests), picks, version.preferredPlatform));
         }
         for (SteamAppInfo.Branch branch : DepotSelection.branches(info, os)) {
             if (usedBranches.contains(branch.name)) continue;
             List<DepotSelection.Pick> picks = DepotSelection.select(info, os, language, branch.name, null, owned);
             if (picks.isEmpty()) continue;
             String detail = branch.description.isEmpty() ? "Build " + branch.buildId : branch.description + " (build " + branch.buildId + ")";
-            entries.add(new Entry(branch.name, detail, "", branch.name, new LinkedHashMap<>(), picks));
+            entries.add(new Entry(branch.name, detail, "", branch.name, new LinkedHashMap<>(), picks, null));
         }
         return entries;
     }
@@ -105,7 +109,7 @@ public final class SteamVersionCatalog {
             }
             picks.add(DepotSelection.pick(m.getKey(), m.getValue(), size));
         }
-        return new Entry("Custom manifests", manifests.size() + " depot" + (manifests.size() == 1 ? "" : "s"), "", "", manifests, picks);
+        return new Entry("Custom manifests", manifests.size() + " depot" + (manifests.size() == 1 ? "" : "s"), "", "", manifests, picks, null);
     }
 
     /** Steam's name for the language of the device (the English one when Steam has no depot language for it). */
