@@ -57,7 +57,15 @@ public final class DeviceInfo {
     public static synchronized Soc soc(Context context) {
         if (cached != null && cached.family != null) return cached;
         String model = model();
-        String text = RegistryCache.get(context, "socs.json", RegistryCache.TTL_INDEX, false);
+        // The downloaded list has no revision to compare, so a model only the bundled list knows (a newer device the registry has not
+        // caught up with) is looked up there when the downloaded one does not have it.
+        Soc found = find(RegistryCache.get(context, "socs.json", RegistryCache.TTL_INDEX, false), model);
+        if (found == null) found = find(RegistryCache.bundledCopy(context, "socs.json"), model);
+        cached = found != null ? found : new Soc(null, model.isEmpty() ? Build.HARDWARE : model, model, Collections.emptyList());
+        return cached;
+    }
+
+    private static Soc find(String text, String model) {
         Soc found = null;
         try {
             JSONArray socs = text == null ? null : new JSONObject(text).optJSONArray("socs");
@@ -80,8 +88,7 @@ public final class DeviceInfo {
         catch (org.json.JSONException e) {
             Log.w(TAG, "Bad socs.json", e);
         }
-        cached = found != null ? found : new Soc(null, model.isEmpty() ? Build.HARDWARE : model, model, Collections.emptyList());
-        return cached;
+        return found;
     }
 
     public static boolean sameGpu(String expected, String actual) {

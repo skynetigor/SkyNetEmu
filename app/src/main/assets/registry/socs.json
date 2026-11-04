@@ -5,7 +5,8 @@
       "family": "snapdragon-8-elite-gen-5",
       "name": "Snapdragon 8 Elite Gen 5",
       "models": [
-        "SM8850"
+        "SM8850",
+        "SM8850P"
       ],
       "gpus": [
         "Adreno (TM) 840"
