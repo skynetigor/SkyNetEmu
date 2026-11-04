@@ -457,6 +457,9 @@ public final class LinuxSession {
         }
         bind(argv, inputDir.getPath(), "/dev/input");
         bindIfExists(argv, new File(rt, EMPTY_DIR), "/sys/fs/selinux");
+        // libpci lists /sys/bus/pci/devices and exits the process when it cannot read a device's "resource" file, which Android
+        // allows to nobody (a phone with a PCIe chip, such as the Redmagic tablet's, has one); an empty list finds no GPU and carries on.
+        bindIfExists(argv, new File(rt, EMPTY_DIR), "/sys/bus/pci/devices");
         // Chromium (the Steam client's web helper, a game's CEF) reads the inotify limits and logs an error that it does not
         // survive for long when they are missing; Android hides /proc/sys/fs from an app.
         String[][] inotify = {
@@ -501,6 +504,7 @@ public final class LinuxSession {
                 bind(argv, "/proc", root + "/proc");
                 bind(argv, "/sys", root + "/sys");
                 bind(argv, powerSupplies.getPath(), root + "/sys/class/power_supply");
+                bindIfExists(argv, new File(rt, EMPTY_DIR), root + "/sys/bus/pci/devices");
                 bind(argv, "/dev", root + "/dev");
                 bind(argv, shmDir.getPath(), root + "/dev/shm");
                 bind(argv, inputDir.getPath(), root + "/dev/input");
