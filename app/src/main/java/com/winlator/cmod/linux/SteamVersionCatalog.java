@@ -76,7 +76,13 @@ public final class SteamVersionCatalog {
             List<DepotSelection.Pick> picks = DepotSelection.select(info, os, language, source.branch.isEmpty() ? null : source.branch, source.manifests, owned);
             if (picks.isEmpty()) continue;
             if (!source.branch.isEmpty()) usedBranches.add(source.branch);
-            entries.add(new Entry(version.label, source.branch.isEmpty() ? "Selected builds" : "Steam branch " + source.branch, version.id,
+            // A build that is no branch any more has no size in Steam's data: the profile's one stands in for a single depot.
+            if (source.size > 0 && picks.size() == 1 && picks.get(0).size == 0) {
+                DepotSelection.Pick only = picks.get(0);
+                picks = new ArrayList<>(java.util.Collections.singletonList(DepotSelection.pick(only.depot, only.manifest, source.size)));
+            }
+            entries.add(new Entry(source.label.isEmpty() ? version.label : source.label,
+                    source.branch.isEmpty() ? "Selected build" : "Steam branch " + source.branch, version.id,
                     source.branch, new LinkedHashMap<>(source.manifests), picks, version.preferredPlatform));
         }
         for (SteamAppInfo.Branch branch : DepotSelection.branches(info, os)) {

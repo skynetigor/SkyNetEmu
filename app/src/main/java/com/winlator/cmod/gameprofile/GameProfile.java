@@ -139,10 +139,16 @@ public final class GameProfile {
         public final String branch;
         /** Depot id to manifest id. */
         public final Map<Long, String> manifests;
+        /** What the version is called on the download screen when the profile's label is not specific enough ("0.39.4"); "" for none. */
+        public final String label;
+        /** The installed size of the manifests in bytes when Steam's own data does not give it (a build that is no branch any more); 0 for unknown. */
+        public final long size;
 
-        SteamSource(String branch, Map<Long, String> manifests) {
+        SteamSource(String branch, Map<Long, String> manifests, String label, long size) {
             this.branch = branch == null ? "" : branch;
             this.manifests = Collections.unmodifiableMap(manifests);
+            this.label = label == null ? "" : label;
+            this.size = size;
         }
 
         public boolean isEmpty() {
@@ -360,7 +366,9 @@ public final class GameProfile {
                 if (depot.matches("[0-9]{1,10}") && manifest.matches("[0-9]{1,20}")) manifests.put(Long.parseLong(depot), manifest);
             }
         }
-        return new SteamSource(branch, manifests);
+        String label = object.optString("label", "").trim();
+        if (label.length() > 40 || label.matches(".*[\\p{Cntrl}].*")) label = "";
+        return new SteamSource(branch, manifests, label, Math.max(0, object.optLong("size", 0)));
     }
 
     private static String configId(String id) {

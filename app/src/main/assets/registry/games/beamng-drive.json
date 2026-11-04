@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 18,
+  "revision": 19,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -80,6 +80,13 @@
       "id": "0.39",
       "label": "0.39.x",
       "preferredPlatform": "linux",
+      "steam": {
+        "label": "0.39.4",
+        "size": 53633513758,
+        "manifests": {
+          "284161": "5975039348266591145"
+        }
+      },
       "status": "untested",
       "notes": "Optional Linux FEX + bionic preset: 0.39.4 menus, Gridmap and West Coast driving checked on SM-F976B / Adreno 840. Uses direct FEX 2610, Vulkan thunks, sysmem, 1280x720, scalar TSO off and full x87 precision. TSO off relaxes x86 memory ordering; performance varies and freezes remain. Long-session stability and other devices are unverified. Requires an app build containing the FEX+bionic BeamNG fixes and executable-only shared-storage staging; an older app cannot gain these fixes from a registry refresh. Box64 recommendations are unchanged.",
       "match": {
