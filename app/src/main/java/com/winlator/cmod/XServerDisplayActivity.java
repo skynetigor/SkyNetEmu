@@ -718,6 +718,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         advertisePanelRefreshRates();
 
         boolean[] winStarted = { false };
+        // A game that runs (it can be heard) but whose window the session never recognised as drawn would keep the loading screen up for
+        // good. After a minute it goes anyway, and the windows the X server has are logged so that the reason can be found.
+        if (linuxSession) handler.postDelayed(() -> {
+            if (winStarted[0] || exiting.get() || isFinishing() || isDestroyed()) return;
+            StringBuilder windows = new StringBuilder();
+            try {
+                for (Window w : xServer.windowManager.rootWindow.getChildren())
+                    windows.append(" id=0x").append(Integer.toHexString(w.id)).append(' ').append(w.getWidth()).append('x').append(w.getHeight())
+                            .append(w.isMappedTopLevel() ? " mapped" : " unmapped").append(';');
+            } catch (RuntimeException e) {
+                windows.append(" (cannot list: ").append(e).append(')');
+            }
+            Log.w("LinuxStartup", "stage=no_window_after_60s windows:" + windows);
+            preloaderDialog.closeOnUiThread();
+        }, 60_000);
 
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             private void onApplicationWindowDrawn(Window window) {
