@@ -36,6 +36,7 @@ import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.gameprofile.GameProfile
 import com.winlator.cmod.gameprofile.GameProfileCatalog
 import com.winlator.cmod.gameprofile.GameProfiles
+import com.winlator.cmod.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxEmulatorSetup
@@ -132,6 +133,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var rendererDriverId by remember { mutableStateOf(shortcut.getRendererDriverId()) }
     val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
     var driverId by remember { mutableStateOf(shortcut.getExtra(LinuxDriverManager.EXTRA_DRIVER)) }
+    // The Android (adrenotools) driver of a bionic session: the "version" of the shortcut's graphics driver config, the setting
+    // the Windows editor writes. Empty leaves the container's own config.
+    var androidGraphicsConfig by remember { mutableStateOf(shortcut.getExtra("graphicsDriverConfig")) }
+    val androidDrivers = remember { com.winlator.cmod.contents.AdrenotoolsManager(context).enumarateInstalledDrivers() }
     var gpuMemory by remember { mutableStateOf(LinuxGpuMemory.normalize(shortcut.getExtra(LinuxGpuMemory.EXTRA))) }
     var glDriver by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_GL_DRIVER)) }
     var vulkanPresent by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT)) }
@@ -252,6 +257,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(com.winlator.cmod.linux.LinuxProot.EXTRA, prootMode)
         shortcut.setRendererDriverId(rendererDriverId)
         shortcut.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId.ifEmpty { null })
+        shortcut.putExtra("graphicsDriverConfig", androidGraphicsConfig.ifEmpty { null })
         shortcut.putExtra(LinuxGpuMemory.EXTRA, gpuMemory)
         shortcut.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver.ifEmpty { null })
         shortcut.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, vulkanPresent.ifEmpty { null })
@@ -449,6 +455,30 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 SettingsDivider()
                 LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
+                if (bionic == "1") {
+                    SettingsDivider()
+                    val chosenAndroidDriver = if (androidGraphicsConfig.isEmpty()) ""
+                        else GraphicsDriverConfigDialog.parseGraphicsDriverConfig(androidGraphicsConfig)["version"].orEmpty()
+                    SettingMappedChoice(
+                        "Android Vulkan driver (bionic)",
+                        chosenAndroidDriver,
+                        LinkedHashMap<String, String>().apply {
+                            put("", "Container default")
+                            androidDrivers.forEach { put(it, it) }
+                            if (chosenAndroidDriver.isNotEmpty() && chosenAndroidDriver !in androidDrivers) put(chosenAndroidDriver, chosenAndroidDriver + " (not installed)")
+                        }
+                    ) { id ->
+                        androidGraphicsConfig = if (id.isEmpty()) "" else {
+                            val config = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(
+                                androidGraphicsConfig.ifEmpty { container.getGraphicsDriverConfig() })
+                            config["version"] = id
+                            GraphicsDriverConfigDialog.toGraphicsDriverConfig(config)
+                        }
+                    }
+                    Text("The Turnip build the game uses with the Android C library runtime (no PRoot). The Linux driver above applies to the glibc runtime only. Restart the game to apply.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
                 SettingsDivider()
                 SettingMappedChoice("Max GPU memory", gpuMemory, linkedMapOf(
                     "0" to "Default (driver)", "512" to "512 MB", "1024" to "1 GB", "2048" to "2 GB",

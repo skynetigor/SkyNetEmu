@@ -24,14 +24,6 @@ public final class LinuxFexBionicSession {
     static LinuxSession.Launch build(Context context, ImageFs imageFs, Container container,
             LinuxEmulator.Installed emulator, LinuxRootfs.Installed rootfs, File home,
             File directHome, File executable, List<String> arguments, Map<String, String> guestEnv,
-            String libraries, List<String> preloads, JSONObject config) throws IOException, JSONException {
-        return build(context, imageFs, container, emulator, rootfs, home, directHome, executable,
-                arguments, guestEnv, libraries, preloads, config, "391220");
-    }
-
-    private static LinuxSession.Launch build(Context context, ImageFs imageFs, Container container,
-            LinuxEmulator.Installed emulator, LinuxRootfs.Installed rootfs, File home,
-            File directHome, File executable, List<String> arguments, Map<String, String> guestEnv,
             String libraries, List<String> preloads, JSONObject config, String appId) throws IOException, JSONException {
         if (emulator == null || !"fex-2610".equals(emulator.id)
                 || !new File(emulator.dir, "share/fex-emu/GuestThunks/libvulkan-guest.so").isFile())
@@ -70,7 +62,9 @@ public final class LinuxFexBionicSession {
             guest.put("STEAM_COMPAT_APP_ID", appId);
         }
         guest.put("BL_SYSV_DIR", new File(context.getFilesDir(), "linux-session/shm/wnsysv").getPath());
-        guest.put("SKY_DIRECT_TMP", new File(directory, "tmp").getPath());
+        // A Steam game talks to the client through files and sockets in the client's /tmp and /dev/shm (SKY_PATHMAP_*).
+        guest.put("SKY_DIRECT_TMP", appId != null && guestEnv.containsKey("SKY_PATHMAP_TMP")
+                ? guestEnv.get("SKY_PATHMAP_TMP") : new File(directory, "tmp").getPath());
         guest.put("SKY_DIRECT_X11", new File(imageFs.getRootDir(), "usr/tmp/.X11-unix").getPath());
         guest.put("SKY_DIRECT_HOME", home.getPath());
         guest.put("SKY_DIRECT_SHM", new File(rootfs.dir, "dev/shm").getPath());
@@ -79,7 +73,7 @@ public final class LinuxFexBionicSession {
         JSONArray entries = new JSONArray();
         guest.forEach((key, value) -> entries.put(key + "=" + value));
         settings.put("Env", entries);
-        File configFile = new File(directory, appId != null ? "Rise.json" : "Direct.json");
+        File configFile = new File(directory, appId != null ? appId + ".json" : "Direct.json");
         Files.write(configFile.toPath(), config.toString().getBytes(StandardCharsets.UTF_8));
         nativeEnv.remove("LD_PRELOAD");
         nativeEnv.put("LD_LIBRARY_PATH", platformTlsDirectory(directory).getPath() + ":" + nativeEnv.get("LD_LIBRARY_PATH"));
@@ -91,7 +85,7 @@ public final class LinuxFexBionicSession {
         nativeEnv.put("FEX_ROOTFS", rootfs.dir.getPath());
         if (appId != null) {
             nativeEnv.put("FEX_THUNKCONFIG",
-                    new File(home, ".skynet/steam-emulator/391220.thunks64.json").getPath());
+                    new File(home, ".skynet/steam-emulator/" + appId + ".thunks64.json").getPath());
         } else {
             File thunkConfig = new File(directory, "ThunkConfig64.json");
             Files.write(thunkConfig.toPath(),

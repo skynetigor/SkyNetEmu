@@ -34,6 +34,26 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             "FEX_TSOENABLED", "FEX_VECTORTSOENABLED", "FEX_MEMCPYSETTSOENABLED",
             "FEX_HALFBARRIERTSOENABLED", "FEX_X87REDUCEDPRECISION", "FEX_MULTIBLOCK",
             "FEX_DYNAMICL1CACHE", "TU_DEBUG", "MESA_VK_WSI_DEBUG", "LD_LIBRARY_PATH");
+    /** A Steam game this bridge may start: its install folder, its x86-64 executable and the old libraries it needs from scout. */
+    private static final class Game {
+        final String appId, folder, executable;
+        final List<String> legacyLibraries;
+
+        Game(String appId, String folder, String executable, String... legacyLibraries) {
+            this.appId = appId;
+            this.folder = folder;
+            this.executable = executable;
+            this.legacyLibraries = Arrays.asList(legacyLibraries);
+        }
+    }
+
+    private static final Map<String, Game> GAMES = new LinkedHashMap<>();
+    static {
+        GAMES.put("391220", new Game("391220", "Rise of the Tomb Raider", "RiseOfTheTombRaider",
+                "libgconf-2.so.4", "libdbus-glib-1.so.2"));
+        GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "ShadowOfTheTombRaider"));
+    }
+
     private final XEnvironment environment;
     private final Container container;
     private final LinuxRuntime.Installed runtime;
@@ -119,8 +139,9 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                 DataInputStream input = new DataInputStream(socket.getInputStream());
                 DataOutputStream result = new DataOutputStream(socket.getOutputStream());
                 try {
-                    if (input.readInt() != 1 || !"391220".equals(readText(input)))
-                        throw new IOException("Unsupported direct FEX request");
+                    if (input.readInt() != 1) throw new IOException("Unsupported direct FEX request");
+                    Game requested = GAMES.get(readText(input));
+                    if (requested == null) throw new IOException("Unsupported direct FEX game");
                     int count = input.readInt();
                     if (count < 1 || count > 64) throw new IOException("Direct FEX argument count exceeds limit");
                     List<String> command = new ArrayList<>();
@@ -140,7 +161,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                         if (!VARIABLES.contains(key) || overrides.put(key, value) != null)
                             throw new IOException("Unsupported or repeated direct FEX variable");
                     }
-                    LinuxSession.Launch launch = prepare(command, overrides);
+                    LinuxSession.Launch launch = prepare(requested, command, overrides);
                     socket.setSoTimeout(0);
                     CountDownLatch exited = new CountDownLatch(1);
                     AtomicInteger status = new AtomicInteger(126);
@@ -205,17 +226,17 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         bionicServer.setSuspended(suspended);
     }
 
-    private LinuxSession.Launch prepare(List<String> command, Map<String, String> overrides)
+    private LinuxSession.Launch prepare(Game game, List<String> command, Map<String, String> overrides)
             throws IOException, JSONException {
         File home = container.getLinuxHomeDir();
-        File gameRoot = new File(home, ".local/share/Steam/steamapps/common/Rise of the Tomb Raider");
-        File executable = new File(gameRoot, "bin/RiseOfTheTombRaider").getCanonicalFile();
+        File gameRoot = new File(home, ".local/share/Steam/steamapps/common/" + game.folder);
+        File executable = new File(gameRoot, "bin/" + game.executable).getCanonicalFile();
         File requested = LinuxSession.hostFile(environment.getContext(), container, command.get(0));
         if (requested == null || (!requested.getCanonicalFile().equals(executable)
-                && !requested.getCanonicalFile().equals(new File(gameRoot, "RiseOfTheTombRaider.sh").getCanonicalFile())))
-            throw new IOException("The direct FEX bridge accepts only Rise's installed Steam entry point");
+                && !requested.getCanonicalFile().equals(new File(gameRoot, game.executable + ".sh").getCanonicalFile())))
+            throw new IOException("The direct FEX bridge accepts only the installed Steam entry point of " + game.folder);
         if (!executable.isFile() || LinuxSession.elfMachine(executable) != 62)
-            throw new IOException("Rise's installed x86-64 executable is unavailable");
+            throw new IOException(game.folder + "'s installed x86-64 executable is unavailable");
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(environment.getContext(), container);
         LinuxRootfs.Installed rootfs = LinuxRootfs.resolve(environment.getContext(), container);
         if (rootfs == null || (!LinuxBionicSession.enabled(container)
@@ -236,7 +257,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         link(new File(directHome, ".steam/sdk64"), new File(steam, "linux64"));
         File legacy = new File(directory, "legacy");
         Files.createDirectories(legacy.toPath());
-        for (String name : new String[]{"libgconf-2.so.4", "libdbus-glib-1.so.2"}) {
+        for (String name : game.legacyLibraries) {
             File source = new File(steam, "steamapps/common/SteamLinuxRuntime/steam-runtime/usr/lib/x86_64-linux-gnu/" + name);
             if (!source.isFile()) throw new IOException("Missing scout library: " + name);
             link(new File(legacy, name), source);
@@ -255,7 +276,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                     + asset("libskysysv_x64.so").getPath());
             List<String> explicit = new ArrayList<>();
             for (String key : new String[]{"SteamAppId", "SteamGameId", "STEAM_COMPAT_APP_ID"})
-                explicit.add(key + "=391220");
+                explicit.add(key + "=" + game.appId);
             explicit.add("BL_SYSV_DIR=" + new File(environment.getContext().getFilesDir(),
                     "linux-session/shm/wnsysv").getPath());
             List<String> bionicCommand = new ArrayList<>(Arrays.asList(
@@ -264,7 +285,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             bionicCommand.addAll(command.subList(1, command.size()));
             LinuxSession.Launch bionic = LinuxBionicSession.build(environment.getContext(),
                     environment.getImageFs(), container, bionicCommand.toArray(new String[0]), guestEnv, directHome);
-            if (bionic == null) throw new IOException("Rise requires the installed Android Box64 bionic runtime");
+            if (bionic == null) throw new IOException(game.folder + " requires the installed Android Box64 bionic runtime");
             List<String> argv = new ArrayList<>(Arrays.asList(bionic.argv));
             String cores = container.getCPUList();
             if (cores != null && !cores.isEmpty()) {
@@ -276,18 +297,25 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                     bionic.workingDir, bionic.executionMode);
         }
         List<String> preloads = new ArrayList<>();
+        // A guest FEX run without proot sees the Android host's /tmp and /dev/shm, not the Steam client's: its crash handler and
+        // its IPC with the client live there. The shim maps the two to the directories the client has bound (see libskypathmap).
+        if (LinuxBionicSession.enabled(container)) {
+            preloads.add(asset("libskypathmap_x64.so").getPath());
+            env.put("SKY_PATHMAP_TMP", new File(rt, "tmp").getPath());
+            env.put("SKY_PATHMAP_SHM", LinuxSession.sessionDirectory(environment.getContext(), "shm").getPath());
+        }
         for (String name : new String[]{"libskyplatform_x64.so", "libskysysv_x64.so",
                 "libskysockets_x64.so", "libskyshim_x64.so", "libcefnosb_x64.so"})
             preloads.add(asset(name).getPath());
         JSONObject config = new JSONObject(new String(Files.readAllBytes(new File(home,
-                ".skynet/steam-emulator/391220.fex.json").toPath()), StandardCharsets.UTF_8));
+                ".skynet/steam-emulator/" + game.appId + ".fex.json").toPath()), StandardCharsets.UTF_8));
         if (LinuxBionicSession.enabled(container)) {
             String libraries = gameRoot + "/lib:" + gameRoot + "/bin:" + legacy + ":" + steam + "/linux64";
             String custom = env.get("LD_LIBRARY_PATH");
             if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
             return LinuxFexBionicSession.build(environment.getContext(), environment.getImageFs(), container,
                     emulator, rootfs, home, directHome, executable, command.subList(1, command.size()),
-                    env, libraries, preloads, config);
+                    env, libraries, preloads, config, game.appId);
         }
         config.getJSONObject("Config").put("Env", "LD_PRELOAD=" + String.join(":", preloads));
         File configFile = new File(directory, "Config.json");
@@ -299,12 +327,12 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         env.put("XDG_CACHE_HOME", new File(home, ".cache").getPath());
         env.put("FEX_APP_CONFIG", configFile.getPath());
         env.put("FEX_ROOTFS", rootfs.dir.getPath());
-        env.put("FEX_THUNKCONFIG", new File(home, ".skynet/steam-emulator/391220.thunks64.json").getPath());
+        env.put("FEX_THUNKCONFIG", new File(home, ".skynet/steam-emulator/" + game.appId + ".thunks64.json").getPath());
         env.put("FEX_SERVER_SOCKET_PATH", new File(directory, "fex.socket").getPath());
         env.put("FEX_NEEDSSECCOMP", "1");
-        env.put("SteamAppId", "391220");
-        env.put("SteamGameId", "391220");
-        env.put("STEAM_COMPAT_APP_ID", "391220");
+        env.put("SteamAppId", game.appId);
+        env.put("SteamGameId", game.appId);
+        env.put("STEAM_COMPAT_APP_ID", game.appId);
         env.put("BL_SYSV_DIR", new File(environment.getContext().getFilesDir(), "linux-session/shm/wnsysv").getPath());
         env.put("SKY_DIRECT_TMP", new File(rt, "tmp").getPath());
         env.put("SKY_DIRECT_X11", new File(environment.getImageFs().getRootDir(), "usr/tmp/.X11-unix").getPath());

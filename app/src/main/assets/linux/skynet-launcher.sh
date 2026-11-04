@@ -339,12 +339,12 @@ EOF
 }
 sky_feral_launcher_state
 sky_feral_resolution
-if [ "$app_id" = 391220 ] && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
-    [ "$game32" != 1 ] || fail "Direct FEX supports only Rise's native 64-bit port."
+if { [ "$app_id" = 391220 ] || [ "$app_id" = 750920 ]; } && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
+    [ "$game32" != 1 ] || fail "Direct FEX supports only the native 64-bit Feral ports (Rise, Shadow)."
     [ "${#sky_wrap[@]}" = 0 ] || fail "Direct FEX does not support command wrappers."
     [ -x "${SKY_DIRECT_FEX_CLIENT:-}" ] || fail "Direct FEX launch client is unavailable."
     [ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")
-    "$SKY_DIRECT_FEX_CLIENT" "${cmd[@]}" &
+    SKY_DIRECT_FEX_APPID="$app_id" "$SKY_DIRECT_FEX_CLIENT" "${cmd[@]}" &
     game=$!
     trap 'cancelled=1; kill -TERM "$game" 2>/dev/null' TERM INT
     wait "$game"

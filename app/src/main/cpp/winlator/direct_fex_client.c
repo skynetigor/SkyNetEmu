@@ -39,15 +39,16 @@ int main(int argc, char **argv) {
         "FEX_DYNAMICL1CACHE", "TU_DEBUG", "MESA_VK_WSI_DEBUG", "LD_LIBRARY_PATH"
     };
     const char *name = getenv("SKY_DIRECT_FEX_SOCKET");
+    const char *app = getenv("SKY_DIRECT_FEX_APPID");
     struct sockaddr_un address = {.sun_family = AF_UNIX};
     int fd = -1;
-    if (!name || !*name || strlen(name) >= sizeof address.sun_path - 1 ||
+    if (!name || !*name || strlen(name) >= sizeof address.sun_path - 1 || !app || !*app ||
             argc < 2 || argc > 65) { errno = EINVAL; goto failed; }
     memcpy(address.sun_path + 1, name, strlen(name));
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0 || connect(fd, (struct sockaddr *)&address,
             (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + strlen(name))) < 0) goto failed;
-    if (number(fd, 1) || text(fd, "391220") || number(fd, (uint32_t)(argc - 1))) goto failed;
+    if (number(fd, 1) || text(fd, app) || number(fd, (uint32_t)(argc - 1))) goto failed;
     for (int index = 1; index < argc; ++index) if (text(fd, argv[index])) goto failed;
     uint32_t count = 0;
     for (size_t index = 0; index < sizeof variables / sizeof *variables; ++index)
