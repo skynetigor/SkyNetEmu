@@ -34,27 +34,45 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             "FEX_TSOENABLED", "FEX_VECTORTSOENABLED", "FEX_MEMCPYSETTSOENABLED",
             "FEX_HALFBARRIERTSOENABLED", "FEX_X87REDUCEDPRECISION", "FEX_MULTIBLOCK",
             "FEX_DYNAMICL1CACHE", "TU_DEBUG", "MESA_VK_WSI_DEBUG", "LD_LIBRARY_PATH");
-    /** A Steam game this bridge may start: its install folder, its x86-64 executable and the old libraries it needs from scout. */
+    /** A Steam game this bridge may start: its install folder, its x86-64 executable and what it needs around it. */
     private static final class Game {
-        final String appId, folder, executable;
+        final String appId, folder;
+        /** The executable, relative to the install folder. */
+        final String executable;
+        /** The start script that stands for the executable in Steam's request (Feral's), or null. */
+        final String script;
         /** Whether the game sees the Steam client's shared memory (/dev/shm); without it the game's Steam API fails to start and the game runs without Steam. */
         final boolean steamIpc;
+        /** The folders of the install that carry the game's own libraries, relative to it ("" is the install folder itself). */
+        final List<String> libraryDirs;
+        /** Old libraries it needs from the Steam Linux Runtime (scout), as paths in that runtime. */
         final List<String> legacyLibraries;
 
-        Game(String appId, String folder, String executable, boolean steamIpc, String... legacyLibraries) {
+        Game(String appId, String folder, String executable, String script, boolean steamIpc, List<String> libraryDirs, String... legacyLibraries) {
             this.appId = appId;
             this.folder = folder;
             this.executable = executable;
+            this.script = script;
             this.steamIpc = steamIpc;
+            this.libraryDirs = libraryDirs;
             this.legacyLibraries = Arrays.asList(legacyLibraries);
+        }
+
+        String libraryPath(File gameRoot) {
+            StringBuilder path = new StringBuilder();
+            for (String dir : libraryDirs) path.append(path.length() == 0 ? "" : ":").append(dir.isEmpty() ? gameRoot.getPath() : gameRoot + "/" + dir);
+            return path.toString();
         }
     }
 
     private static final Map<String, Game> GAMES = new LinkedHashMap<>();
     static {
-        GAMES.put("391220", new Game("391220", "Rise of the Tomb Raider", "RiseOfTheTombRaider", false,
-                "libgconf-2.so.4", "libdbus-glib-1.so.2"));
-        GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "ShadowOfTheTombRaider", true));
+        List<String> feral = Arrays.asList("lib", "bin");
+        GAMES.put("391220", new Game("391220", "Rise of the Tomb Raider", "bin/RiseOfTheTombRaider", "RiseOfTheTombRaider.sh", false, feral,
+                "usr/lib/x86_64-linux-gnu/libgconf-2.so.4", "usr/lib/x86_64-linux-gnu/libdbus-glib-1.so.2"));
+        GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "bin/ShadowOfTheTombRaider", "ShadowOfTheTombRaider.sh", true, feral));
+        GAMES.put("383150", new Game("383150", "DIDE", "DeadIslandGame", null, false, Arrays.asList(""),
+                "lib/x86_64-linux-gnu/libpng12.so.0", "usr/lib/x86_64-linux-gnu/libGLEW.so.1.10"));
     }
 
     private final XEnvironment environment;
@@ -233,10 +251,10 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             throws IOException, JSONException {
         File home = container.getLinuxHomeDir();
         File gameRoot = new File(home, ".local/share/Steam/steamapps/common/" + game.folder);
-        File executable = new File(gameRoot, "bin/" + game.executable).getCanonicalFile();
+        File executable = new File(gameRoot, game.executable).getCanonicalFile();
         File requested = LinuxSession.hostFile(environment.getContext(), container, command.get(0));
         if (requested == null || (!requested.getCanonicalFile().equals(executable)
-                && !requested.getCanonicalFile().equals(new File(gameRoot, game.executable + ".sh").getCanonicalFile())))
+                && (game.script == null || !requested.getCanonicalFile().equals(new File(gameRoot, game.script).getCanonicalFile()))))
             throw new IOException("The direct FEX bridge accepts only the installed Steam entry point of " + game.folder);
         if (!executable.isFile() || LinuxSession.elfMachine(executable) != 62)
             throw new IOException(game.folder + "'s installed x86-64 executable is unavailable");
@@ -260,8 +278,9 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         link(new File(directHome, ".steam/sdk64"), new File(steam, "linux64"));
         File legacy = new File(directory, "legacy");
         Files.createDirectories(legacy.toPath());
-        for (String name : game.legacyLibraries) {
-            File source = new File(steam, "steamapps/common/SteamLinuxRuntime/steam-runtime/usr/lib/x86_64-linux-gnu/" + name);
+        for (String relative : game.legacyLibraries) {
+            String name = relative.substring(relative.lastIndexOf('/') + 1);
+            File source = new File(steam, "steamapps/common/SteamLinuxRuntime/steam-runtime/" + relative);
             if (!source.isFile()) throw new IOException("Missing scout library: " + name);
             link(new File(legacy, name), source);
         }
@@ -270,7 +289,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             guestEnv.add("BOX64_DYNAREC=1");
             guestEnv.add("BOX64_DYNAREC_STRONGMEM=1");
             env.forEach((key, value) -> guestEnv.add(key + "=" + value));
-            String libraries = gameRoot + "/lib:" + gameRoot + "/bin:" + legacy + ":" + steam + "/linux64";
+            String libraries = game.libraryPath(gameRoot) + ":" + legacy + ":" + steam + "/linux64";
             String custom = env.get("LD_LIBRARY_PATH");
             if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
             guestEnv.add("BOX64_LD_LIBRARY_PATH=" + libraries);
@@ -313,7 +332,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         JSONObject config = new JSONObject(new String(Files.readAllBytes(new File(home,
                 ".skynet/steam-emulator/" + game.appId + ".fex.json").toPath()), StandardCharsets.UTF_8));
         if (LinuxBionicSession.enabled(container)) {
-            String libraries = gameRoot + "/lib:" + gameRoot + "/bin:" + legacy + ":" + steam + "/linux64";
+            String libraries = game.libraryPath(gameRoot) + ":" + legacy + ":" + steam + "/linux64";
             String custom = env.get("LD_LIBRARY_PATH");
             if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
             return LinuxFexBionicSession.build(environment.getContext(), environment.getImageFs(), container,
@@ -340,7 +359,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         env.put("SKY_DIRECT_TMP", new File(rt, "tmp").getPath());
         env.put("SKY_DIRECT_X11", new File(environment.getImageFs().getRootDir(), "usr/tmp/.X11-unix").getPath());
         env.put("SKY_DIRECT_HOME", home.getPath());
-        String libraries = gameRoot + "/lib:" + gameRoot + "/bin:" + legacy + ":" + steam + "/linux64";
+        String libraries = game.libraryPath(gameRoot) + ":" + legacy + ":" + steam + "/linux64";
         String custom = env.get("LD_LIBRARY_PATH");
         if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
         env.put("LD_LIBRARY_PATH", libraries);
