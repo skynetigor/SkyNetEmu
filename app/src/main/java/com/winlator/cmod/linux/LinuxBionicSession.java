@@ -272,7 +272,10 @@ public final class LinuxBionicSession {
         env.put("WRAPPER_VK_VERSION", "1.3.289");
         env.put("WRAPPER_RESOURCE_TYPE", valueOr(graphics.get("resourceType"), "auto"));
         env.put("WRAPPER_DISABLE_PRESENT_WAIT", valueOr(graphics.get("disablePresentWait"), "0"));
-        env.put("WRAPPER_EMULATE_BCN", "1");
+        // The wrapper emulates BCn textures in software unless told otherwise; the Wine path maps the graphics config's choice the same way.
+        // Without a choice ("auto" or none) the Linux sessions keep emulating partially, as they always did.
+        String bcn = graphics.get("bcnEmulation");
+        env.put("WRAPPER_EMULATE_BCN", "none".equals(bcn) ? "0" : "partial".equals(bcn) ? "1" : "full".equals(bcn) ? "2" : "1");
         env.put("MESA_VK_WSI_PRESENT_MODE", valueOr(graphics.get("presentMode"), "mailbox"));
         return env;
     }
