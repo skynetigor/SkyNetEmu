@@ -54,6 +54,8 @@ public final class GameProfiles {
         /** "native", "WxH" or empty. */
         public final String resolution;
         public final Map<String, String> extras;
+        /** Where the game keeps its user data and what of it is linked into the game's folder; null when the profile says nothing. */
+        public final GameProfile.UserData userData;
 
         Effective(GameProfile profile, GameProfile.Version version, String how, String rootGuest, File rootHost, GameProfile.Settings settings,
                   boolean noSteam) {
@@ -70,6 +72,7 @@ public final class GameProfiles {
             this.env = new LinkedHashMap<>(settings.env);
             this.resolution = settings.resolution == null ? "" : settings.resolution;
             this.extras = new LinkedHashMap<>(settings.extras);
+            this.userData = settings.userData;
         }
 
         /** A Steam game's shortcut starts the game's own executable instead of going through the client. */

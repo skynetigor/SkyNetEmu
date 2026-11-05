@@ -54,6 +54,22 @@ public final class GameProfile {
         }
     }
 
+    /**
+     * Where a game keeps its user data (settings, mods): the launch argument that moves it ({@code -userpath <dir>}) and the folders of
+     * that directory that are links to folders in the game's own folder. Both sides are relative: a link name to the directory the argument
+     * names, a target to the game's folder. Whatever is not a link stays in the directory, which is on the app's internal storage.
+     */
+    public static final class UserData {
+        public final String arg;
+        /** Link name (in the user-data directory) to target (in the game's folder), in the order the profile gives them. */
+        public final Map<String, String> links;
+
+        UserData(String arg, Map<String, String> links) {
+            this.arg = arg;
+            this.links = Collections.unmodifiableMap(links);
+        }
+    }
+
     /** The launch settings of a game or of one of its versions; null / empty where nothing is said. */
     public static final class Settings {
         /** Relative to the game's folder. */
@@ -65,6 +81,8 @@ public final class GameProfile {
         /** "native" or "WxH". */
         public String resolution;
         public final Map<String, String> extras = new LinkedHashMap<>();
+        /** Null where the profile says nothing; one that is set replaces an earlier one. */
+        public UserData userData;
 
         Settings copy() {
             Settings copy = new Settings();
@@ -74,6 +92,7 @@ public final class GameProfile {
             copy.env.putAll(env);
             copy.resolution = resolution;
             copy.extras.putAll(extras);
+            copy.userData = userData;
             return copy;
         }
     }
@@ -283,6 +302,7 @@ public final class GameProfile {
         if (over.noSteam != null) merged.noSteam = over.noSteam;
         if (over.args != null) merged.args = new ArrayList<>(over.args);
         if (over.resolution != null) merged.resolution = over.resolution;
+        if (over.userData != null) merged.userData = over.userData;
         for (Map.Entry<String, String> entry : over.env.entrySet()) {
             if (entry.getValue() == null) merged.env.remove(entry.getKey());
             else merged.env.put(entry.getKey(), entry.getValue());
@@ -451,7 +471,30 @@ public final class GameProfile {
         if (resolution.equals("native") || resolution.matches("\\d{3,5}x\\d{3,5}")) settings.resolution = resolution;
         readMap(object.optJSONObject("env"), settings.env, null);
         readMap(object.optJSONObject("extras"), settings.extras, ALLOWED_EXTRAS);
+        settings.userData = userData(object.optJSONObject("userData"));
         return settings;
+    }
+
+    /** "arg" is the launch argument (a word that starts with a dash); "links" maps a name in the user-data directory to a folder of the game's. Null when it is not usable. */
+    private static UserData userData(JSONObject object) {
+        if (object == null) return null;
+        String arg = object.optString("arg", "");
+        if (!arg.matches("-[A-Za-z][A-Za-z0-9_-]*")) {
+            Log.w(TAG, "Not a usable user-data argument: " + arg);
+            return null;
+        }
+        Map<String, String> links = new LinkedHashMap<>();
+        JSONObject given = object.optJSONObject("links");
+        if (given != null) {
+            Iterator<String> names = given.keys();
+            while (names.hasNext()) {
+                String name = names.next();
+                String target = given.optString(name, "");
+                if (relative(name) && relative(target)) links.put(name, target);
+                else Log.w(TAG, "Not a usable user-data link: " + name + " -> " + target);
+            }
+        }
+        return new UserData(arg, links);
     }
 
     private static void readMap(JSONObject object, Map<String, String> into, Set<String> allowed) {

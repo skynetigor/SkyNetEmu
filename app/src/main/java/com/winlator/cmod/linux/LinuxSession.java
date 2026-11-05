@@ -146,6 +146,7 @@ public final class LinuxSession {
                     return refusal("The game's program " + profile.executableGuest + " is not there. Turn off \"Launch without Steam\" "
                             + "in the shortcut's settings to start the game through Steam.");
                 }
+                LinuxUserData.apply(container, profile, options);
                 return directCommand(context, container, profile.executableGuest, options);
             }
             if (profile != null && !profile.profile.linuxExecutables.isEmpty()) {
@@ -162,6 +163,7 @@ public final class LinuxSession {
             writeSteamLaunchOptions(container, appId, options);
             return steamCommand(appId, !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL)), false);
         }
+        LinuxUserData.apply(container, profile, options);
         return directCommand(context, container, path, options);
     }
 
