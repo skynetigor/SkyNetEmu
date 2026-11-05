@@ -296,6 +296,32 @@
       "testedOn": ["Samsung Galaxy Z Fold8 Ultra (SM-F976B), BeamNG 0.39.4"]
     },
     {
+      "id": "beamng-039-linux-fex-bionic-960x544",
+      "name": "BeamNG 0.39 - Linux, FEX + bionic, no PRoot, 960x544",
+      "platform": "linux",
+      "file": "containers/beamng-039-linux-fex-bionic-960x544.wcfg",
+      "description": "BeamNG 0.39.4 native Linux build, the configuration measured on West Coast: FEX 2610 Performance (TSO off), bionic and direct execution with no PRoot, Vulkan thunks, DD-Turnip v0.1.1 (renderer and game driver), native Vulkan output, 960x544 with the app upscaler, post effects and frame generation off, sysmem off, GPU memory 8192 MB. Set BeamNG's own graphics to the Lowest preset with a 960 544 resolution (about 100-110 FPS average on a Redmagic Astra 2 and a Z Fold8 Ultra, 1% lows 50-66) or to the Steam Deck preset (about 50 FPS on both). With 3 traffic cars about 80-90 FPS with 1% lows near 12. The game starts from shared storage; the app stages the executable. Some launches die at startup (exit 133, a CEF startup race: 3 of about 10 on the Fold, 1 of about 10 on the tablet) and one Fold run froze after a Vulkan transfer-queue error; TSO off relaxes x86 memory ordering. Long sessions are untested.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "gpus": [
+        "Adreno 840"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "BeamNG 0.39",
+        "FEX",
+        "bionic",
+        "no PRoot",
+        "Experimental"
+      ],
+      "testedOn": [
+        "Redmagic Astra 2 (SM8850P, Android 16), BeamNG 0.39.4",
+        "Samsung Galaxy Z Fold8 Ultra (SM-F976B, Android 17), BeamNG 0.39.4"
+      ]
+    },
+    {
       "id": "alien-isolation-linux-fex-performance",
       "name": "Linux, FEX Performance + TSO",
       "platform": "linux",
@@ -415,5 +441,5 @@
       ]
     }
   ],
-  "revision": 18
+  "revision": 19
 }
