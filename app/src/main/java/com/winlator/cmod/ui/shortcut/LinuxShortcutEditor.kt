@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +67,8 @@ import com.winlator.cmod.ui.container.UPSCALER_MODES
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.settings.SettingsCard
 import com.winlator.cmod.ui.settings.SettingsDivider
+import kotlinx.coroutines.launch
+import com.winlator.cmod.contents.ContainerConfigCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -117,6 +121,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var profileVersion by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_VERSION)) }
     var noSteam by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_NO_STEAM)) }
     var gameRoot by remember { mutableStateOf(shortcut.getExtra(GameProfiles.EXTRA_ROOT)) }
+    // The registry's preset these settings were taken from ("" when they were set by hand), and the direct launch of a Steam game (no field of its own: a preset sets it).
+    var presetId by remember { mutableStateOf(shortcut.getExtra("containerConfig")) }
+    var directFex by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxDirectFexBridge.EXTRA)) }
     // The x86 emulator: empty follows the container. The names are the container's, so the session code is shared.
     var bionic by remember { mutableStateOf(if (prootEnabled) "0" else shortcut.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA)) }
     var emulatorChoice by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR)) }
@@ -193,24 +200,79 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val throughSteam = shortcut.isSteamGame && effective?.runsWithoutSteam() != true
     // The profile's settings are the shortcut's as soon as one is chosen: they are copied into the fields, not followed.
     var takeFromProfile by remember { mutableStateOf(false) }
+    fun copyProfileExtras(shown: GameProfiles.Effective, withResolution: Boolean) {
+        if (withResolution && shown.resolution.isNotEmpty()) size = shown.resolution
+        shown.extras.forEach { (key, value) ->
+            if (value.isNullOrEmpty()) return@forEach
+            when (key) {
+                FIT -> fit = value
+                UPSCALER -> upscaler = value
+                "simTouchScreen" -> if (!shown.extras.containsKey("linuxTouchMode") && touch != "mouse") touch = if (value == "0") "touchpad" else "native"
+                "linuxTouchMode" -> touch = value
+                LsfgManager.EXTRA_MULTIPLIER -> multiplier = value
+                LsfgManager.EXTRA_FLOW_SCALE -> flowScale = value
+                LsfgManager.EXTRA_LAYER -> lsfgLayer = value
+            }
+        }
+    }
     LaunchedEffect(effective) {
         val shown = effective
         if (takeFromProfile && shown != null) {
             takeFromProfile = false
-            if (shown.resolution.isNotEmpty()) size = shown.resolution
-            shown.extras.forEach { (key, value) ->
-                if (value.isNullOrEmpty()) return@forEach
-                when (key) {
-                    FIT -> fit = value
-                    UPSCALER -> upscaler = value
-                    "simTouchScreen" -> if (!shown.extras.containsKey("linuxTouchMode") && touch != "mouse") touch = if (value == "0") "touchpad" else "native"
-                    "linuxTouchMode" -> touch = value
-                    LsfgManager.EXTRA_MULTIPLIER -> multiplier = value
-                    LsfgManager.EXTRA_FLOW_SCALE -> flowScale = value
-                    LsfgManager.EXTRA_LAYER -> lsfgLayer = value
-                }
-            }
+            copyProfileExtras(shown, true)
         }
+    }
+
+    // The version's presets (the registry's container configs made for this device): choosing one replaces every setting of the shortcut.
+    var presetChoices by remember { mutableStateOf(LinuxPresetSettings.Choices(emptyList(), null)) }
+    LaunchedEffect(effective?.version?.id, profileIdNow) {
+        presetChoices = withContext(Dispatchers.IO) { LinuxPresetSettings.choices(context, effective?.version) }
+    }
+    var pendingPreset by remember { mutableStateOf<ContainerConfigCatalog.Config?>(null) }
+    val scope = rememberCoroutineScope()
+    // The fields take what the preset says; a setting it does not mention stays as it is. They are written to the shortcut by Save.
+    fun applyPreset(values: Map<String, String>) {
+        values[LinuxLaunchOptions.EXTRA_ENV_VARS]?.let { envVars = it }
+        values[LinuxShortcutDefaults.RUNTIME]?.takeIf { it.isNotEmpty() }?.let { runtimeId = it }
+        values["cpuList"]?.let { list ->
+            val chosen = list.split(",").mapNotNull { it.toIntOrNull() }.toSet()
+            for (i in cpuSelected.indices) cpuSelected[i] = chosen.isEmpty() || i in chosen
+        }
+        values["graphicsFpsPreset"]?.let { fps = it }
+        values["hudMode"]?.let { hud = it }
+        values[SIZE]?.let { size = it }
+        values[FIT]?.let { fit = it }
+        values[UPSCALER]?.let { upscaler = it }
+        values["linuxTouchMode"]?.let { touch = it }
+        values[LsfgManager.EXTRA_MULTIPLIER]?.let { multiplier = it }
+        values[LsfgManager.EXTRA_LAYER]?.let { lsfgLayer = it }
+        values[LsfgManager.EXTRA_PERFORMANCE_MODE]?.let { lsfgPerformance = it }
+        values[LsfgManager.EXTRA_PRESENT_MODE]?.let { lsfgPresent = it }
+        values[LsfgManager.EXTRA_FLOW_SCALE]?.let { flowScale = it }
+        values[LinuxSession.EXTRA_KEYBOARD_BUTTON]?.let { keyboardButton = it }
+        values[LinuxSession.EXTRA_AUTO_KEYBOARD]?.let { autoKeyboard = it }
+        values[LinuxEmulator.EXTRA_EMULATOR]?.let { emulatorChoice = it }
+        values[LinuxEmulator.EXTRA_ID]?.let { emulatorId = it }
+        values[LinuxEmulator.EXTRA_PRESET]?.let { emulatorPreset = it }
+        values[LinuxEmulator.EXTRA_ROOTFS]?.let { rootfsId = it }
+        values[LinuxEmulator.EXTRA_FEX_PRESET]?.let { fexPreset = it }
+        values[LinuxEmulator.EXTRA_FEX_THUNKS]?.let { fexThunks = it }
+        values[LinuxFex.EXTRA_GL_32]?.let { fexGl32 = it }
+        values[LinuxFex.EXTRA_GL_VENDOR]?.let { glVendor = it }
+        values[LinuxEmulatorSetup.EXTRA_TU_SYSMEM]?.let { tuSysmem = it }
+        values[LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU]?.let { isolateGameGpu = it }
+        values[com.winlator.cmod.linux.LinuxProot.EXTRA]?.let { prootMode = it }
+        values[LinuxDriverManager.EXTRA_DRIVER]?.let { driverId = it }
+        values[LinuxSession.EXTRA_GL_DRIVER]?.let { glDriver = it }
+        values[LinuxSession.EXTRA_VULKAN_PRESENT]?.let { vulkanPresent = it }
+        values[LinuxGpuMemory.EXTRA]?.let { gpuMemory = LinuxGpuMemory.normalize(it) }
+        values["rendererDriverId"]?.let { rendererDriverId = it }
+        // The execution mode: PRoot or not, glibc or bionic (bionic never runs under PRoot).
+        values[LinuxSession.EXTRA_NO_PROOT]?.let { prootEnabled = LinuxSession.prootEnabled(it) }
+        values[com.winlator.cmod.linux.LinuxBionicSession.EXTRA]?.let { bionic = it }
+        if (bionic == "1") prootEnabled = false
+        values[com.winlator.cmod.linux.LinuxDirectFexBridge.EXTRA]?.let { directFex = it }
+        androidGraphicsConfig = values["graphicsDriverConfig"].orEmpty()
     }
 
     // What the program runs under.
@@ -256,6 +318,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(GameProfiles.EXTRA_NO_STEAM, noSteam.ifEmpty { null })
         shortcut.putExtra(GameProfiles.EXTRA_ROOT, gameRoot.trim().ifEmpty { null })
         shortcut.putExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA, bionic.ifEmpty { null })
+        shortcut.putExtra(com.winlator.cmod.linux.LinuxDirectFexBridge.EXTRA, directFex.ifEmpty { null })
+        shortcut.putExtra("containerConfig", presetId.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulatorChoice.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_ID, emulatorId.ifEmpty { null })
         shortcut.putExtra(LinuxEmulator.EXTRA_PRESET, emulatorPreset.ifEmpty { null })
@@ -339,6 +403,58 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     ) {
                         profileVersion = it
                         takeFromProfile = true
+                    }
+                    if (presetChoices.presets.isNotEmpty()) {
+                        SettingsDivider()
+                        SettingMappedChoice(
+                            "Settings preset",
+                            presetId.takeIf { id -> presetChoices.presets.any { it.id == id } } ?: "",
+                            LinkedHashMap<String, String>().apply {
+                                put("", "Current settings (not taken from a preset)")
+                                presetChoices.presets.forEach {
+                                    put(it.id, it.name + if (it.id == presetChoices.recommendedId) " (recommended)" else "")
+                                }
+                            }
+                        ) { id -> if (id.isNotEmpty()) pendingPreset = presetChoices.presets.firstOrNull { it.id == id } }
+                        Text(
+                            "A preset is a ready set of settings for this version of the game, such as Box64 or FEX. Choosing one replaces all of " +
+                                "this shortcut's settings with the preset's; you are asked first.",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    pendingPreset?.let { chosen ->
+                        AlertDialog(
+                            onDismissRequest = { pendingPreset = null },
+                            title = { Text("Apply \"${chosen.name}\"?") },
+                            text = {
+                                Text(
+                                    "All of this shortcut's settings will be changed to the preset's: the emulator and its build, glibc or bionic, " +
+                                        "PRoot, the drivers, the resolution and scaling, the environment variables, GPU memory, input and frame " +
+                                        "generation. What you set by hand is replaced. The new settings are kept when you save the shortcut."
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    pendingPreset = null
+                                    scope.launch {
+                                        val values = withContext(Dispatchers.IO) { LinuxPresetSettings.load(context, chosen) }
+                                        if (values == null) {
+                                            android.widget.Toast.makeText(context,
+                                                "The preset \"${chosen.name}\" cannot be read: there is no copy of it on the device and no network.",
+                                                android.widget.Toast.LENGTH_LONG).show()
+                                        } else {
+                                            applyPreset(values)
+                                            presetId = chosen.id
+                                            // As when a game is added: the game's own settings come over the preset's.
+                                            effective?.let { copyProfileExtras(it, false) }
+                                        }
+                                    }
+                                }) { Text("Apply") }
+                            },
+                            dismissButton = { TextButton(onClick = { pendingPreset = null }) { Text("Cancel") } }
+                        )
                     }
                     if (!shortcut.isSteamGame) {
                         SettingsDivider()
