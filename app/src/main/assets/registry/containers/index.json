@@ -296,6 +296,31 @@
       "testedOn": ["Samsung Galaxy Z Fold8 Ultra (SM-F976B), BeamNG 0.39.4"]
     },
     {
+      "id": "beamng-040-linux-fex-bionic-960x544",
+      "name": "BeamNG 0.40 - Linux, FEX + bionic, no PRoot, 960x544",
+      "platform": "linux",
+      "file": "containers/beamng-040-linux-fex-bionic-960x544.wcfg",
+      "description": "BeamNG 0.40.x native Linux build, the configuration measured on West Coast (0.40.4.0): FEX 2610 Performance (TSO off), bionic and direct execution with no PRoot, Vulkan thunks, DD-Turnip v0.1.1 (renderer and game driver), native Vulkan output, 960x544 with the app upscaler, post effects and frame generation off, sysmem off, GPU memory 8192 MB. Set BeamNG's own graphics to the Lowest preset with a 960 544 resolution and a settings file whose lastVersion matches the game (about 73 FPS average, 45 for the 1% low, on a Redmagic Astra 2; the same drive on 0.39.4 gave about 101). On the same tablet Box64 0.4.4-r3 (Performance) gave 27 FPS in its only valid run and failed in most launches (CEF UI crash, a pickup that never moves, corrupt floating point in the game's Lua with STRONGMEM=3); Box64 r4, which the Box64 preset selects, was not tested there. Some launches die at startup (1 of 4 on FEX). After a game version change BeamNG's folder cleanup removes the app's LuaJIT-off extension, so the first launch is slow (several minutes of loading). A GPU device loss that crashed SystemUI was seen during tests. TSO off relaxes x86 memory ordering. Long sessions and other phones are untested.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "gpus": [
+        "Adreno 840"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "BeamNG 0.40",
+        "FEX",
+        "bionic",
+        "no PRoot",
+        "Experimental"
+      ],
+      "testedOn": [
+        "Redmagic Astra 2 (SM8850P, Android 16), BeamNG 0.40.4"
+      ]
+    },
+    {
       "id": "beamng-039-linux-fex-bionic-960x544",
       "name": "BeamNG 0.39 - Linux, FEX + bionic, no PRoot, 960x544",
       "platform": "linux",
@@ -441,5 +466,5 @@
       ]
     }
   ],
-  "revision": 19
+  "revision": 20
 }
