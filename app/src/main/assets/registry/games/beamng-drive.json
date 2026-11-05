@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 23,
+  "revision": 24,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -156,6 +156,15 @@
         "beamng-linux-box64-performance"
       ],
       "preferredContainer": "proton11-x64-box64-turnip-stable",
+      "linux": {
+        "userData": {
+          "arg": "-userpath",
+          "links": {
+            "0.34/settings": "userdata/settings",
+            "0.34/mods": "userdata/mods"
+          }
+        }
+      },
       "preferredBySoc": {
         "snapdragon-8s-gen-3": "beamng-linux-box64-adreno735-performance",
         "snapdragon-8-gen-1": "beamng-linux-box64-adreno730-performance",
