@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 24,
+  "revision": 25,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -138,6 +138,7 @@
         "branch": "0.34.2_win7_no_updates"
       },
       "status": "works",
+      "notes": "Native Linux 0.34.2: run it with Box64 (the Linux Box64 presets listed). FEX + bionic does not start yet: its CEF library crashes about a second after the Lua VM loads (exit 139), so no FEX preset is offered for 0.34 for now. Its settings and mods are kept in the game folder (userData links from the game's 0.34 folder), tested with Box64 under PRoot.",
       "match": {
         "versionFile": {
           "path": "integrity.json",
