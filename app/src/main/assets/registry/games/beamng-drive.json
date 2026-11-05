@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 21,
+  "revision": 22,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -89,7 +89,7 @@
         }
       },
       "status": "untested",
-      "notes": "Optional Linux FEX + bionic preset: 0.39.4 menus, Gridmap and West Coast driving checked on SM-F976B / Adreno 840. Uses direct FEX 2610, Vulkan thunks, sysmem, 1280x720, scalar TSO off and full x87 precision. TSO off relaxes x86 memory ordering; performance varies and freezes remain. Long-session stability and other devices are unverified. Requires an app build containing the FEX+bionic BeamNG fixes and executable-only shared-storage staging; an older app cannot gain these fixes from a registry refresh. Alternative preset beamng-039-linux-fex-bionic-960x544 (FEX Performance, bionic, no PRoot, direct, 960x544, upscaler off) is the configuration measured on West Coast on a Redmagic Astra 2 and a Z Fold8 Ultra; it is not the preferred one. Box64 recommendations are unchanged.",
+      "notes": "Alternative Linux preset beamng-039-linux-fex-bionic-960x544: FEX 2610 Performance (TSO off), bionic, no PRoot, direct launch, Vulkan thunks, DD-Turnip v0.1.1, 960x544 with the app upscaler off. West Coast driving measured on a Redmagic Astra 2 and a Z Fold8 Ultra (about 100-110 FPS average at BeamNG's Lowest graphics). TSO off relaxes x86 memory ordering; some launches die at startup; long sessions are unverified. Requires an app build containing the FEX+bionic BeamNG fixes and executable-only shared-storage staging; an older app cannot gain these fixes from a registry refresh. It is not the preferred preset; Box64 recommendations are unchanged.",
       "match": {
         "versionFile": {
           "path": "integrity.json",
@@ -105,7 +105,6 @@
         "beamng-linux-box64-adreno740-performance",
         "cachyos-arm64ec-box64-dd-turnip",
         "beamng-linux-box64-performance",
-        "beamng-039-linux-fex-bionic",
         "beamng-039-linux-fex-bionic-960x544"
       ],
       "preferredContainer": "cachyos-arm64ec-box64-dd-turnip",
