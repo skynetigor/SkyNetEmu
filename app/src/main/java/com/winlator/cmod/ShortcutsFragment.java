@@ -780,7 +780,14 @@ public class ShortcutsFragment extends Fragment {
             com.winlator.cmod.ui.library.GameSavesComposeDialog.show(this, shortcut);
         }
         else if (LibraryComposeHost.ACTION_STORAGE.equals(action)) {
-            com.winlator.cmod.ui.library.GameStorageComposeDialog.show(this, shortcut, this::loadShortcutsList);
+            // The game's folder in the app's file manager (copying or moving it to the app's storage is in the game's own screen).
+            java.io.File folder = com.winlator.cmod.ui.library.GameFolderLocator.folderOf(requireContext(), shortcut);
+            if (folder == null) {
+                android.widget.Toast.makeText(requireContext(), "This shortcut has no game folder.", android.widget.Toast.LENGTH_SHORT).show();
+            }
+            else if (requireActivity() instanceof MainActivity) {
+                ((MainActivity) requireActivity()).showFileManager(folder);
+            }
         }
         else if (LibraryComposeHost.ACTION_DOWNLOAD_VERSION.equals(action)) {
             com.winlator.cmod.ui.library.GameVersionDownloadDialog.show(this, shortcut, this::loadShortcutsList);

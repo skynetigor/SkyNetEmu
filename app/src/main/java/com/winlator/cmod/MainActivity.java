@@ -647,6 +647,13 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 .commit();
     }
 
+    /** The app's file manager in a folder, as when it is chosen in the menu (a game's folder, from the library). */
+    public void showFileManager(java.io.File folder) {
+        show(FileManagerFragment.forFolder(folder), false);
+        navigationView.setCheckedItem(R.id.main_menu_file_manager);
+        selectBottomDestination(R.id.main_menu_file_manager);
+    }
+
     private void show(Fragment fragment, boolean reverse) {
         FragmentManager fragmentManager = getSupportFragmentManager();
         if (reverse) {

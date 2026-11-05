@@ -169,6 +169,15 @@ public class FileManagerFragment extends Fragment {
         return fragment;
     }
 
+    /** The file manager opened in a folder (a game's own folder): browsing, copying, moving and deleting as anywhere else in it. */
+    public static FileManagerFragment forFolder(File startDir) {
+        FileManagerFragment fragment = new FileManagerFragment();
+        Bundle args = new Bundle();
+        args.putString(ARG_START_PATH, startDir.getAbsolutePath());
+        fragment.setArguments(args);
+        return fragment;
+    }
+
     public static FileManagerFragment forContainerFiles(Container container) {
         FileManagerFragment fragment = forContainer(container.id);
         Bundle args = fragment.requireArguments();
