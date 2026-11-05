@@ -548,14 +548,14 @@ private fun LibraryItemMenu(item: LibraryItem, anchor: Rect, cb: LibraryCallback
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                         val rows = if (item.steamClient) listOf(
                             Triple(R.string.library_saves, Icons.Outlined.Save, LibraryComposeHost.ACTION_SAVES),
-                            Triple(R.string.library_storage, Icons.Outlined.Storage, LibraryComposeHost.ACTION_STORAGE),
+                            Triple(R.string.library_game_folder, Icons.Outlined.Storage, LibraryComposeHost.ACTION_STORAGE),
                             Triple(R.string.library_download_version, Icons.Outlined.Download, LibraryComposeHost.ACTION_DOWNLOAD_VERSION),
                             Triple(R.string.library_configure, Icons.Outlined.Settings, LibraryComposeHost.ACTION_SETTINGS)
                         ) else listOf(
                             Triple(R.string.library_configure, Icons.Outlined.Settings, LibraryComposeHost.ACTION_SETTINGS),
                             Triple(R.string.library_enter_container, Icons.Outlined.FolderOpen, LibraryComposeHost.ACTION_ENTER),
                             Triple(R.string.library_saves, Icons.Outlined.Save, LibraryComposeHost.ACTION_SAVES),
-                            Triple(R.string.library_storage, Icons.Outlined.Storage, LibraryComposeHost.ACTION_STORAGE),
+                            Triple(R.string.library_game_folder, Icons.Outlined.Storage, LibraryComposeHost.ACTION_STORAGE),
                             Triple(R.string.library_container_settings, Icons.Outlined.Tune, LibraryComposeHost.ACTION_CONTAINER)
                         )
                         rows.forEachIndexed { index, (label, icon, key) ->
