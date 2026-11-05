@@ -130,13 +130,25 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var isolateGameGpu by remember { mutableStateOf(shortcut.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, "0")) }
     var prootMode by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxProot.EXTRA, "runtime").ifEmpty { "runtime" }) }
     var glVendor by remember { mutableStateOf(shortcut.getExtra(LinuxFex.EXTRA_GL_VENDOR)) }
-    var rendererDriverId by remember { mutableStateOf(shortcut.getRendererDriverId()) }
-    val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
-    var driverId by remember { mutableStateOf(shortcut.getExtra(LinuxDriverManager.EXTRA_DRIVER)) }
     // The Android (adrenotools) driver of a bionic session: the "version" of the shortcut's graphics driver config, the setting
     // the Windows editor writes. Empty leaves the container's own config.
     var androidGraphicsConfig by remember { mutableStateOf(shortcut.getExtra("graphicsDriverConfig")) }
-    val androidDrivers = remember { com.winlator.cmod.contents.AdrenotoolsManager(context).enumarateInstalledDrivers() }
+    var rendererDriverId by remember { mutableStateOf(shortcut.getRendererDriverId()) }
+    // On bionic one Turnip driver serves both the game and the renderer: choosing it sets both. "auto" leaves the game's driver to
+    // the container, "system" is the phone's own.
+    val chooseTurnip: (String) -> Unit = { id ->
+        rendererDriverId = id
+        androidGraphicsConfig = if (id.equals("auto", ignoreCase = true)) "" else {
+            val config = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(
+                androidGraphicsConfig.ifEmpty { container.getGraphicsDriverConfig() })
+            config["version"] = if (id.equals("system", ignoreCase = true)) "System" else id
+            GraphicsDriverConfigDialog.toGraphicsDriverConfig(config)
+        }
+    }
+    val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { id ->
+        if (bionic == "1") chooseTurnip(id) else rendererDriverId = id
+    }
+    var driverId by remember { mutableStateOf(shortcut.getExtra(LinuxDriverManager.EXTRA_DRIVER)) }
     var gpuMemory by remember { mutableStateOf(LinuxGpuMemory.normalize(shortcut.getExtra(LinuxGpuMemory.EXTRA))) }
     var glDriver by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_GL_DRIVER)) }
     var vulkanPresent by remember { mutableStateOf(shortcut.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT)) }
@@ -255,7 +267,11 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM, tuSysmem.ifEmpty { null })
         shortcut.putExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, isolateGameGpu)
         shortcut.putExtra(com.winlator.cmod.linux.LinuxProot.EXTRA, prootMode)
-        shortcut.setRendererDriverId(rendererDriverId)
+        // On bionic the renderer uses the same Turnip driver as the game (a shortcut made earlier may still name two).
+        val gameTurnip = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(androidGraphicsConfig)["version"].orEmpty()
+        shortcut.setRendererDriverId(
+            if (bionic == "1" && gameTurnip.isNotEmpty()) (if (gameTurnip.equals("System", ignoreCase = true)) "system" else gameTurnip)
+            else rendererDriverId)
         shortcut.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId.ifEmpty { null })
         shortcut.putExtra("graphicsDriverConfig", androidGraphicsConfig.ifEmpty { null })
         shortcut.putExtra(LinuxGpuMemory.EXTRA, gpuMemory)
@@ -454,30 +470,18 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 SettingsDivider()
-                LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 if (bionic == "1") {
-                    SettingsDivider()
-                    val chosenAndroidDriver = if (androidGraphicsConfig.isEmpty()) ""
-                        else GraphicsDriverConfigDialog.parseGraphicsDriverConfig(androidGraphicsConfig)["version"].orEmpty()
-                    SettingMappedChoice(
-                        "Android Vulkan driver (bionic)",
-                        chosenAndroidDriver,
-                        LinkedHashMap<String, String>().apply {
-                            put("", "Container default")
-                            androidDrivers.forEach { put(it, it) }
-                            if (chosenAndroidDriver.isNotEmpty() && chosenAndroidDriver !in androidDrivers) put(chosenAndroidDriver, chosenAndroidDriver + " (not installed)")
-                        }
-                    ) { id ->
-                        androidGraphicsConfig = if (id.isEmpty()) "" else {
-                            val config = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(
-                                androidGraphicsConfig.ifEmpty { container.getGraphicsDriverConfig() })
-                            config["version"] = id
-                            GraphicsDriverConfigDialog.toGraphicsDriverConfig(config)
-                        }
-                    }
-                    Text("The Turnip build the game uses with the Android C library runtime (no PRoot). The Linux driver above applies to the glibc runtime only. Restart the game to apply.",
+                    // The game and the renderer use this one driver; the Linux (glibc) driver does not apply to bionic.
+                    val gameTurnip = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(androidGraphicsConfig)["version"].orEmpty()
+                    val shown = if (gameTurnip.isEmpty()) rendererDriverId
+                        else if (gameTurnip.equals("System", ignoreCase = true)) "system" else gameTurnip
+                    RendererDriverPicker(shown, rendererDriverPicker, "Turnip driver") { chooseTurnip(it) }
+                    Text("The Turnip build used by the game and by the screen renderer alike (bionic runs without the Linux driver). " +
+                        "Auto picks one for your GPU. Restart the game to apply.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                } else {
+                    LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
                 }
                 SettingsDivider()
                 SettingMappedChoice("Max GPU memory", gpuMemory, linkedMapOf(
@@ -505,7 +509,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                         "sw" to "Software (CPU copy, experimental)"
                     )
                 ) { vulkanPresent = it }
-                if (vulkanPresent == "native") {
+                if (vulkanPresent == "native" && bionic != "1") {
                     SettingsDivider()
                     RendererDriverPicker(rendererDriverId, rendererDriverPicker) { rendererDriverId = it }
                 }
@@ -633,14 +637,16 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 }) { runtimeId = it }
                 SettingsDivider()
                 SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = "0" }
-                SettingsDivider()
-                SettingMappedChoice("PRoot runtime (experimental)", prootMode,
-                    linkedMapOf("runtime" to "Runtime default", "baseline" to "Source-matched rebuild",
-                        "filters" to "Selective syscall filters",
-                        "fastpath" to "Selective filters + filesystem fast path")) { prootMode = it }
-                Text("Opt-in matched tracer/loader. Filesystem fast path supports direct Box64 PRoot games: read-only regular files; symlinks, relative paths and writes use PRoot. Steam and FEX retain normal filesystem tracing.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                if (prootEnabled) {
+                    SettingsDivider()
+                    SettingMappedChoice("PRoot runtime (experimental)", prootMode,
+                        linkedMapOf("runtime" to "Runtime default", "baseline" to "Source-matched rebuild",
+                            "filters" to "Selective syscall filters",
+                            "fastpath" to "Selective filters + filesystem fast path")) { prootMode = it }
+                    Text("Opt-in matched tracer/loader. Filesystem fast path supports direct Box64 PRoot games: read-only regular files; symlinks, relative paths and writes use PRoot. Steam and FEX retain normal filesystem tracing.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
                 SettingsDivider()
                 SettingMappedChoice(
                     "x86 emulator",
@@ -658,11 +664,11 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 }
                 SettingsDivider()
                 SettingMappedChoice(
-                    "Runtime",
+                    "Libraries: glibc or bionic",
                     bionic,
                     linkedMapOf(
-                        "0" to "Linux runtime (glibc)",
-                        "1" to "Android's C library (experimental, Box64)"
+                        "0" to "glibc: the standard Linux libraries (with or without PRoot)",
+                        "1" to "bionic: Android's own libraries, no PRoot (experimental)"
                     )
                 ) { bionic = it; if (it == "1") prootEnabled = false }
                 if (effectiveChoice == LinuxEmulator.BOX64 || effectiveChoice == LinuxEmulator.FEX) {

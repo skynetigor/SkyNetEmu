@@ -87,6 +87,7 @@ import com.winlator.cmod.linux.LinuxRuntimeCatalog
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask
 import com.winlator.cmod.linux.LinuxRuntimeInstaller
 import com.winlator.cmod.linux.LinuxSession
+import com.winlator.cmod.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.cmod.linux.LinuxBionicSession
 import com.winlator.cmod.steam.SteamContainer
 import com.winlator.cmod.ui.settings.CpuSelectorRow
@@ -385,7 +386,14 @@ private fun LinuxContainerEditorBody(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: steam?.defaults?.driver ?: "") }
-    var rendererDriverId by remember { mutableStateOf(editing?.rendererDriverId ?: "auto") }
+    var rendererDriverId by remember {
+        // On bionic one Turnip driver serves the game and the renderer: show the game's.
+        val gameTurnip = editing?.takeIf { it.getExtra(LinuxBionicSession.EXTRA) == "1" }
+            ?.let { GraphicsDriverConfigDialog.parseGraphicsDriverConfig(it.graphicsDriverConfig)["version"].orEmpty() }.orEmpty()
+        mutableStateOf(
+            if (gameTurnip.equals("System", ignoreCase = true)) "system"
+            else gameTurnip.ifEmpty { editing?.rendererDriverId ?: "auto" })
+    }
     val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
     var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: if (steam != null) LinuxEmulator.BOX64 else LinuxEmulator.NONE) }
     var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: steam?.defaults?.emulator ?: "") }
@@ -500,6 +508,13 @@ private fun LinuxContainerEditorBody(
         container.putExtra("scaleGameWindow", if (scaleWindow) "1" else if (SteamContainer.isManaged(container)) "0" else "")
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
         container.setRendererDriverId(rendererDriverId)
+        if (bionic && !rendererDriverId.equals("auto", ignoreCase = true)) {
+            // The same Turnip driver for the game (the "version" of the graphics driver config) and the renderer.
+            val config = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(
+                container.graphicsDriverConfig.ifBlank { Container.DEFAULT_GRAPHICSDRIVERCONFIG })
+            config["version"] = if (rendererDriverId.equals("system", ignoreCase = true)) "System" else rendererDriverId
+            container.graphicsDriverConfig = GraphicsDriverConfigDialog.toGraphicsDriverConfig(config)
+        }
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
         container.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulator)
@@ -649,16 +664,18 @@ private fun LinuxContainerEditorBody(
                     ) { chosenRuntimeId = it }
                 }
                 SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = false }
+                if (prootEnabled) {
+                    SettingsDivider()
+                    SettingMappedChoice("PRoot runtime (experimental)", prootMode,
+                        linkedMapOf("runtime" to "Runtime default", "baseline" to "Source-matched rebuild",
+                            "filters" to "Selective syscall filters",
+                            "fastpath" to "Selective filters + filesystem fast path")) { prootMode = it }
+                    Text("Filesystem fast path supports direct Box64 PRoot games. Steam and FEX keep normal filesystem tracing; symlinks, relative paths and writes always fall back.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
                 SettingsDivider()
-                SettingMappedChoice("PRoot runtime (experimental)", prootMode,
-                    linkedMapOf("runtime" to "Runtime default", "baseline" to "Source-matched rebuild",
-                        "filters" to "Selective syscall filters",
-                        "fastpath" to "Selective filters + filesystem fast path")) { prootMode = it }
-                Text("Filesystem fast path supports direct Box64 PRoot games. Steam and FEX keep normal filesystem tracing; symlinks, relative paths and writes always fall back.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                SettingsDivider()
-                SettingToggle("Run on Android's C library, without glibc (experimental, Box64)", bionic) { bionic = it; if (it) prootEnabled = false }
+                SettingToggle("Use bionic (Android's own libraries) instead of glibc, without PRoot (experimental)", bionic) { bionic = it; if (it) prootEnabled = false }
             }
         },
         EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {
@@ -757,9 +774,11 @@ private fun LinuxContainerEditorBody(
                 ) { upscaler = it }
                 SettingsDivider()
                 SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
-                if (!softwareOutput) {
+                if (!softwareOutput || bionic) {
                     SettingsDivider()
-                    RendererDriverPicker(rendererDriverId, rendererDriverPicker) { rendererDriverId = it }
+                    // On bionic this one Turnip driver serves the game and the renderer.
+                    RendererDriverPicker(rendererDriverId, rendererDriverPicker,
+                        if (bionic) "Turnip driver" else "Renderer driver") { rendererDriverId = it }
                 }
                 SettingsDivider()
                 SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
@@ -768,8 +787,11 @@ private fun LinuxContainerEditorBody(
                 Text("New shortcuts can avoid inheriting the running launcher's TU_DEBUG. Per-game sysmem and explicit variables still apply.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                SettingsDivider()
-                LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
+                if (!bionic) {
+                    // bionic runs on the Turnip driver above, not on a Linux (glibc) one.
+                    SettingsDivider()
+                    LinuxDriverPicker(driverId, linuxDriverPicker) { driverId = it }
+                }
                 SettingsDivider()
                 SettingMappedChoice(
                     "OpenGL driver",

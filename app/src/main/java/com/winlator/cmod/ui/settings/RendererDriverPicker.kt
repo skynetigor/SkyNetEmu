@@ -66,8 +66,10 @@ internal fun rememberRendererDriverPicker(
 
 /** Android AdrenoTools drivers, shared with Wine; Linux's glibc Turnip packages are separate. */
 @Composable
-internal fun RendererDriverPicker(selected: String, state: RendererDriverPickerState, onSelected: (String) -> Unit) {
-    SettingDriverChoice("Renderer driver", selected, state.options, state.installing, state.install, {
+internal fun RendererDriverPicker(
+    selected: String, state: RendererDriverPickerState, label: String = "Renderer driver", onSelected: (String) -> Unit
+) {
+    SettingDriverChoice(label, selected, state.options, state.installing, state.install, {
         if (state.installing.isEmpty()) onSelected(it)
     })
     if (state.loading) Text("Loading available drivers…")
