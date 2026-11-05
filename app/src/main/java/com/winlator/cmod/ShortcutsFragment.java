@@ -786,7 +786,7 @@ public class ShortcutsFragment extends Fragment {
                 android.widget.Toast.makeText(requireContext(), "This shortcut has no game folder.", android.widget.Toast.LENGTH_SHORT).show();
             }
             else if (requireActivity() instanceof MainActivity) {
-                ((MainActivity) requireActivity()).showFileManager(folder);
+                ((MainActivity) requireActivity()).showFileManager(folder, shortcut.container);
             }
         }
         else if (LibraryComposeHost.ACTION_DOWNLOAD_VERSION.equals(action)) {

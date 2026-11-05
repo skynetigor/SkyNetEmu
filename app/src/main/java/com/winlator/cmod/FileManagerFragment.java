@@ -71,6 +71,8 @@ public class FileManagerFragment extends Fragment {
     private static final String ARG_START_PATH = "start_path";
     private static final String ARG_DRIVE_ROOT = "drive_root";
     private static final String ARG_FOLDER_REQUEST = "folder_request";
+    private static final String ARG_GAME_FOLDER = "game_folder";
+    private static final String ARG_GAME_CONTAINER = "game_container";
     public static final String RESULT_FOLDER_PATH = "folder_path";
     private View chooseFolderButton;
 
@@ -85,6 +87,9 @@ public class FileManagerFragment extends Fragment {
     private List<File> discoveredExternalStorageRoots;
     private File currentDir;
     private File currentDriveRoot;
+    /** Opened from a game: its folder and container. The drives offered are those of the game's runtime, and "Game" comes back to its folder. */
+    private File gameFolder;
+    private Container gameContainer;
     private FileAdapter adapter;
     private ContainerManager containerManager;
     private FloatingActionButton fabPaste;
@@ -169,11 +174,16 @@ public class FileManagerFragment extends Fragment {
         return fragment;
     }
 
-    /** The file manager opened in a folder (a game's own folder): browsing, copying, moving and deleting as anywhere else in it. */
-    public static FileManagerFragment forFolder(File startDir) {
+    /**
+     * The file manager opened in a game's folder. It offers the drives of the game's runtime only (a Linux game's container and the shared
+     * storage; a Windows game's C:, D: and Z:) and "Game", which comes back to the game's folder from wherever one has gone.
+     */
+    public static FileManagerFragment forGame(File gameFolder, Container container) {
         FileManagerFragment fragment = new FileManagerFragment();
         Bundle args = new Bundle();
-        args.putString(ARG_START_PATH, startDir.getAbsolutePath());
+        args.putString(ARG_START_PATH, gameFolder.getAbsolutePath());
+        args.putString(ARG_GAME_FOLDER, gameFolder.getAbsolutePath());
+        if (container != null) args.putInt(ARG_GAME_CONTAINER, container.id);
         fragment.setArguments(args);
         return fragment;
     }
@@ -240,6 +250,10 @@ public class FileManagerFragment extends Fragment {
             String rootPath = args.getString(ARG_DRIVE_ROOT, "");
             if (!startPath.isEmpty()) startDir = new File(startPath);
             if (!rootPath.isEmpty()) currentDriveRoot = new File(rootPath);
+            String gamePath = args.getString(ARG_GAME_FOLDER, "");
+            gameContainer = containerManager.getContainerById(args.getInt(ARG_GAME_CONTAINER, -1));
+            // Without the game's container there is no runtime to show the drives of: the file manager is the general one.
+            if (!gamePath.isEmpty() && gameContainer != null) gameFolder = new File(gamePath);
         }
 
         if (startDir == null || !startDir.exists() || !startDir.isDirectory()) {
@@ -497,9 +511,56 @@ public class FileManagerFragment extends Fragment {
         }
     }
 
+    /** The drives of a game's runtime, and "Game". */
+    private void populateGameDriveOptions() {
+        File shared = Environment.getExternalStorageDirectory();
+        File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File sharedTarget = downloads.exists() ? downloads : shared;
+        boolean inGame = isWithinRoot(currentDir, gameFolder);
+        File gameDrive = inferDriveRoot(gameFolder);
+        driveOptionsPanel.addView(createDriveOptionRow("Game", gameFolder.getName(), inGame, () -> openDrive(gameFolder, gameDrive)));
+
+        if (gameContainer.isLinux()) {
+            File home = gameContainer.getLinuxHomeDir();
+            if (!home.isDirectory()) home = gameContainer.getRootDir();
+            final File homeTarget = home;
+            driveOptionsPanel.addView(createDriveOptionRow(gameContainer.getName(), "Linux container",
+                    !inGame && samePath(currentDriveRoot, gameContainer.getRootDir()), () -> openDrive(homeTarget, gameContainer.getRootDir())));
+            driveOptionsPanel.addView(createDriveOptionRow("Shared storage", "Downloads, documents",
+                    !inGame && samePath(currentDriveRoot, shared), () -> openDrive(sharedTarget, shared)));
+        } else {
+            boolean inDriveC = !inGame && currentDir != null && normalizeFilePath(currentDir.getAbsolutePath()).contains("/.wine/drive_c");
+            driveOptionsPanel.addView(createDriveOptionRow("Drive C:", gameContainer.getName(), inDriveC,
+                    () -> navigateToContainerDriveC(gameContainer)));
+            driveOptionsPanel.addView(createDriveOptionRow("Drive D:", "Downloads",
+                    !inGame && samePath(currentDriveRoot, shared), () -> openDrive(sharedTarget, shared)));
+            File rootFs = new File(requireContext().getFilesDir(), "imagefs");
+            driveOptionsPanel.addView(createDriveOptionRow("Drive Z:", "RootFS", !inGame && !inDriveC && samePath(currentDriveRoot, rootFs), () -> {
+                if (rootFs.exists()) openDrive(rootFs, rootFs);
+                else Toast.makeText(getContext(), "RootFS not found", Toast.LENGTH_SHORT).show();
+            }));
+        }
+
+        if (discoveredExternalStorageRoots != null) {
+            for (File external : discoveredExternalStorageRoots) {
+                driveOptionsPanel.addView(createDriveOptionRow(
+                        "External Storage", external.getName(), samePath(currentDriveRoot, external), () -> openDrive(external, external)));
+            }
+        }
+        driveOptionsPanel.addView(createDriveOptionRow(
+                "Add External Storage",
+                discoveredExternalStorageRoots == null ? "Find SD card or USB storage" : "Scan again",
+                false,
+                this::discoverExternalStorage));
+    }
+
     private void populateDriveOptions() {
         if (driveOptionsPanel == null) return;
         driveOptionsPanel.removeAllViews();
+        if (gameFolder != null) {
+            populateGameDriveOptions();
+            return;
+        }
 
         File dRoot = Environment.getExternalStorageDirectory();
         File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
@@ -691,6 +752,32 @@ public class FileManagerFragment extends Fragment {
 
     private void updateDriveButtonLabel(File dir) {
         if (tvDriveName == null || ivDriveIcon == null) return;
+
+        if (gameFolder != null) {
+            String path = normalizeFilePath(dir.getAbsolutePath());
+            String primary = normalizeFilePath(Environment.getExternalStorageDirectory().getAbsolutePath());
+            boolean shared = path.equals(primary) || path.startsWith(primary + File.separator);
+            if (isWithinRoot(dir, gameFolder)) {
+                tvDriveName.setText("Game");
+                ivDriveIcon.setImageResource(R.drawable.ic_internal_storage);
+            } else if (path.contains("/.wine/drive_c")) {
+                tvDriveName.setText("Drive C:");
+                ivDriveIcon.setImageResource(R.drawable.icon_wine);
+            } else if (shared) {
+                tvDriveName.setText(gameContainer.isLinux() ? "Shared storage" : "Drive D:");
+                ivDriveIcon.setImageResource(R.drawable.ic_internal_storage);
+            } else if (path.startsWith("/storage/") && !path.startsWith("/storage/emulated")) {
+                tvDriveName.setText("External Storage");
+                ivDriveIcon.setImageResource(R.drawable.ic_internal_storage);
+            } else if (gameContainer.isLinux()) {
+                tvDriveName.setText(gameContainer.getName());
+                ivDriveIcon.setImageResource(android.R.drawable.ic_menu_manage);
+            } else {
+                tvDriveName.setText("Drive Z:");
+                ivDriveIcon.setImageResource(android.R.drawable.ic_menu_manage);
+            }
+            return;
+        }
 
         for (Container container : containerManager.getContainers()) {
             if (samePath(currentDriveRoot, container.getRootDir())) {

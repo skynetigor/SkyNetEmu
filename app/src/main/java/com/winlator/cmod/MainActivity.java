@@ -647,9 +647,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 .commit();
     }
 
-    /** The app's file manager in a folder, as when it is chosen in the menu (a game's folder, from the library). */
-    public void showFileManager(java.io.File folder) {
-        show(FileManagerFragment.forFolder(folder), false);
+    /** The app's file manager in a game's folder, as when it is chosen in the menu (from the library): with the drives of the game's runtime. */
+    public void showFileManager(java.io.File folder, com.winlator.cmod.container.Container container) {
+        show(FileManagerFragment.forGame(folder, container), false);
         navigationView.setCheckedItem(R.id.main_menu_file_manager);
         selectBottomDestination(R.id.main_menu_file_manager);
     }
