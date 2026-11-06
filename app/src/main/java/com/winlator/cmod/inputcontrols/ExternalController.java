@@ -477,7 +477,10 @@ public class ExternalController {
         if (device == null) return false;
         if (device.getName() != null && device.getName().toLowerCase().contains("uinput-fpc")) return false;
         int sources = device.getSources();
-        // Exclude devices with SOURCE_MOUSE from being considered controllers
+        // A mouse is not a controller, even when it carries a joystick interface (Logitech G305): its motion would reach the game
+        // as game pad state. Under pointer capture Android reports a mouse as MOUSE_RELATIVE instead of MOUSE.
+        if ((sources & InputDevice.SOURCE_MOUSE_RELATIVE) == InputDevice.SOURCE_MOUSE_RELATIVE
+                && (sources & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD) return false;
         return !device.isVirtual() && ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
                 ((sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK && (sources & InputDevice.SOURCE_MOUSE) == 0));
     }

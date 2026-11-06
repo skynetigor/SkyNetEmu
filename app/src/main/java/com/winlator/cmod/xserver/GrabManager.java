@@ -141,7 +141,19 @@ public class GrabManager implements WindowManager.OnWindowModificationListener, 
         return eventListener != null ? eventListener.client : null;
     }
 
+    /** The window the active pointer grab confines the pointer to (XGrabPointer confine-to), or null. */
+    private volatile Window confineWindow;
+
+    public Window getConfineWindow() {
+        return confineWindow;
+    }
+
+    public void setConfineWindow(Window confineWindow) {
+        this.confineWindow = confineWindow;
+    }
+
     public void deactivatePointerGrab() {
+        confineWindow = null;
         if (window != null) {
             xServer.inputDeviceManager.sendEnterLeaveNotify(window, xServer.inputDeviceManager.getPointWindow(), PointerWindowEvent.Mode.UNGRAB);
             window = null;

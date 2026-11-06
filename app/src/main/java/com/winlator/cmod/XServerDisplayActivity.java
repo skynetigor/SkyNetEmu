@@ -1017,6 +1017,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         return false;
     }
 
+    private float capturedRemainderX, capturedRemainderY;
+
     private void handleCapturedPointer(MotionEvent event) {
         switch (event.getAction()) {
             case MotionEvent.ACTION_BUTTON_PRESS: {
@@ -1049,9 +1051,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             case MotionEvent.ACTION_MOVE:
             case MotionEvent.ACTION_HOVER_MOVE: {
-                float[] p = XForm.transformPoint(xform, event.getX(), event.getY());
+                // A fast mouse's samples arrive batched, and relative values are not accumulated in a batch: every sample counts.
+                float sumX = event.getX(), sumY = event.getY();
+                for (int h = event.getHistorySize() - 1; h >= 0; h--) {
+                    sumX += event.getHistoricalX(h);
+                    sumY += event.getHistoricalY(h);
+                }
+                float[] p = XForm.transformPoint(xform, sumX + capturedRemainderX, sumY + capturedRemainderY);
                 int dx = (int) p[0];
                 int dy = (int) p[1];
+                capturedRemainderX = p[0] - dx;
+                capturedRemainderY = p[1] - dy;
                 if (xServer.isRelativeMouseMovement())
                     winHandler.mouseEvent(MouseEventFlags.MOVE, dx, dy, 0);
                 else

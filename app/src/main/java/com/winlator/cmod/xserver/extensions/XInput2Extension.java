@@ -333,12 +333,14 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 out.writeShort((short)id);
                 out.writeShort((short)axis);
                 out.writeInt(0); // label
-                out.writeFP3232(0);
-                out.writeFP3232(size);
-                out.writeFP3232(id == XInput2Touch.DEVICE ? touch.axisValue(axis)
-                        : axis == 0 ? xServer.pointer.getClampedX() : xServer.pointer.getClampedY());
-                out.writeInt(1000); // resolution
-                out.writeByte((byte)1); // absolute
+                // A mouse has relative axes (its raw motion events carry deltas, and SDL, which trusts the declared mode, would
+                // otherwise take differences of consecutive deltas); the touch screen is absolute.
+                boolean absolute = id == XInput2Touch.DEVICE;
+                out.writeFP3232(absolute ? 0 : -1);
+                out.writeFP3232(absolute ? size : -1);
+                out.writeFP3232(absolute ? touch.axisValue(axis) : 0);
+                out.writeInt(absolute ? 1000 : 1); // resolution
+                out.writeByte((byte)(absolute ? 1 : 0)); // mode: 1 absolute, 0 relative
                 out.writePad(3);
             }
         }
@@ -683,12 +685,12 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         public void send(short sequenceNumber, XOutputStream out) throws IOException {
             try (XStreamLock lock = out.lock()) {
                 if (raw) {
-                    // xXIRawEvent: 36 bytes, then the valuator mask and, for each set bit, the value and the raw value.
+                    // xXIRawEvent: 32 bytes (the last 4 are padding), then the valuator mask and, for each set bit, the value and the raw value.
                     int words = valuators ? 1 + 8 : 0;
                     out.writeByte((byte)GENERIC_EVENT);
                     out.writeByte(extension);
                     out.writeShort(sequenceNumber);
-                    out.writeInt(1 + words);
+                    out.writeInt(words);
                     out.writeShort((short)evType);
                     out.writeShort((short)deviceId);
                     out.writeInt(time);
@@ -696,7 +698,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                     out.writeShort((short)sourceId);
                     out.writeShort((short)(valuators ? 1 : 0));
                     out.writeInt(0); // flags
-                    out.writePad(8);
+                    out.writePad(4);
                     if (valuators) {
                         out.writeInt(3);
                         out.writeFP3232(dx);

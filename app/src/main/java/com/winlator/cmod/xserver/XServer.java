@@ -228,7 +228,19 @@ public class XServer {
                     com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
             if (xi != null) { xi.pendingDx = dx; xi.pendingDy = dy; xi.pendingDelta = true; }
             try {
-                pointer.setPosition(pointer.getX() + dx, pointer.getY() + dy);
+                // The pointer stays on the screen, and inside the window an active grab confines it to (a game's relative mouse mode).
+                int minX = 0, minY = 0, maxX = screenInfo.width - 1, maxY = screenInfo.height - 1;
+                Window confine = grabManager.getConfineWindow();
+                if (confine != null) {
+                    short[] origin = confine.localPointToRoot((short)0, (short)0);
+                    minX = Math.max(minX, origin[0]);
+                    minY = Math.max(minY, origin[1]);
+                    maxX = Math.min(maxX, origin[0] + confine.getWidth() - 1);
+                    maxY = Math.min(maxY, origin[1] + confine.getHeight() - 1);
+                }
+                int nx = Math.max(minX, Math.min(maxX, pointer.getX() + dx));
+                int ny = Math.max(minY, Math.min(maxY, pointer.getY() + dy));
+                pointer.setPosition(nx, ny);
             } finally {
                 if (xi != null) xi.pendingDelta = false;
             }

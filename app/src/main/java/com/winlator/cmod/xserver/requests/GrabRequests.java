@@ -35,7 +35,9 @@ public abstract class GrabRequests {
         if (window == null) throw new BadWindow(windowId);
 
         Bitmask eventMask = new Bitmask(inputStream.readShort());
-        inputStream.skip(14);
+        inputStream.skip(2);   // pointer mode, keyboard mode
+        Window confineTo = client.xServer.windowManager.getWindow(inputStream.readInt());
+        inputStream.skip(8);   // cursor, time
 
         Status status;
         if (client.xServer.grabManager.getWindow() != null && client.xServer.grabManager.getClient() != client) {
@@ -47,6 +49,7 @@ public abstract class GrabRequests {
         else {
             status = Status.SUCCESS;
             client.xServer.grabManager.activatePointerGrab(window, ownerEvents, eventMask, client);
+            client.xServer.grabManager.setConfineWindow(confineTo);
         }
 
         try (XStreamLock lock = outputStream.lock()) {
