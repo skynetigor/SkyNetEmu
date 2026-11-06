@@ -149,11 +149,17 @@ public class GrabManager implements WindowManager.OnWindowModificationListener, 
     }
 
     public void setConfineWindow(Window confineWindow) {
+        if (this.confineWindow == confineWindow) return;
         this.confineWindow = confineWindow;
+        Runnable listener = onConfineChanged;
+        if (listener != null) listener.run();
     }
 
+    /** Called when a pointer grab starts or stops confining the pointer (a game entering or leaving mouse look). */
+    public volatile Runnable onConfineChanged;
+
     public void deactivatePointerGrab() {
-        confineWindow = null;
+        setConfineWindow(null);
         if (window != null) {
             xServer.inputDeviceManager.sendEnterLeaveNotify(window, xServer.inputDeviceManager.getPointWindow(), PointerWindowEvent.Mode.UNGRAB);
             window = null;

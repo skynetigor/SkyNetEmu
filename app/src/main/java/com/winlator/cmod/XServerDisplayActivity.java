@@ -1450,7 +1450,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             touchpadView.setRealMouseConnected(realMouseConnected && !touchpad);
         }
         if (xServerView != null) {
-            xServerView.setForceCursor(touchpad || realMouseConnected);
+            // While a game confines the pointer (mouse look) its own cursor decides: the forced arrow would sit over the game.
+            boolean gameHoldsPointer = xServer != null && xServer.grabManager.getConfineWindow() != null;
+            xServerView.setForceCursor(touchpad || (realMouseConnected && !gameHoldsPointer));
             xServerView.setCursorVisible(touchpad || realMouseConnected);
         }
     }
@@ -1998,6 +2000,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setSensitivity(globalCursorSpeed);
         touchpadView.setMouseEnabled(!isMouseDisabled);
         watchRealMouse();
+        xServer.grabManager.onConfineChanged = this::applyCursorVisibility;
         touchpadView.setFourFingersTapCallback(() -> {
             if (steamClientSession) return;
             if (!drawerLayout.isDrawerOpen(GravityCompat.START))
