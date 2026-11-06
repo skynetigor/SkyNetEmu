@@ -1452,8 +1452,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (!hasFocus && touchpadView != null) touchpadView.cancelNativeTouches();
 
         if (touchpadView != null) {
-            if (hasFocus && cursorLock)
+            if (hasFocus && cursorLock) {
+                // Captured pointer events (a physical mouse) go to the focused view only; the touchpad starts without focus.
+                if (!touchpadView.hasFocus()) touchpadView.requestFocus();
                 touchpadView.requestPointerCapture();
+            }
             else if (!hasFocus)
                 touchpadView.releasePointerCapture();
         }
