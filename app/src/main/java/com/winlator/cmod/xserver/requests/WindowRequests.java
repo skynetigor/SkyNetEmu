@@ -372,6 +372,9 @@ public abstract class WindowRequests {
             client.xServer.pointer.setX(localPoint[0]);
             client.xServer.pointer.setY(localPoint[1]);
         }
+        com.winlator.cmod.xserver.extensions.XInput2Extension xi = client.xServer.getExtension(
+                com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+        if (xi != null) xi.syncRoot(client.xServer.pointer.getX(), client.xServer.pointer.getY());
     }
 
     public static void setInputFocus(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {

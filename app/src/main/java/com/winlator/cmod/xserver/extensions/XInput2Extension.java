@@ -607,11 +607,17 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         int dy = inputStream.readInt() >> 16;
         client.skipRequest();
 
-        if (destination != null) {
-            short[] origin = destination.rootPointToLocal((short)0, (short)0);
-            xServer.injectPointerMove(dx - origin[0], dy - origin[1]);
+        // A warp is not device motion: no raw motion event (a game that recentres the pointer every frame would cancel its own mouse deltas).
+        suppressRaw = true;
+        try {
+            if (destination != null) {
+                short[] origin = destination.rootPointToLocal((short)0, (short)0);
+                xServer.injectPointerMove(dx - origin[0], dy - origin[1]);
+            }
+            else xServer.injectPointerMoveDelta(dx, dy);
+        } finally {
+            suppressRaw = false;
         }
-        else xServer.injectPointerMoveDelta(dx, dy);
     }
 
     // ---- events ---------------------------------------------------------------------------------------------
@@ -867,6 +873,7 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
             }
         }
 
+        if (suppressRaw) return;
         XI2Event raw = new XI2Event(MAJOR_OPCODE, rawType, DEVICE_MASTER_POINTER, DEVICE_SLAVE_POINTER, detail, null, null, null,
                 (short)0, (short)0, (short)0, (short)0, 0, 0, valuators, true, dx, dy);
         deliver(rawType, DEVICE_MASTER_POINTER, true, xServer.windowManager.rootWindow, raw);
@@ -912,11 +919,23 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 button.code(), button, false, 0, 0);
     }
 
+    /** Set while a warp moves the pointer: the motion is delivered, but not as raw device motion. */
+    public volatile boolean suppressRaw;
+    /** The exact device delta of a relative move (a mouse), which the root position difference cannot give once warps move the pointer. */
+    public volatile boolean pendingDelta;
+    public volatile int pendingDx, pendingDy;
+
+    public void syncRoot(short x, short y) {
+        lastRootX = x;
+        lastRootY = y;
+    }
+
     public void onMotion(short x, short y) {
         int dx = x - lastRootX;
         int dy = y - lastRootY;
         lastRootX = x;
         lastRootY = y;
+        if (pendingDelta) { dx = pendingDx; dy = pendingDy; }
         deliverPointer(EVENT_MOTION, EVENT_RAW_MOTION, 0, null, true, dx, dy);
     }
 

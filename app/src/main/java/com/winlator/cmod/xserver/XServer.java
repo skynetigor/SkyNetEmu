@@ -224,7 +224,14 @@ public class XServer {
 
     public void injectPointerMoveDelta(int dx, int dy) {
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
-            pointer.setPosition(pointer.getX() + dx, pointer.getY() + dy);
+            com.winlator.cmod.xserver.extensions.XInput2Extension xi = getExtension(
+                    com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+            if (xi != null) { xi.pendingDx = dx; xi.pendingDy = dy; xi.pendingDelta = true; }
+            try {
+                pointer.setPosition(pointer.getX() + dx, pointer.getY() + dy);
+            } finally {
+                if (xi != null) xi.pendingDelta = false;
+            }
         }
     }
 
