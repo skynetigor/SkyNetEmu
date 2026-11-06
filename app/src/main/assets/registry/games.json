@@ -36,6 +36,12 @@
    "name": "Dead Island Definitive Edition",
    "steamAppId": 383150,
    "config": "games/dead-island-definitive-edition.json"
+  },
+  {
+   "id": "counter-strike-2",
+   "name": "Counter-Strike 2",
+   "steamAppId": 730,
+   "config": "games/counter-strike-2.json"
   }
  ]
 }

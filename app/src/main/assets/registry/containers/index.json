@@ -452,7 +452,33 @@
       "testedOn": [
         "Samsung Galaxy Z Fold8 Ultra (SM-F976B)"
       ]
+    },
+    {
+      "id": "counter-strike-2-linux-fex-bionic",
+      "name": "Linux, FEX + bionic, no PRoot, 8 cores (experimental)",
+      "platform": "linux",
+      "file": "containers/counter-strike-2-linux-fex-bionic.wcfg",
+      "description": "Counter-Strike 2, native x86-64 Steam Linux build 26445667, run by Android FEX 2610 directly with no PRoot; the Steam client stays on the glibc runtime. Direct FEX bridge with TSO emulation, Turnip Gen8 V37 on Adreno 8xx, native Vulkan output, native screen size with the window zoomed to the game (fullscreenStretched=2), all 8 cores. The game's pinning of main/render threads to the prime cores (perfPrimeCores) comes from the game profile. About 124 fps in de_dust2 without bots at 640x480 lowest graphics on a RedMagic Astra 2; a busy online match is slower. Starts only on about every second try (exit 139).",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "gpus": [
+        "Adreno 840"
+      ],
+      "channel": "stable",
+      "tags": [
+        "Linux",
+        "FEX",
+        "bionic",
+        "no PRoot",
+        "64-bit",
+        "Turnip",
+        "Experimental"
+      ],
+      "testedOn": [
+        "RedMagic Astra 2 Gaming Tablet (SM8850P), Android 16"
+      ]
     }
   ],
-  "revision": 21
+  "revision": 22
 }
