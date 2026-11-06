@@ -76,6 +76,14 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             return this;
         }
 
+        /** Whether the guest's /root is the Linux home (the paths the Steam client hands out, such as the game's user data folder). */
+        boolean mapRoot;
+
+        Game mapRoot() {
+            this.mapRoot = true;
+            return this;
+        }
+
         Game sniper(String... libraries) {
             this.sniperLibraries = Arrays.asList(libraries);
             return this;
@@ -109,8 +117,12 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         // cs2.sh (patched copy in the launcher) only sets these and starts the ELF from game/; SKY_MMAP32_GUARD is the shim's switch
         // for the game's oversized MAP_32BIT probe.
         GAMES.put("730", new Game("730", "Counter-Strike Global Offensive", "game/bin/linuxsteamrt64/cs2", "game/cs2.sh", true,
-                Arrays.asList("game/bin/linuxsteamrt64")).with("game", "ENABLE_PATHMATCH=1", "SDL_VIDEO_DRIVER=x11", "SKY_MMAP32_GUARD=1")
+                Arrays.asList("game/bin/linuxsteamrt64")).with("game", "ENABLE_PATHMATCH=1", "SDL_VIDEO_DRIVER=x11", "SKY_MMAP32_GUARD=1",
+                // CS2's lock-free lists (libtier0) crash under FEX without TSO emulation; the arm64 Steam client has no browser host for the game's
+                // chrome_ipc connect (its failure fires Valve's asserts, whose minidump code faults inside FEX): see cs2fix.c.
+                "FEX_TSOENABLED=1", "FEX_VECTORTSOENABLED=1", "FEX_MEMCPYSETTSOENABLED=1", "FEX_HALFBARRIERTSOENABLED=1", "SKY_CS2FIX_SOCKET=1")
                 .preload("libskycs2fix_x64.so")
+                .mapRoot()
                 // ~30,000 live 32 KiB blocks of the Turnip driver (retained NIR) cost scudo three mappings each and exhaust vm.max_map_count (65,530).
                 .hostPreload("libskyhostpool.so")
                 .sniper("libfribidi.so.0", "libthai.so.0", "libdatrie.so.1", "libharfbuzz.so.0", "libgraphite2.so.3", "libpixman-1.so.0"));
@@ -307,6 +319,14 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         Map<String, String> env = new LinkedHashMap<>(sessionEnv);
         env.putAll(overrides);
         for (String entry : game.environment) env.put(entry.substring(0, entry.indexOf('=')), entry.substring(entry.indexOf('=') + 1));
+        // Developer aid: extra variables for this game from Winlator/game-<appid>.env on shared storage (KEY=VALUE per line), no rebuild needed.
+        File extraEnv = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/game-" + game.appId + ".env");
+        if (extraEnv.isFile()) {
+            for (String line : new String(Files.readAllBytes(extraEnv.toPath()), StandardCharsets.UTF_8).split("\n")) {
+                int equals = line.indexOf('=');
+                if (equals > 0 && !line.startsWith("#")) env.put(line.substring(0, equals).trim(), line.substring(equals + 1).trim());
+            }
+        }
         if (!game.hostPreloads.isEmpty()) {
             List<String> hostLibraries = new ArrayList<>();
             for (String name : game.hostPreloads) hostLibraries.add(asset(name).getPath());
@@ -387,6 +407,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         if (LinuxBionicSession.enabled(container)) {
             preloads.add(asset("libskypathmap_x64.so").getPath());
             env.put("SKY_PATHMAP_TMP", new File(rt, "tmp").getPath());
+            if (game.mapRoot) env.put("SKY_PATHMAP_ROOT", home.getPath());
             if (game.steamIpc) env.put("SKY_PATHMAP_SHM", LinuxSession.sessionDirectory(environment.getContext(), "shm").getPath());
         }
         for (String name : new String[]{"libskyplatform_x64.so", "libskysysv_x64.so",
