@@ -59,6 +59,9 @@ public class Property {
         data.rewind();
         switch (type) {
             case "UTF8_STRING":
+            // Some clients (Steam's windows, SDL games) type WM_NAME with an atom named "UTF-8"; without it the bytes came out as
+            // "83,116,101,97,109" and no window could be recognised by its name.
+            case "UTF-8":
                 return StringUtils.fromANSIString(data.array(), StandardCharsets.UTF_8);
             case "STRING":
                 return StringUtils.fromANSIString(data.array(), XServer.LATIN1_CHARSET);
