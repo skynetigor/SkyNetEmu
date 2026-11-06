@@ -20,12 +20,13 @@ import com.winlator.cmod.perf.PerformanceSession
 import com.winlator.cmod.perf.PerformanceTuning
 import com.winlator.cmod.ui.theme.WinZTheme
 
-private val tuningLabels = listOf("Sustained performance", "Boost thread priority", "Prefer performance cores", "GPU turbo")
+private val tuningLabels = listOf("Sustained performance", "Boost thread priority", "Prefer performance cores", "GPU turbo", "Prime cores for main and render threads")
 private val tuningHelp = listOf(
     "Ask Android for a sustainable performance policy. Requires device support and can reduce peak speed.",
     "Try higher priority for game threads and audio/render workers. Android may deny the request.",
     "Keep game threads on cores at least 70% as fast as the fastest core, within your CPU selection. May keep all cores on 8 Elite.",
-    "Unavailable: the legacy KGSL override caused severe performance regressions. Saved On values are ignored."
+    "Unavailable: the legacy KGSL override caused severe performance regressions. Saved On values are ignored.",
+    "Linux games only. Put the game's main thread and its Vulkan render threads on the fastest (prime) cores and keep its other threads on the remaining cores. Needs a CPU with distinct prime cores (the two on 8 Elite); does nothing on other CPUs."
 )
 
 internal class PerformanceTuningEditorState(shortcut: Shortcut) {

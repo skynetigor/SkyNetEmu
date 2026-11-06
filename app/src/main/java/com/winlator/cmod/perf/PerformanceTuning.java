@@ -6,18 +6,16 @@ import com.winlator.cmod.container.Shortcut;
 
 /** Missing shortcut values inherit the global default; explicit zero always overrides it. */
 public final class PerformanceTuning {
-    public static final String[] KEYS = {"perfSustained", "perfPriority", "perfBigCores", "perfGpuTurbo"};
+    public static final String[] KEYS = {"perfSustained", "perfPriority", "perfBigCores", "perfGpuTurbo", "perfPrimeCores"};
     private PerformanceTuning() {}
     public static boolean resolve(Context context, Shortcut shortcut, int option) {
         String value = shortcut == null ? null : shortcut.getExtra(KEYS[option], null);
         return value == null ? PreferenceManager.getDefaultSharedPreferences(context).getBoolean(KEYS[option], false)
                 : "1".equals(value);
     }
-    /** Shortcut extra (no settings screen yet): the game's main and render threads on the prime cores, its other threads on the rest. */
-    public static final String PRIME_CORES = "perfPrimeCores";
+    /** The game's main and render threads on the prime cores, its other threads on the rest (Linux games; KEYS[4]). */
     public static boolean resolvePrime(Context context, Shortcut shortcut) {
-        String value = shortcut == null ? null : shortcut.getExtra(PRIME_CORES, null);
-        return value == null ? PreferenceManager.getDefaultSharedPreferences(context).getBoolean(PRIME_CORES, false) : "1".equals(value);
+        return resolve(context, shortcut, 4);
     }
     /** The cores of the highest capacity (the prime cores of an 8 Elite); 0 when all cores are alike or the capacities are unknown. */
     public static int selectPrimeCores(long[] speeds) {
