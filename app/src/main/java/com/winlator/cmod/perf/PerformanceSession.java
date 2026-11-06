@@ -35,9 +35,10 @@ public final class PerformanceSession implements AutoCloseable {
     private int root = -1;
     private long rootBirth;
     private long readyAt;
-    private boolean gpuOwned, lastPriority, lastCores;
+    private boolean gpuOwned, lastPriority, lastCores, lastPrime;
     private int gpuError = -1, failures, changedNice, changedAffinity;
     private final int bigMask = detectCores();
+    private final int primeMask = detectPrimeCores();
     private final boolean sustainedSupported;
     private volatile String status = "Waiting for session";
     private static volatile String latest = "";
@@ -77,6 +78,7 @@ public final class PerformanceSession implements AutoCloseable {
         boolean priority=active && PerformanceTuning.resolve(activity,shortcut,1);
         boolean cores=active && PerformanceTuning.resolve(activity,shortcut,2);
         boolean gpuRequested=active && PerformanceTuning.resolve(activity,shortcut,3);
+        boolean prime=active && primeMask!=0 && PerformanceTuning.resolvePrime(activity,shortcut);
         // Quarantined after a severe device regression. Saved overrides must never invoke it.
         activity.runOnUiThread(() -> activity.getWindow().setSustainedPerformanceMode(
                 foreground && !closed && sustained && sustainedSupported));
@@ -86,17 +88,17 @@ public final class PerformanceSession implements AutoCloseable {
         }
         failures=0; changedNice=0; changedAffinity=0;
         // Capture descendants born since the last scan before restoring inherited policies.
-        if ((lastPriority && !priority) || (lastCores && !cores)) tune(false,false);
-        restoreDisabled(priority, cores);
-        if ((priority || cores) && root>0 && android.os.SystemClock.elapsedRealtime()>=readyAt) tune(priority,cores);
-        lastPriority=priority; lastCores=cores;
+        if ((lastPriority && !priority) || ((lastCores || lastPrime) && !(cores || prime))) tune(false,false,false);
+        restoreDisabled(priority, cores || prime);
+        if ((priority || cores || prime) && root>0 && android.os.SystemClock.elapsedRealtime()>=readyAt) tune(priority,cores,prime);
+        lastPriority=priority; lastCores=cores; lastPrime=prime;
         status="Sustained: " + (sustained ? (sustainedSupported ? "requested" : "unsupported") : "off")
                 + "\nPriority: " + changedNice + " boosted threads; cores: " + changedAffinity + " restricted threads"
                 + "\nGPU turbo: disabled after performance regression"
                 + (prefs.getBoolean(GPU_PENDING,false) ? " · restore pending (errno " + gpuError + ")" : "")
                 + "\nThread operation failures: " + failures;
         String diagnostics="tuning_sustained="+(sustained?1:0)+" tuning_sustained_supported="+(sustainedSupported?1:0)
-                +" tuning_priority="+(priority?1:0)+" tuning_cores="+(cores?1:0)+" tuning_big_mask="+Integer.toUnsignedString(bigMask)
+                +" tuning_priority="+(priority?1:0)+" tuning_cores="+(cores?1:0)+" tuning_prime="+(prime?1:0)+" tuning_prime_mask="+Integer.toUnsignedString(primeMask)+" tuning_big_mask="+Integer.toUnsignedString(bigMask)
                 +" tuning_boosted="+changedNice+" tuning_affinity="+changedAffinity+" tuning_failures="+failures
                 +" tuning_gpu_requested="+(gpuRequested?1:0)+" tuning_gpu_blocked=1"+" tuning_gpu_accepted="+(gpuOwned?1:0)+" tuning_gpu_errno="+gpuError;
         if (active) latest=diagnostics;
@@ -120,7 +122,7 @@ public final class PerformanceSession implements AutoCloseable {
             if (!priority && !cores && s.appliedNice==s.nice && s.appliedMask==s.mask) it.remove();
         }
     }
-    private void tune(boolean priority, boolean cores) {
+    private void tune(boolean priority, boolean cores, boolean prime) {
         Map<Integer,Integer> parents=new HashMap<>();
         File[] proc=new File("/proc").listFiles();
         if (proc==null) return;
@@ -144,6 +146,15 @@ public final class PerformanceSession implements AutoCloseable {
             if(!changed) break;
         }
         Set<Integer> scan=new HashSet<>(tree); scan.add(android.os.Process.myPid());
+        // The game is the emulator process with Vulkan render threads (the Steam client and its helpers have none). It hangs under the
+        // app's container supervisor, not under the launcher process the rest of this tuning follows, so it is looked for among all of
+        // this app's processes.
+        Set<Integer> games=new HashSet<>();
+        if(prime) for(int pid:parents.keySet()) {
+            if(!read("/proc/"+pid+"/comm").trim().equals("FEX")) continue;
+            File[] tasks=new File("/proc/"+pid+"/task").listFiles(); if(tasks==null) continue;
+            for(File task:tasks) if(read(task+"/comm").trim().equals("VKRenderThread")) { games.add(pid); scan.add(pid); break; }
+        }
         List<State> batch=new ArrayList<>();
         for(int pid:scan) {
             File[] tasks=new File("/proc/"+pid+"/task").listFiles(); if(tasks==null) continue;
@@ -188,8 +199,16 @@ public final class PerformanceSession implements AutoCloseable {
                 int now=getNice(s.tid);
                 if(owned && now<s.nice) { s.appliedNice=now; changedNice++; }
             }
-            if(cores && s.owner!=android.os.Process.myPid() && bigMask!=0) {
-                long target=s.mask & Integer.toUnsignedLong(bigMask);
+            if((cores || prime) && s.owner!=android.os.Process.myPid() && (bigMask!=0 || primeMask!=0)) {
+                long target=s.mask;
+                if(cores && bigMask!=0) target&=Integer.toUnsignedLong(bigMask);
+                if(prime && games.contains(s.owner)) {
+                    // The main thread and the render threads own the prime cores; every other thread of the game stays off them.
+                    long primeBits=Integer.toUnsignedLong(primeMask);
+                    boolean hot=s.tid==s.owner || read("/proc/"+s.tid+"/comm").trim().equals("VKRenderThread");
+                    long split=hot ? target & primeBits : target & ~primeBits;
+                    if(split!=0) target=split;
+                }
                 long actual=getAffinity(s.tid);
                 if(target!=0 && target!=s.mask && (actual==s.mask || actual==s.appliedMask)) {
                     if(setAffinity(s.tid,(int)target)==0 && getAffinity(s.tid)==target) {
@@ -209,6 +228,11 @@ public final class PerformanceSession implements AutoCloseable {
             if(speeds[i]>0) frequencyCount++; if(capacities[i]>0) capacityCount++;
         }
         return PerformanceTuning.selectCores(capacityCount>frequencyCount?capacities:speeds);
+    }
+    private static int detectPrimeCores() {
+        long[] capacities=new long[32];
+        for(int i=0;i<capacities.length;i++) capacities[i]=number("/sys/devices/system/cpu/cpu"+i+"/cpu_capacity");
+        return PerformanceTuning.selectPrimeCores(capacities);
     }
     private static long number(String path) { try{return Long.parseLong(read(path).trim());}catch(Exception e){return 0;} }
     private static int parse(String value) { try{return Integer.parseInt(value);}catch(Exception e){return -1;} }

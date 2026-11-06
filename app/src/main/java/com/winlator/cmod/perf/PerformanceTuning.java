@@ -13,6 +13,21 @@ public final class PerformanceTuning {
         return value == null ? PreferenceManager.getDefaultSharedPreferences(context).getBoolean(KEYS[option], false)
                 : "1".equals(value);
     }
+    /** Shortcut extra (no settings screen yet): the game's main and render threads on the prime cores, its other threads on the rest. */
+    public static final String PRIME_CORES = "perfPrimeCores";
+    public static boolean resolvePrime(Context context, Shortcut shortcut) {
+        String value = shortcut == null ? null : shortcut.getExtra(PRIME_CORES, null);
+        return value == null ? PreferenceManager.getDefaultSharedPreferences(context).getBoolean(PRIME_CORES, false) : "1".equals(value);
+    }
+    /** The cores of the highest capacity (the prime cores of an 8 Elite); 0 when all cores are alike or the capacities are unknown. */
+    public static int selectPrimeCores(long[] speeds) {
+        long max = 0, min = Long.MAX_VALUE;
+        for (long speed : speeds) if (speed > 0) { max = Math.max(max, speed); min = Math.min(min, speed); }
+        if (max <= 0 || min == max) return 0;
+        int mask = 0;
+        for (int i = 0; i < Math.min(32, speeds.length); i++) if (speeds[i] >= max * .95) mask |= 1 << i;
+        return mask;
+    }
     /** Retain unknown cores. All fast cores remain eligible on homogeneous designs such as 8 Elite. */
     public static int selectCores(long[] speeds) {
         long max = 0;
