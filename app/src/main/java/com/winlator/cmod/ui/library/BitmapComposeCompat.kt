@@ -555,8 +555,7 @@ private fun LibraryItemMenu(item: LibraryItem, anchor: Rect, cb: LibraryCallback
                             Triple(R.string.library_configure, Icons.Outlined.Settings, LibraryComposeHost.ACTION_SETTINGS),
                             Triple(R.string.library_enter_container, Icons.Outlined.FolderOpen, LibraryComposeHost.ACTION_ENTER),
                             Triple(R.string.library_saves, Icons.Outlined.Save, LibraryComposeHost.ACTION_SAVES),
-                            Triple(R.string.library_game_folder, Icons.Outlined.Storage, LibraryComposeHost.ACTION_STORAGE),
-                            Triple(R.string.library_container_settings, Icons.Outlined.Tune, LibraryComposeHost.ACTION_CONTAINER)
+                            Triple(R.string.library_game_folder, Icons.Outlined.Storage, LibraryComposeHost.ACTION_STORAGE)
                         )
                         rows.forEachIndexed { index, (label, icon, key) ->
                             TextButton(onClick = { action(key) },

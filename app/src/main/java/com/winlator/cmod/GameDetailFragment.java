@@ -118,12 +118,6 @@ public class GameDetailFragment extends Fragment {
                         GameStorageComposeDialog.show(GameDetailFragment.this, shortcut, GameDetailFragment.this::reloadShortcut);
                     }
 
-                    @Override
-                    public void onContainerSettings() {
-                        startActivity(new android.content.Intent(requireContext(), com.winlator.cmod.ui.settings.ContainersSettingsActivity.class)
-                                .putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_EDIT_CONTAINER, shortcut.container.id));
-                    }
-
                     @NonNull
                     @Override
                     public String storageLabel() {

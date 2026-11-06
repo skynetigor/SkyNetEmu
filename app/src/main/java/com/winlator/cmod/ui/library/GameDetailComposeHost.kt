@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
@@ -75,8 +74,6 @@ interface GameDetailCallbacks {
     fun onArguments()
     fun onSaves()
     fun onStorage()
-    /** Opens the settings of the container the game lives in. */
-    fun onContainerSettings()
     /** "Internal storage" or "Shared storage" (empty when unknown); read again after a copy or move. */
     fun storageLabel(): String
     fun onFavorite(favorite: Boolean)
@@ -197,8 +194,6 @@ private fun LandscapeDetail(title: String, subtitle: String, artwork: Bitmap?, f
                         DetailAction(Icons.Outlined.Storage, storageText, Modifier.weight(1f), callbacks::onStorage)
                     }
                     Spacer(Modifier.height(10.dp))
-                    DetailAction(Icons.Outlined.Tune, "Container settings", Modifier.fillMaxWidth(), callbacks::onContainerSettings)
-                    Spacer(Modifier.height(10.dp))
                     DetailAction(Icons.Outlined.DeleteOutline, "Remove", Modifier.fillMaxWidth(), callbacks::onRemove, true)
                 }
             }
@@ -232,7 +227,6 @@ private fun PortraitDetail(title: String, subtitle: String, artwork: Bitmap?, fa
             DetailAction(Icons.Outlined.PlayArrow, "Enter container", Modifier.fillMaxWidth(), callbacks::onArguments)
             DetailAction(Icons.Outlined.Folder, "Saves", Modifier.fillMaxWidth(), callbacks::onSaves)
             DetailAction(Icons.Outlined.Storage, storageText, Modifier.fillMaxWidth(), callbacks::onStorage)
-            DetailAction(Icons.Outlined.Tune, "Container settings", Modifier.fillMaxWidth(), callbacks::onContainerSettings)
             DetailAction(Icons.Outlined.DeleteOutline, "Remove", Modifier.fillMaxWidth(), callbacks::onRemove, true)
             Spacer(Modifier.height(12.dp))
         }
