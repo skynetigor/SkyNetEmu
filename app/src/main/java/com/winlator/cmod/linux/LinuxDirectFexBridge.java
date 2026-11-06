@@ -47,6 +47,39 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         final List<String> libraryDirs;
         /** Old libraries it needs from the Steam Linux Runtime (scout), as paths in that runtime. */
         final List<String> legacyLibraries;
+        /** The working directory relative to the install folder, or null for the executable's own folder. */
+        String workingDir;
+        /** Variables the game's own start script sets, as KEY=VALUE. */
+        List<String> environment = new ArrayList<>();
+        /** Libraries taken from Valve's sniper runtime (names without the minor version) for a game built against its older userland. */
+        List<String> sniperLibraries = new ArrayList<>();
+
+        Game with(String workingDir, String... environment) {
+            this.workingDir = workingDir;
+            this.environment = Arrays.asList(environment);
+            return this;
+        }
+
+        /** Extra guest libraries (from assets/linux) to preload for this game only. */
+        List<String> preloads = new ArrayList<>();
+
+        Game preload(String... libraries) {
+            this.preloads = Arrays.asList(libraries);
+            return this;
+        }
+
+        /** Libraries (from assets/linux, built for Android) preloaded into the FEX host process itself, bionic FEX only. */
+        List<String> hostPreloads = new ArrayList<>();
+
+        Game hostPreload(String... libraries) {
+            this.hostPreloads = Arrays.asList(libraries);
+            return this;
+        }
+
+        Game sniper(String... libraries) {
+            this.sniperLibraries = Arrays.asList(libraries);
+            return this;
+        }
 
         Game(String appId, String folder, String executable, String script, boolean steamIpc, List<String> libraryDirs, String... legacyLibraries) {
             this.appId = appId;
@@ -73,6 +106,14 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "bin/ShadowOfTheTombRaider", "ShadowOfTheTombRaider.sh", true, feral));
         GAMES.put("383150", new Game("383150", "DIDE", "DeadIslandGame", null, false, Arrays.asList(""),
                 "lib/x86_64-linux-gnu/libpng12.so.0", "usr/lib/x86_64-linux-gnu/libGLEW.so.1.10"));
+        // cs2.sh (patched copy in the launcher) only sets these and starts the ELF from game/; SKY_MMAP32_GUARD is the shim's switch
+        // for the game's oversized MAP_32BIT probe.
+        GAMES.put("730", new Game("730", "Counter-Strike Global Offensive", "game/bin/linuxsteamrt64/cs2", "game/cs2.sh", true,
+                Arrays.asList("game/bin/linuxsteamrt64")).with("game", "ENABLE_PATHMATCH=1", "SDL_VIDEO_DRIVER=x11", "SKY_MMAP32_GUARD=1")
+                .preload("libskycs2fix_x64.so")
+                // ~30,000 live 32 KiB blocks of the Turnip driver (retained NIR) cost scudo three mappings each and exhaust vm.max_map_count (65,530).
+                .hostPreload("libskyhostpool.so")
+                .sniper("libfribidi.so.0", "libthai.so.0", "libdatrie.so.1", "libharfbuzz.so.0", "libgraphite2.so.3", "libpixman-1.so.0"));
     }
 
     private final XEnvironment environment;
@@ -265,6 +306,12 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             throw new IOException("Direct FEX requires the selected FEX and root filesystem");
         Map<String, String> env = new LinkedHashMap<>(sessionEnv);
         env.putAll(overrides);
+        for (String entry : game.environment) env.put(entry.substring(0, entry.indexOf('=')), entry.substring(entry.indexOf('=') + 1));
+        if (!game.hostPreloads.isEmpty()) {
+            List<String> hostLibraries = new ArrayList<>();
+            for (String name : game.hostPreloads) hostLibraries.add(asset(name).getPath());
+            env.put(LinuxFexBionicSession.HOST_PRELOAD, String.join(":", hostLibraries));
+        }
         File rt = LinuxRuntime.rootDir(environment.getContext(), runtime.id);
         File directHome = new File(directory, "home");
         Files.createDirectories(new File(directHome, ".steam").toPath());
@@ -284,12 +331,28 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             if (!source.isFile()) throw new IOException("Missing scout library: " + name);
             link(new File(legacy, name), source);
         }
+        // The game ships its own older FreeType/pango; the root filesystem's newer harfbuzz and friends need symbols that FreeType lacks.
+        // The sniper runtime's versions go on the library path after the game's own folders.
+        String sniperPath = "";
+        if (!game.sniperLibraries.isEmpty()) {
+            File[] runtimes = new File(steam, "steamapps/common/SteamLinuxRuntime_sniper").listFiles((dir, name) -> name.startsWith("sniper_platform_"));
+            File fonts = new File(directory, "sniper-" + game.appId);
+            Files.createDirectories(fonts.toPath());
+            if (runtimes != null) for (File runtime : runtimes) {
+                File libDir = new File(runtime, "files/lib/x86_64-linux-gnu");
+                for (String name : game.sniperLibraries) {
+                    File[] versions = libDir.listFiles((dir, file) -> file.startsWith(name + "."));
+                    if (versions != null && versions.length > 0) link(new File(fonts, name), versions[0]);
+                }
+            }
+            sniperPath = ":" + fonts;
+        }
         if (LinuxBionicSession.enabled(container) && !LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) {
             List<String> guestEnv = new ArrayList<>();
             guestEnv.add("BOX64_DYNAREC=1");
             guestEnv.add("BOX64_DYNAREC_STRONGMEM=1");
             env.forEach((key, value) -> guestEnv.add(key + "=" + value));
-            String libraries = game.libraryPath(gameRoot) + ":" + legacy + ":" + steam + "/linux64";
+            String libraries = game.libraryPath(gameRoot) + ":" + legacy + sniperPath + ":" + steam + "/linux64";
             String custom = env.get("LD_LIBRARY_PATH");
             if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
             guestEnv.add("BOX64_LD_LIBRARY_PATH=" + libraries);
@@ -316,7 +379,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                 argv.addAll(0, Arrays.asList("/system/bin/taskset", Integer.toHexString(mask)));
             }
             return new LinuxSession.Launch(argv.toArray(new String[0]), bionic.hostEnv,
-                    bionic.workingDir, bionic.executionMode);
+                    game.workingDir == null ? bionic.workingDir : new File(gameRoot, game.workingDir), bionic.executionMode);
         }
         List<String> preloads = new ArrayList<>();
         // A guest FEX run without proot sees the Android host's /tmp and /dev/shm, not the Steam client's: its crash handler and
@@ -329,15 +392,19 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         for (String name : new String[]{"libskyplatform_x64.so", "libskysysv_x64.so",
                 "libskysockets_x64.so", "libskyshim_x64.so", "libcefnosb_x64.so"})
             preloads.add(asset(name).getPath());
+        // First in the order: the per-game fixes see a call before the shared shim does (cs2fix passes connect() on to it).
+        for (int index = game.preloads.size() - 1; index >= 0; --index) preloads.add(0, asset(game.preloads.get(index)).getPath());
         JSONObject config = new JSONObject(new String(Files.readAllBytes(new File(home,
                 ".skynet/steam-emulator/" + game.appId + ".fex.json").toPath()), StandardCharsets.UTF_8));
         if (LinuxBionicSession.enabled(container)) {
-            String libraries = game.libraryPath(gameRoot) + ":" + legacy + ":" + steam + "/linux64";
+            String libraries = game.libraryPath(gameRoot) + ":" + legacy + sniperPath + ":" + steam + "/linux64";
             String custom = env.get("LD_LIBRARY_PATH");
             if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
-            return LinuxFexBionicSession.build(environment.getContext(), environment.getImageFs(), container,
+            LinuxSession.Launch fex = LinuxFexBionicSession.build(environment.getContext(), environment.getImageFs(), container,
                     emulator, rootfs, home, directHome, executable, command.subList(1, command.size()),
                     env, libraries, preloads, config, game.appId);
+            return game.workingDir == null ? fex : new LinuxSession.Launch(fex.argv, fex.hostEnv,
+                    new File(gameRoot, game.workingDir), fex.executionMode);
         }
         config.getJSONObject("Config").put("Env", "LD_PRELOAD=" + String.join(":", preloads));
         File configFile = new File(directory, "Config.json");
@@ -359,7 +426,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         env.put("SKY_DIRECT_TMP", new File(rt, "tmp").getPath());
         env.put("SKY_DIRECT_X11", new File(environment.getImageFs().getRootDir(), "usr/tmp/.X11-unix").getPath());
         env.put("SKY_DIRECT_HOME", home.getPath());
-        String libraries = game.libraryPath(gameRoot) + ":" + legacy + ":" + steam + "/linux64";
+        String libraries = game.libraryPath(gameRoot) + ":" + legacy + sniperPath + ":" + steam + "/linux64";
         String custom = env.get("LD_LIBRARY_PATH");
         if (custom != null && !custom.isEmpty()) libraries += ":" + custom.replace("/root/", home + "/");
         env.put("LD_LIBRARY_PATH", libraries);
@@ -386,7 +453,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             if (mask == 0) throw new IOException("Direct FEX CPU affinity selects no cores");
             argv.addAll(0, Arrays.asList("/system/bin/taskset", Integer.toHexString(mask)));
         }
-        return new LinuxSession.Launch(argv.toArray(new String[0]), launch.hostEnv, executable.getParentFile(), "direct_fex");
+        return new LinuxSession.Launch(argv.toArray(new String[0]), launch.hostEnv, game.workingDir == null ? executable.getParentFile() : new File(gameRoot, game.workingDir), "direct_fex");
     }
 
     private File asset(String name) throws IOException {

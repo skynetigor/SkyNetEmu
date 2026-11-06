@@ -19,6 +19,9 @@ import org.json.JSONObject;
 
 /** Android-hosted FEX with real x86 glibc and a matching bionic Vulkan thunk. */
 public final class LinuxFexBionicSession {
+    /** Environment key (in the guest environment map) whose value, a colon list of host libraries, becomes the FEX process's LD_PRELOAD. */
+    public static final String HOST_PRELOAD = "SKY_HOST_PRELOAD";
+
     private LinuxFexBionicSession() {}
 
     static LinuxSession.Launch build(Context context, ImageFs imageFs, Container container,
@@ -76,6 +79,8 @@ public final class LinuxFexBionicSession {
         File configFile = new File(directory, appId != null ? appId + ".json" : "Direct.json");
         Files.write(configFile.toPath(), config.toString().getBytes(StandardCharsets.UTF_8));
         nativeEnv.remove("LD_PRELOAD");
+        // Libraries for the FEX process itself (the guest gets its own LD_PRELOAD through FEX's config).
+        if (guestEnv.containsKey(HOST_PRELOAD)) nativeEnv.put("LD_PRELOAD", guestEnv.get(HOST_PRELOAD));
         nativeEnv.put("LD_LIBRARY_PATH", platformTlsDirectory(directory).getPath() + ":" + nativeEnv.get("LD_LIBRARY_PATH"));
         guestEnv.forEach((key, value) -> {
             if (key.startsWith("FEX_") || key.startsWith("TU_") || key.startsWith("MESA_"))
