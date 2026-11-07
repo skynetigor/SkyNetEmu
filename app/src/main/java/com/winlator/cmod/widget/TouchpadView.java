@@ -43,6 +43,8 @@ public class TouchpadView extends View {
     private Finger fingerPointerButtonRight;
     private float scrollAccumY = 0;
     private boolean scrolling = false;
+    /** Two or more fingers were down in this gesture: the finger that lifts last is the end of a two-finger tap, not a one-finger tap (no left click). */
+    private boolean multiFingerGesture = false;
     private final XServer xServer;
     private Runnable fourFingersTapCallback;
     private Runnable fingerUpCallback;
@@ -94,6 +96,7 @@ public class TouchpadView extends View {
         if (fingerPointerButtonRight != null) xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
         fingerPointerButtonLeft = fingerPointerButtonRight = null;
         java.util.Arrays.fill(fingers, null); numFingers = 0;
+        multiFingerGesture = false;
         scrolling = false; scrollAccumY = 0;
         guestTouches.clear(); freshNativeGesture = true;
         xServer.cancelTouches();
@@ -431,6 +434,7 @@ public class TouchpadView extends View {
                 scrolling = false;
                 fingers[pointerId] = new Finger(event.getX(actionIndex), event.getY(actionIndex));
                 numFingers++;
+                if (numFingers >= 2) multiFingerGesture = true;
                 if (simTouchScreen) {
                     final int generation = gestureGeneration;
                     final Runnable clickDelay = () -> {
@@ -481,6 +485,7 @@ public class TouchpadView extends View {
                                 handleFingerUp(fingers[i]);
                                 fingers[i] = null;
                                 numFingers--;
+                                if (numFingers <= 0) multiFingerGesture = false;
                             }
                         }
                     }
@@ -493,11 +498,13 @@ public class TouchpadView extends View {
                     handleFingerUp(fingers[pointerId]);
                     fingers[pointerId] = null;
                     numFingers--;
+                    if (numFingers <= 0) multiFingerGesture = false;
                 }
                 break;
             case MotionEvent.ACTION_CANCEL:
                 for (byte i = 0; i < MAX_FINGERS; i++) fingers[i] = null;
                 numFingers = 0;
+                multiFingerGesture = false;
                 break;
         }
 
@@ -617,7 +624,7 @@ public class TouchpadView extends View {
                     };
                     postDelayed(clickDelay, CLICK_DELAYED_TIME);
                 }
-                else if (finger1.isTap()) pressPointerButtonLeft(finger1);
+                else if (finger1.isTap() && !multiFingerGesture) pressPointerButtonLeft(finger1);
                 break;
             case 2:
                 Finger finger2 = findSecondFinger(finger1);
