@@ -240,6 +240,65 @@ public class XServerDisplayActivity extends AppCompatActivity {
     PreloaderDialog preloaderDialog = null;
     private Runnable configChangedCallback = null;
     private boolean isPaused = false;
+    private View pauseOverlay;
+
+    /**
+     * The user's pause: the game's processes are frozen (a Linux session through its container supervisors, Wine through its process
+     * list), input is dropped and an overlay with a Resume button covers the screen. Leaving the app and coming back keeps it.
+     */
+    private void setEmulationPaused(boolean paused) {
+        if (paused == isPaused) return;
+        isPaused = paused;
+        if (paused) {
+            if (touchpadView != null) touchpadView.cancelNativeTouches();
+            if (inputControlsView != null) inputControlsView.cancelNativeInput();
+            if (winHandler != null) winHandler.resetGamepadState();
+            if (linuxSession) { if (environment != null) environment.onPause(); }
+            else ProcessHelper.pauseAllWineProcesses();
+        } else {
+            if (linuxSession) { if (environment != null) environment.onResume(); }
+            else ProcessHelper.resumeAllWineProcesses();
+        }
+        updatePauseUi();
+    }
+
+    private void updatePauseUi() {
+        ViewGroup button = (ViewGroup) findViewById(R.id.BTItemPause);
+        if (button != null && button.getChildAt(0) instanceof ImageView)
+            ((ImageView) button.getChildAt(0)).setImageResource(isPaused ? R.drawable.icon_play : R.drawable.icon_pause);
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        if (rootView == null) return;
+        if (isPaused) {
+            if (pauseOverlay == null) pauseOverlay = createPauseOverlay();
+            if (pauseOverlay.getParent() != rootView) rootView.addView(pauseOverlay, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            pauseOverlay.bringToFront();
+            pauseOverlay.setVisibility(View.VISIBLE);
+        } else if (pauseOverlay != null) pauseOverlay.setVisibility(View.GONE);
+    }
+
+    private View createPauseOverlay() {
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(0xB0000000);
+        overlay.setClickable(true);
+        overlay.setFocusable(true);
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText(R.string.emulation_paused);
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(28);
+        title.setPadding(0, 0, 0, Math.round(16 * getResources().getDisplayMetrics().density));
+        android.widget.Button resume = new android.widget.Button(this);
+        resume.setText(R.string.emulation_resume);
+        resume.setOnClickListener(v -> setEmulationPaused(false));
+        box.addView(title);
+        box.addView(resume);
+        overlay.addView(box, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.CENTER));
+        return overlay;
+    }
     private boolean isRelativeMouseMovement = false;
     private boolean isMouseDisabled = false;
     private boolean simulateTouchScreen = false;
@@ -1112,11 +1171,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (environment != null) {
             xServerView.onResume();
-            environment.onResume();
+            if (!isPaused) environment.onResume();   // a game the user paused stays paused
         }
         startTime = System.currentTimeMillis();
         handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
-        if (!isInPictureInPictureMode() && !linuxSession)
+        if (!isInPictureInPictureMode() && !linuxSession && !isPaused)
             ProcessHelper.resumeAllWineProcesses();
         restoreLinuxGameFocus();
     }
@@ -2009,6 +2068,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         View.OnCapturedPointerListener capturedPointerListener = new View.OnCapturedPointerListener() {
             @Override
             public boolean onCapturedPointer(View view, MotionEvent event) {
+                if (isPaused) return true;
                 handleCapturedPointer(event);
                 return true;
             }
@@ -2192,16 +2252,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         ViewGroup btItemPause = (ViewGroup) findViewById(R.id.BTItemPause);
         if (btItemPause != null) {
-            ImageView pauseIcon = (ImageView) btItemPause.getChildAt(0);
             btItemPause.setOnClickListener(v -> {
-                if (isPaused) {
-                    ProcessHelper.resumeAllWineProcesses();
-                    if (pauseIcon != null) pauseIcon.setImageResource(R.drawable.icon_pause);
-                } else {
-                    ProcessHelper.pauseAllWineProcesses();
-                    if (pauseIcon != null) pauseIcon.setImageResource(R.drawable.icon_play);
-                }
-                isPaused = !isPaused;
+                setEmulationPaused(!isPaused);
                 drawerLayout.closeDrawers();
             });
         }
@@ -3566,12 +3618,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
-        if (isPaused && (drawerLayout == null || !drawerLayout.isDrawerOpen(GravityCompat.START))) return true;
         return super.dispatchTouchEvent(event);
     }
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (isPaused) return true;
         boolean handledByWinHandler = false;
         boolean handledByTouchpadView = false;
 
@@ -3601,6 +3653,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (isPaused && event.getKeyCode() != KeyEvent.KEYCODE_BACK) {
+            int key = event.getKeyCode();
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0 && (key == KeyEvent.KEYCODE_BUTTON_START
+                    || key == KeyEvent.KEYCODE_BUTTON_A || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_SPACE))
+                setEmulationPaused(false);
+            return true;
+        }
 
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE || event.getKeyCode() == KeyEvent.KEYCODE_HOME

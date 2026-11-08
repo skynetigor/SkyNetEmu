@@ -700,4 +700,6 @@ E.g. <b>META</b> for <i>META key</i>, \n
 
     <string name="magnifier_not_available">Magnifier is not available in DisplayX mode</string>
     <string name="game_version_description">Game version %1$s</string>
+    <string name="emulation_paused">Paused</string>
+    <string name="emulation_resume">Resume</string>
 </resources>
