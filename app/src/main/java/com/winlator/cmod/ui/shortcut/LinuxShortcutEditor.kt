@@ -59,6 +59,8 @@ import com.winlator.cmod.ui.settings.LinuxDriverPicker
 import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
 import com.winlator.cmod.ui.settings.rememberRendererDriverPicker
 import com.winlator.cmod.ui.settings.SettingToggle
+import com.winlator.cmod.ui.settings.envPut
+import com.winlator.cmod.ui.settings.envValue
 import com.winlator.cmod.ui.settings.SettingText
 import com.winlator.cmod.ui.container.FexDownloadPrompt
 import com.winlator.cmod.ui.container.ResolutionSetting
@@ -628,6 +630,31 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 if (vulkanPresent == "native" && bionic != "1") {
                     SettingsDivider()
                     RendererDriverPicker(rendererDriverId, rendererDriverPicker) { rendererDriverId = it }
+                }
+                if (profileIdNow == "beamng-drive") {
+                    // BeamNG's own graphics switches, kept as variables of the shortcut (read by LinuxBeamNgLuaJit under FEX + bionic).
+                    SettingsDivider()
+                    SettingMappedChoice(
+                        "BeamNG lighting (FEX + bionic)",
+                        if (envValue(envVars, "SKY_BEAMNG_LIGHTING").equals("basic", ignoreCase = true)) "basic" else "default",
+                        linkedMapOf(
+                            "default" to "The game's own setting (Advanced Lighting on Normal)",
+                            "basic" to "Basic Lighting (much faster; night scenes look different)"
+                        )
+                    ) { envVars = envPut(envVars, "SKY_BEAMNG_LIGHTING", if (it == "basic") "basic" else null) }
+                    Text("Switches only the game's light renderer, keeping the rest of the graphics settings. On an Adreno 840 it raised a West Coast scene from 27 to 50 FPS; " +
+                        "by day the picture is almost the same, at night it is darker and cooler. Not saved to the game's settings. Restart the game to apply.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    SettingsDivider()
+                    SettingMappedChoice(
+                        "BeamNG anti-aliasing (FEX + bionic)",
+                        if (envValue(envVars, "SKY_BEAMNG_AA").equals("smaa", ignoreCase = true)) "smaa" else "default",
+                        linkedMapOf(
+                            "default" to "The game's own setting (FXAA on Normal)",
+                            "smaa" to "SMAA (cleaner edges, about the same cost)"
+                        )
+                    ) { envVars = envPut(envVars, "SKY_BEAMNG_AA", if (it == "smaa") "smaa" else null) }
                 }
             }
         },

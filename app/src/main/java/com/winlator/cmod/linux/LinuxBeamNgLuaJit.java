@@ -18,28 +18,68 @@ final class LinuxBeamNgLuaJit {
     static final String EXTENSION = "skynetfexjit";
     static final String KEEP_JIT_VARIABLE = "SKY_BEAMNG_LUAJIT";
     private static final String ARGUMENT = "-onLevelLoad_ext";
-    private static final String SOURCE = String.join("\n",
-            "-- Written by SkyNetEmu: the Lua JIT stays off under FEX (see LinuxBeamNgLuaJit).",
-            "local M = {}",
-            "",
-            "local function vehicleJitOff(vid)",
-            "  local vehicle = be:getObjectByID(vid)",
-            "  if vehicle then vehicle:queueLuaCommand(\"pcall(function() jit.off() jit.flush() end)\") end",
-            "end",
-            "",
-            "function M.onExtensionLoaded()",
-            "  setExtensionUnloadMode(\"" + EXTENSION + "\", \"manual\")",
-            "  pcall(function() jit.off() end)",
-            "  log(\"I\", \"" + EXTENSION + "\", \"Lua JIT turned off (FEX)\")",
-            "end",
-            "",
-            "M.onVehicleSpawned = vehicleJitOff",
-            "M.onVehicleReplaced = vehicleJitOff",
-            "M.onVehicleResetted = vehicleJitOff",
-            "M.onVehicleSwitched = function(_, vid) if vid then vehicleJitOff(vid) end end",
-            "",
-            "return M",
-            "");
+    /** "basic" in this variable runs the game's Basic Lighting renderer instead of the deferred Advanced Lighting one (about 60% more FPS on Adreno 840; night scenes look different). */
+    static final String LIGHTING_VARIABLE = "SKY_BEAMNG_LIGHTING";
+    /** "smaa" in this variable uses SMAA instead of FXAA (the same cost, cleaner edges). */
+    static final String ANTIALIAS_VARIABLE = "SKY_BEAMNG_AA";
+
+    /** The extension's source; the graphics choices are only added when the shortcut asks for them, so the default file stays as it was. */
+    static String source(String lighting, String antialias) {
+        boolean basic = "basic".equalsIgnoreCase(lighting), smaa = "smaa".equalsIgnoreCase(antialias);
+        List<String> lines = new java.util.ArrayList<>(java.util.Arrays.asList(
+                "-- Written by SkyNetEmu: the Lua JIT stays off under FEX (see LinuxBeamNgLuaJit).",
+                "local M = {}",
+                "",
+                "local function vehicleJitOff(vid)",
+                "  local vehicle = be:getObjectByID(vid)",
+                "  if vehicle then vehicle:queueLuaCommand(\"pcall(function() jit.off() jit.flush() end)\") end",
+                "end",
+                ""));
+        if (basic || smaa) {
+            lines.addAll(java.util.Arrays.asList(
+                    "-- The shortcut's graphics choices, applied at run time (not saved to the player's settings).",
+                    "local function applyGraphics()",
+                    basic ? "  pcall(function() VariableRegistry.set(\"$pref::lightManager\", \"Basic Lighting\") setLightManager(\"Basic Lighting\") end)" : null,
+                    smaa ? "  pcall(function()" : null,
+                    smaa ? "    local smaa, fxaa = scenetree.findObject(\"SMAA_PostEffect\"), scenetree.findObject(\"FXAA_PostEffect\")" : null,
+                    smaa ? "    if fxaa then fxaa:disable() end" : null,
+                    smaa ? "    if smaa then smaa:enable() end" : null,
+                    smaa ? "  end)" : null,
+                    "  log(\"I\", \"" + EXTENSION + "\", \"graphics: lighting=" + (basic ? "basic" : "default") + " antialias=" + (smaa ? "smaa" : "default") + "\")",
+                    "end",
+                    "",
+                    "-- The level applies its own graphics settings while it loads, and again when the player changes an option: ours go after them.",
+                    "local stage, applyAt = 0, 0",
+                    "function M.onUpdate()",
+                    "  if stage == 2 then return end",
+                    "  local now = os.clockhp()",
+                    "  if stage == 0 then",
+                    "    if be:getPlayerVehicle(0) then stage, applyAt = 1, now + 10 end",
+                    "  elseif now >= applyAt then",
+                    "    stage = 2",
+                    "    applyGraphics()",
+                    "  end",
+                    "end",
+                    "function M.onSettingsChanged() if stage == 2 then stage, applyAt = 1, os.clockhp() + 3 end end",
+                    ""));
+        }
+        lines.addAll(java.util.Arrays.asList(
+                "function M.onExtensionLoaded()",
+                "  setExtensionUnloadMode(\"" + EXTENSION + "\", \"manual\")",
+                "  pcall(function() jit.off() end)",
+                "  log(\"I\", \"" + EXTENSION + "\", \"Lua JIT turned off (FEX)\")",
+                "end",
+                "",
+                "M.onVehicleSpawned = vehicleJitOff",
+                "M.onVehicleReplaced = vehicleJitOff",
+                "M.onVehicleResetted = vehicleJitOff",
+                "M.onVehicleSwitched = function(_, vid) if vid then vehicleJitOff(vid) end end",
+                "",
+                "return M",
+                ""));
+        lines.removeIf(java.util.Objects::isNull);
+        return String.join("\n", lines);
+    }
 
     private LinuxBeamNgLuaJit() {}
 
@@ -69,7 +109,7 @@ final class LinuxBeamNgLuaJit {
             File directory = userPath != null ? new File(hostPath(container, userPath), "current/lua/ge/extensions")
                     : new File(container.getLinuxHomeDir(), ".local/share/BeamNG/BeamNG.drive/current/lua/ge/extensions");
             File file = new File(directory, EXTENSION + ".lua");
-            byte[] bytes = SOURCE.getBytes(StandardCharsets.UTF_8);
+            byte[] bytes = source(options.env.get(LIGHTING_VARIABLE), options.env.get(ANTIALIAS_VARIABLE)).getBytes(StandardCharsets.UTF_8);
             if (!file.isFile() || !java.util.Arrays.equals(Files.readAllBytes(file.toPath()), bytes)) {
                 Files.createDirectories(directory.toPath());
                 Files.write(file.toPath(), bytes);
