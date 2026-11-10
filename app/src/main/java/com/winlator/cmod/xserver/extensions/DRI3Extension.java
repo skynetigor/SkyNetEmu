@@ -256,7 +256,9 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
         try {
             gpuImage = new GPUImage(fd);
             if (gpuImage.hardwareBufferPtr == 0 || width <= 0 || height <= 0
-                    || width != gpuImage.getWidth() || height != gpuImage.getHeight()
+                    || width != gpuImage.getWidth()
+                    // Adreno pads very short buffers (a 103x1 window gets 103x4): the pixmap keeps the requested size.
+                    || gpuImage.getHeight() < height || gpuImage.getHeight() - height >= 4
                     || (depth != 24 && depth != 32)) {
                 Log.e("Dri3", "Rejected AHB pixmap " + width + "x" + height + ", actual "
                         + gpuImage.getWidth() + "x" + gpuImage.getHeight());
