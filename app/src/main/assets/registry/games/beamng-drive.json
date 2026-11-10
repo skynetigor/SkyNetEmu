@@ -96,7 +96,7 @@
         }
       },
       "status": "untested",
-      "notes": "Alternative Linux preset beamng-039-linux-fex-bionic-960x544: FEX 2610 Performance (TSO off), bionic, no PRoot, direct launch, Vulkan thunks, DD-Turnip v0.1.1, 960x544 with the app upscaler off. West Coast driving measured on a Redmagic Astra 2 and a Z Fold8 Ultra (about 100-110 FPS average at BeamNG's Lowest graphics). TSO off relaxes x86 memory ordering; some launches die at startup; long sessions are unverified. Requires an app build containing the FEX+bionic BeamNG fixes and executable-only shared-storage staging; an older app cannot gain these fixes from a registry refresh. It is not the preferred preset; Box64 recommendations are unchanged.",
+      "notes": "Alternative Linux preset beamng-039-linux-fex-bionic-960x544: FEX 2610 Performance (TSO off), bionic, no PRoot, direct launch, Vulkan thunks, DD-Turnip v0.1.1, 960x544 with the app upscaler off. West Coast driving measured on a Redmagic Astra 2 and a Z Fold8 Ultra (about 100-110 FPS average at BeamNG's Lowest graphics). TSO off relaxes x86 memory ordering; some launches die at startup; long sessions are unverified. Requires an app build containing the FEX+bionic BeamNG fixes and executable-only shared-storage staging; an older app cannot gain these fixes from a registry refresh. It is not the preferred preset; Box64 recommendations are unchanged. Preset beamng-039-linux-box64-bionic-960x544 runs the Box64 built for Android (bionic, no PRoot, direct from the app): as fast as FEX + bionic without traffic, about a quarter slower with traffic (42 against 56 FPS with 3 driving and 3 parked cars on a Redmagic Astra 2 at Lowest 960x544); an app build with the Box64 fixes is required.",
       "match": {
         "versionFile": {
           "path": "integrity.json",
@@ -112,7 +112,8 @@
         "beamng-linux-box64-adreno740-performance",
         "cachyos-arm64ec-box64-dd-turnip",
         "beamng-linux-box64-performance",
-        "beamng-039-linux-fex-bionic-960x544"
+        "beamng-039-linux-fex-bionic-960x544",
+        "beamng-039-linux-box64-bionic-960x544"
       ],
       "preferredContainer": "cachyos-arm64ec-box64-dd-turnip",
       "linux": {

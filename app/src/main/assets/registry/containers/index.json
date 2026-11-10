@@ -335,6 +335,31 @@
       ]
     },
     {
+      "id": "beamng-039-linux-box64-bionic-960x544",
+      "name": "BeamNG 0.39 - Linux, Box64 + bionic, no PRoot, 960x544",
+      "platform": "linux",
+      "file": "containers/beamng-039-linux-box64-bionic-960x544.wcfg",
+      "description": "BeamNG 0.39.4 native Linux build with the Box64 built for Android: Box64 0.4.4 Performance preset, bionic and no PRoot (the game starts straight from the app), Vulkan through the wrapper on DD-Turnip v0.1.1, native Vulkan output, 960x544 with the app upscaler, post effects and frame generation off, CPU cores 2-7, GPU memory 8192 MB. Set BeamNG's own graphics to the Lowest preset with a 960 544 resolution. Measured on a Redmagic Astra 2 (West Coast, 60 s driving, Lowest, CPU at 44-45 C at the start): without traffic about the same as FEX (about 100-110 FPS); with 3 driving and 3 parked cars about 42 FPS against 56 FPS for FEX + bionic, and Box64 loses more than FEX when the chip is warm. Launches reach the main menu and the map reliably (21 of 22 in the last tests; the launch crash was a Box64 allocator race, fixed in the app's Box64). Requires an app build with these Box64 fixes (a registry refresh alone cannot add them). FEX + bionic remains the faster choice with traffic.",
+      "socs": [
+        "snapdragon-8-elite-gen-5"
+      ],
+      "gpus": [
+        "Adreno 840"
+      ],
+      "channel": "prerelease",
+      "tags": [
+        "Linux",
+        "BeamNG 0.39",
+        "Box64",
+        "bionic",
+        "no PRoot",
+        "Experimental"
+      ],
+      "testedOn": [
+        "Redmagic Astra 2 (SM8850P, Android 16), BeamNG 0.39.4"
+      ]
+    },
+    {
       "id": "alien-isolation-linux-fex-performance",
       "name": "Linux, FEX Performance + TSO",
       "platform": "linux",
@@ -480,5 +505,5 @@
       ]
     }
   ],
-  "revision": 23
+  "revision": 24
 }
