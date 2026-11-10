@@ -2838,7 +2838,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         if (vkRenderer == null) return;
 
-        final String[] upscalerLabels = {"SGSR", "FSR", "Lanczos 2", "Color Boost"};
+        // Position + 2 is the renderer mode: 2 SGSR, 3 FSR-style (an SGSR variant), 4 Lanczos 2, 5 Color Boost, 6 AMD FSR 1.0 (EASU + RCAS).
+        final String[] upscalerLabels = {"SGSR", "FSR-style", "Lanczos 2", "Color Boost", "AMD FSR 1.0"};
         if (spUpscalerMode != null) {
             ArrayAdapter<String> a = createSidebarSpinnerAdapter(upscalerLabels);
             a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -2877,7 +2878,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (spUpscalerMode != null)
                 spUpscalerMode.setVisibility(fsrOn ? View.VISIBLE : View.GONE);
             if (fsrOn) {
-                // The mode the container was saved with (SGSR 2, FSR 3, Lanczos 2 = 4, Color Boost 5), not the spinner's first item.
+                // The mode the container was saved with (SGSR 2, FSR-style 3, Lanczos 2 = 4, Color Boost 5, AMD FSR 1.0 = 6), not the spinner's first item.
                 int savedMode = Integer.parseInt(savedFilter);
                 if (spUpscalerMode != null && savedMode >= 2 && savedMode - 2 < upscalerLabels.length)
                     spUpscalerMode.setSelection(savedMode - 2);

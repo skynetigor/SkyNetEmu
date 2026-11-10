@@ -63,7 +63,10 @@ internal val RESOLUTION_PRESETS = listOf(
 )
 
 // The renderer's filter modes (see the sidebar): 0 is a plain scale, 2 SGSR (Qualcomm), 3 FSR 1, 4 Lanczos 2.
-internal val UPSCALER_MODES = listOf("0" to "Off (plain scaling)", "2" to "SGSR (Qualcomm)", "3" to "FSR 1", "4" to "Lanczos 2")
+internal val UPSCALER_MODES = listOf(
+    "0" to "Off (plain scaling)", "2" to "SGSR (Qualcomm)", "3" to "FSR-style (an SGSR variant)",
+    "6" to "AMD FSR 1.0 (EASU + RCAS)", "4" to "Lanczos 2"
+)
 
 
 

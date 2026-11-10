@@ -7,6 +7,7 @@
 
 #include "window_vert.h"
 #include "window_lanczos_frag.h"
+#include "window_amdfsr_frag.h"
 
 void VulkanRendererContext::createLanczosPipeline() {
     if (lanczosPipeline != VK_NULL_HANDLE) return;
@@ -88,6 +89,88 @@ void VulkanRendererContext::createLanczosPipeline() {
         throw std::runtime_error("lanczos_pipeline");
     }
     RLOG("createLanczosPipeline: done");
+}
+
+void VulkanRendererContext::createAmdFsrPipeline() {
+    if (amdFsrPipeline != VK_NULL_HANDLE) return;
+
+    auto vert = makeShader(window_vert_code, sizeof(window_vert_code));
+    auto frag = makeShader(window_amdfsr_frag_code, sizeof(window_amdfsr_frag_code));
+
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vert;
+    stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = frag;
+    stages[1].pName = "main";
+
+    VkPipelineVertexInputStateCreateInfo vi{};
+    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+    VkPipelineInputAssemblyStateCreateInfo ia{};
+    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+
+    VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dyn{};
+    dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dyn.dynamicStateCount = 2;
+    dyn.pDynamicStates = dynStates;
+
+    VkPipelineViewportStateCreateInfo vp{};
+    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    vp.viewportCount = 1;
+    vp.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rast{};
+    rast.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rast.polygonMode = VK_POLYGON_MODE_FILL;
+    rast.lineWidth = 1.0f;
+    rast.cullMode = VK_CULL_MODE_NONE;
+    rast.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo ms{};
+    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState ba{};
+    ba.colorWriteMask = 0xF;
+    ba.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo blend{};
+    blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend.attachmentCount = 1;
+    blend.pAttachments = &ba;
+
+    VkGraphicsPipelineCreateInfo pi{};
+    pi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pi.stageCount = 2;
+    pi.pStages = stages;
+    pi.pVertexInputState = &vi;
+    pi.pInputAssemblyState = &ia;
+    pi.pViewportState = &vp;
+    pi.pRasterizationState = &rast;
+    pi.pMultisampleState = &ms;
+    pi.pColorBlendState = &blend;
+    pi.pDynamicState = &dyn;
+    pi.layout = pipeLayout;
+    pi.renderPass = renderPass;
+    pi.subpass = 0;
+
+    VkResult result = vk_.CreateGraphicsPipelines(
+        device, VK_NULL_HANDLE, 1, &pi, nullptr, &amdFsrPipeline);
+
+    vk_.DestroyShaderModule(device, frag, nullptr);
+    vk_.DestroyShaderModule(device, vert, nullptr);
+
+    if (result != VK_SUCCESS) {
+        amdFsrPipeline = VK_NULL_HANDLE;
+        throw std::runtime_error("amdfsr_pipeline");
+    }
+    RLOG("createAmdFsrPipeline: done");
 }
 
 void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
@@ -228,6 +311,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     const bool useSgsr = filterMode == 2 && sgsrPipeline != VK_NULL_HANDLE;
     const bool useFsr = filterMode == 3 && fsr1Pipeline != VK_NULL_HANDLE;
     const bool useLanczos = filterMode == 4 && lanczosPipeline != VK_NULL_HANDLE;
+    const bool useAmdFsr = filterMode == 6 && amdFsrPipeline != VK_NULL_HANDLE;
     const bool useColorBoost = filterMode == 5 && postfxPipeline != VK_NULL_HANDLE;
     const bool usePostFX = postFXMode > 0 && postfxPipeline != VK_NULL_HANDLE;
     const bool useStretch = stretchMode == 1 && stretchPipeline != VK_NULL_HANDLE;
@@ -235,6 +319,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     VkPipeline activePipeline = useSgsr ? sgsrPipeline
                               : useFsr ? fsr1Pipeline
                               : useLanczos ? lanczosPipeline
+                              : useAmdFsr ? amdFsrPipeline
                               : useColorBoost ? postfxPipeline
                               : usePostFX ? postfxPipeline
                               : useStretch ? stretchPipeline
@@ -270,7 +355,7 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             vk_.CmdPushConstants(cb, pipeLayout,
                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 0, sizeof(pc), &pc);
-        } else if (useFsr || useLanczos) {
+        } else if (useFsr || useLanczos || useAmdFsr) {
             WindowPushConstantsFSR1 pc{};
             if (useStretch) { pc.ndcX0 = -1.0f; pc.ndcX1 = 1.0f; }
             else {

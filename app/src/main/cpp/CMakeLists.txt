@@ -147,6 +147,15 @@ add_custom_command(
 )
 
 add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_amdfsr_frag.h
+    COMMAND glslangValidator -V --vn window_amdfsr_frag_code
+            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_amdfsr_frag.h
+            ${VULKAN_RENDERER_DIR}/window_amdfsr.frag
+    DEPENDS ${VULKAN_RENDERER_DIR}/window_amdfsr.frag
+    COMMENT "Compiling AMD FSR 1.0 (EASU + RCAS) -> window_amdfsr_frag.h"
+)
+
+add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
     COMMAND glslangValidator -V --vn window_stretch_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
@@ -198,7 +207,7 @@ if(LANCZOS_DESTROY_POS EQUAL -1)
 endif()
 string(REPLACE
     "${LANCZOS_DESTROY_MARKER}"
-    "    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);\n    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);\n"
+    "    if (fsr1Pipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fsr1Pipeline, nullptr);\n    if (lanczosPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, lanczosPipeline, nullptr);\n    if (amdFsrPipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, amdFsrPipeline, nullptr);\n"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 
@@ -227,18 +236,18 @@ if(FILTER_CREATE_POS EQUAL -1)
 endif()
 string(REPLACE
     "${FILTER_CREATE_MARKER}"
-    "    if (mode == 3 && fsr1Pipeline == VK_NULL_HANDLE) createFsr1Pipeline();\n    if (mode == 4 && lanczosPipeline == VK_NULL_HANDLE) createLanczosPipeline();\n"
+    "    if (mode == 3 && fsr1Pipeline == VK_NULL_HANDLE) createFsr1Pipeline();\n    if (mode == 4 && lanczosPipeline == VK_NULL_HANDLE) createLanczosPipeline();\n    if (mode == 6 && amdFsrPipeline == VK_NULL_HANDLE) createAmdFsrPipeline();\n"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 
 string(REPLACE
     "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR1\":\"LINEAR\"; };"
-    "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR\":m==4?\"LANCZOS2\":m==5?\"COLOR_BOOST\":\"LINEAR\"; };"
+    "auto modeName=[](int m){ return m==1?\"NEAREST\":m==2?\"SGSR\":m==3?\"FSR\":m==4?\"LANCZOS2\":m==5?\"COLOR_BOOST\":m==6?\"AMD_FSR1\":\"LINEAR\"; };"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 string(REPLACE
     "filterMode, filterMode==3?\"FSR1\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
-    "filterMode, filterMode==5?\"COLOR_BOOST\":filterMode==4?\"LANCZOS2\":filterMode==3?\"FSR\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
+    "filterMode, filterMode==6?\"AMD_FSR1\":filterMode==5?\"COLOR_BOOST\":filterMode==4?\"LANCZOS2\":filterMode==3?\"FSR\":filterMode==2?\"SGSR\":filterMode==1?\"NEAREST\":\"LINEAR\");"
     VULKAN_CONTEXT_TEXT
     "${VULKAN_CONTEXT_TEXT}")
 
@@ -263,6 +272,7 @@ add_library(vulkan_renderer SHARED
         ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_fsr1_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_lanczos_frag.h
+        ${CMAKE_CURRENT_BINARY_DIR}/window_amdfsr_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
 )
