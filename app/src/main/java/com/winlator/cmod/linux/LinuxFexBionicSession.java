@@ -195,7 +195,7 @@ public final class LinuxFexBionicSession {
      * host Vulkan thunk starts) binds to it and fails on OpenSSL_add_all_algorithms: the game then sees no Vulkan driver.
      * Only these two names are pointed back at the platform's libraries; the imagefs's other libraries keep priority.
      */
-    private static File platformTlsDirectory(File directory) throws IOException {
+    static File platformTlsDirectory(File directory) throws IOException {
         File links = new File(directory, "platform-tls");
         Files.createDirectories(links.toPath());
         for (String name : new String[]{"libcrypto.so", "libssl.so"}) {

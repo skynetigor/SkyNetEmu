@@ -64,6 +64,20 @@ public final class LinuxBionicSession {
 
         File box64 = LinuxSession.stageAsset(context, "linux-bionic", "box64-bionic");
         if (box64 == null) return null;
+        // Debug builds only: Winlator/box64-bionic-override on shared storage (which cannot run programs, hence the copy) replaces the shipped Android Box64.
+        File override = new File(Environment.getExternalStorageDirectory(), "Winlator/box64-bionic-override");
+        if (override.isFile() && com.winlator.cmod.core.AppUtils.isDebugBuild(context)) {
+            File copy = new File(new File(context.getFilesDir(), "linux-bionic"), "box64-bionic-override");
+            File stamp = new File(copy.getPath() + ".stamp");
+            String id = override.length() + ":" + override.lastModified();
+            if (!copy.isFile() || !stamp.isFile() || !id.equals(FileUtils.readString(stamp))) {
+                if (FileUtils.copy(override, copy)) {
+                    FileUtils.chmod(copy, 0755);
+                    FileUtils.writeString(stamp, id);
+                }
+            }
+            if (copy.isFile()) box64 = copy;
+        }
         File parent = LinuxSession.stageAsset(context, "linux-bionic", "bionic-launch-parent");
         if (parent == null) {
             LinuxFail.w(TAG, "Android Box64 launch parent is unavailable");
@@ -71,6 +85,14 @@ public final class LinuxBionicSession {
         }
         String homePath = home.getPath();
         EnvVars env = nativeEnvironment(context, imageFs, container, home);
+        // The imagefs's OpenSSL 3 would shadow the platform's libcrypto/libssl for the host Vulkan loader's vendor libraries (no GPU found).
+        try {
+            File linuxBionic = new File(context.getFilesDir(), "linux-bionic");
+            env.put("LD_LIBRARY_PATH", LinuxFexBionicSession.platformTlsDirectory(linuxBionic).getPath() + ":" + env.get("LD_LIBRARY_PATH"));
+        }
+        catch (java.io.IOException e) {
+            LinuxFail.w(TAG, "Cannot link the platform's libcrypto: " + e.getMessage());
+        }
 
         // What the glibc session decided for the program: Box64's settings, the shims it preloads, the game's own variables.
         String libs = "";
@@ -81,10 +103,10 @@ public final class LinuxBionicSession {
             String value = entry.substring(eq + 1).replace("/root", homePath);
             if (key.equals("BOX64_LD_LIBRARY_PATH")) libs = value;
             else if (key.equals("BOX64_LD_PRELOAD")) {
-                // libskyshim_x64 (gamepad, execveat, robust lists) is built for the glibc Box64 and brings the Android one down; the others are plain.
+                // libskyshim_x64 stays: it answers the evdev ioctls on the app's gamepad files (the same shim the FEX + bionic session preloads).
                 StringBuilder kept = new StringBuilder();
                 for (String lib : value.split(":")) {
-                    if (lib.isEmpty() || lib.endsWith("libskyshim_x64.so")) continue;
+                    if (lib.isEmpty()) continue;
                     if (kept.length() > 0) kept.append(':');
                     kept.append(lib);
                 }
@@ -109,6 +131,18 @@ public final class LinuxBionicSession {
         if (x86 == null) {
             java.util.List<LinuxRootfs.Installed> all = LinuxRootfs.list(context);
             if (!all.isEmpty()) x86 = all.get(0);
+        }
+        // Audio goes through PulseAudio like the FEX + bionic session's: the glibc session's ALSA aserver configuration does not suit this process
+        // (FMOD played with high-frequency artifacts through it). The root filesystem's x86-64 ALSA Pulse plugin is run by Box64.
+        if (x86 != null) {
+            File plugins = new File(x86.dir, "usr/lib/x86_64-linux-gnu/alsa-lib");
+            if (new File(plugins, "libasound_module_pcm_pulse.so").isFile() && new File(plugins, "libasound_module_ctl_pulse.so").isFile()) {
+                File audioConfig = new File(new File(context.getFilesDir(), "linux-bionic"), "alsa-pulse.conf");
+                if (FileUtils.writeString(audioConfig, "pcm.!default { type pulse }\nctl.!default { type pulse }\n")) {
+                    env.put("ALSA_CONFIG_PATH", audioConfig.getPath());
+                    env.put("ALSA_PLUGIN_DIR", plugins.getPath());
+                }
+            }
         }
         // An embedded Chromium's gtk and epoxy look for OpenGL: the root filesystem's Mesa (a software renderer on LLVM) cannot work on Android, so a library saying
         // "no OpenGL" (tools/linux-shim/skynogl.c) stands in under these names, ahead of the root filesystem's.
