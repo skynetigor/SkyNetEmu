@@ -292,7 +292,6 @@ public class Shortcut {
             android.widget.Toast.makeText(context, "Could not remove shortcut.", android.widget.Toast.LENGTH_SHORT).show();
             return false;
         }
-        if (container.isLinux()) com.winlator.cmod.linux.LinuxStagingCleanup.schedule(context);
         return true;
     }
 

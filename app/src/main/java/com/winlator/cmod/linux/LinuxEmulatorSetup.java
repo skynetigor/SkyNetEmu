@@ -42,21 +42,21 @@ public final class LinuxEmulatorSetup {
      * shortcut's settings. Choosing another emulator drops the container's build and preset (they name builds of the other one).
      */
     public static Container of(Container container, Shortcut shortcut) {
-        return stagedBeamNG(settings(container, shortcut), shortcut);
+        return sharedStorageBeamNG(settings(container, shortcut), shortcut);
     }
 
     /**
-     * FEX cannot map programs from noexec shared storage. For BeamNG there it is not refused: the direct Android FEX session stages
-     * the game's ELF files internally (see {@link LinuxExecutableStaging}), which needs bionic and no PRoot, so those are chosen
-     * for the session whatever the shortcut says. The shortcut itself is not changed.
+     * FEX under PRoot cannot map programs from noexec shared storage. For BeamNG there it is not refused: the direct Android FEX
+     * session maps guest files without PROT_EXEC and runs the game from shared storage, which needs bionic and no PRoot, so those
+     * are chosen for the session whatever the shortcut says. The shortcut itself is not changed.
      */
-    private static Container stagedBeamNG(Container effective, Shortcut shortcut) {
+    private static Container sharedStorageBeamNG(Container effective, Shortcut shortcut) {
         if (effective == null || shortcut == null || !effective.isLinux()
                 || !LinuxEmulator.FEX.equals(LinuxEmulator.choice(effective)) || LinuxBionicSession.enabled(effective)) return effective;
         String path = shortcut.path;
         File program = path != null && path.startsWith("/") ? new File(path)
                 : new File(shortcut.getExtra("gameRoot"), "BinLinux/BeamNG.drive.x64");
-        if (!LinuxExecutableStaging.isBeamNG(program)
+        if (!LinuxProgramPaths.isBeamNG(program)
                 || !LinuxProgramPaths.isWithin(android.os.Environment.getExternalStorageDirectory(), program)
                 || LinuxSession.elfMachine(program) != 62) return effective;
         Map<String, String> over = new LinkedHashMap<>();

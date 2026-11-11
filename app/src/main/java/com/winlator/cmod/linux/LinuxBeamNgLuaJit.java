@@ -61,7 +61,7 @@ final class LinuxBeamNgLuaJit {
 
     /** The arguments to start the game with: unchanged unless this is BeamNG under FEX with nothing of the user's in the way. */
     static List<String> arguments(Container container, File program, boolean runsOnFex, LinuxLaunchOptions options) {
-        if (!runsOnFex || !LinuxExecutableStaging.isBeamNG(program) || "1".equals(options.env.get(KEEP_JIT_VARIABLE))
+        if (!runsOnFex || !LinuxProgramPaths.isBeamNG(program) || "1".equals(options.env.get(KEEP_JIT_VARIABLE))
                 || options.args.contains(ARGUMENT)) return options.args;
         try {
             // The game's user folder: the container's default one, or the one -userpath gives it ("<path>/current").

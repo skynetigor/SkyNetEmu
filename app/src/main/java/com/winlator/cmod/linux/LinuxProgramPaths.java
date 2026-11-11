@@ -13,6 +13,12 @@ public final class LinuxProgramPaths {
         return relative == null ? null : relative.isEmpty() ? "/root" : "/root/" + relative;
     }
 
+    /** BeamNG's Linux executable, BinLinux/BeamNG.drive.x64. */
+    public static boolean isBeamNG(File executable) {
+        return executable != null && "BeamNG.drive.x64".equals(executable.getName())
+                && executable.getParentFile() != null && "BinLinux".equals(executable.getParentFile().getName());
+    }
+
     public static boolean isWithin(File directory, File file) {
         return relativeTo(directory, file) != null;
     }

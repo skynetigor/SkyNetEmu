@@ -34,7 +34,6 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private com.winlator.cmod.core.ContainerProcess process;
     private com.winlator.cmod.linux.LinuxDirectFexBridge directFex;
     private volatile com.winlator.cmod.core.ContainerProcess bionicServer;
-    private String stagingLease;
     private long startedAt;
     private volatile String executionMode = "not_built";
 
@@ -90,16 +89,13 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void start() {
-        try {
-            startSession();
-        } finally {
-            watchStaging();
-        }
+        startSession();
     }
 
     private void startSession() {
         Context context = environment.getContext();
         ImageFs imageFs = environment.getImageFs();
+        com.winlator.cmod.linux.LinuxStagingCleanup.schedule(context);
         startedAt = System.currentTimeMillis();
         phase = "waiting_xserver";
         startupStage(phase);
@@ -108,21 +104,6 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         try {
             phase = "building";
             startupStage(phase);
-            synchronized (lock) {
-                for (int i = 0; i + 1 < guestCommand.length; i++) {
-                    if (!"bannerlator-run".equals(guestCommand[i])) continue;
-                    File executable = LinuxSession.hostFile(context, container, guestCommand[i + 1]);
-                    if (com.winlator.cmod.linux.LinuxExecutableStaging.isBeamNG(executable)) {
-                        try {
-                            stagingLease = com.winlator.cmod.linux.LinuxExecutableStaging.retain(executable,
-                                    new File(context.getFilesDir(), "linux-executable-staging"));
-                        } catch (IOException error) {
-                            throw new IllegalStateException("Cannot retain staged executable", error);
-                        }
-                    }
-                    break;
-                }
-            }
             launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
             if (com.winlator.cmod.linux.LinuxDirectFexBridge.enabled(container, guestCommand)) {
                 try {
@@ -309,32 +290,6 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     /** Waits for owned descendants to be reaped. Call off the main thread. */
     public void awaitTeardown() {
         environment.awaitTeardown();
-    }
-
-    /** Root exit is not teardown: detached CEF workers can still hold executable mappings. */
-    private void watchStaging() {
-        final String lease;
-        final com.winlator.cmod.core.ContainerProcess guest, server;
-        synchronized (lock) {
-            if (stagingLease == null) return;
-            lease = stagingLease;
-            stagingLease = null;
-            guest = process;
-            server = bionicServer;
-        }
-        Thread watcher = new Thread(() -> {
-            try {
-                if (guest != null) while (!guest.awaitStop(1000)) {}
-                if (server != null) while (!server.awaitStop(1000)) {}
-                com.winlator.cmod.linux.LinuxExecutableStaging.release(lease);
-                com.winlator.cmod.linux.LinuxStagingCleanup.schedule(environment.getContext());
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                Log.w(TAG, "Staging retained: interrupted while waiting for owned workers", error);
-            }
-        }, "staging-teardown");
-        watcher.setDaemon(true);
-        watcher.start();
     }
 
     public void suspendProcess() {

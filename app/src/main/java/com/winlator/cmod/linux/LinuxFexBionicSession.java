@@ -135,12 +135,6 @@ public final class LinuxFexBionicSession {
         File executable = LinuxSession.hostFile(context, container, command[at + 1]);
         if (executable == null || LinuxSession.elfMachine(executable) != 62)
             throw new IOException("Android FEX requires an installed x86-64 executable");
-        File originalExecutable = executable;
-        if (LinuxExecutableStaging.isBeamNG(executable)
-                && LinuxProgramPaths.isWithin(android.os.Environment.getExternalStorageDirectory(), executable)) {
-            executable = LinuxExecutableStaging.stageBeamNG(executable,
-                    new File(context.getFilesDir(), "linux-executable-staging"));
-        }
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
         LinuxRootfs.Installed rootfs = LinuxRootfs.resolve(context, container);
         if (rootfs == null) throw new IOException(LinuxFex.NEEDS_ROOTFS);
@@ -155,7 +149,6 @@ public final class LinuxFexBionicSession {
             if (separator <= 0) throw new IOException("Invalid Android FEX guest environment entry");
             guest.put(entry.substring(0, separator), entry.substring(separator + 1));
         }
-        if (!originalExecutable.equals(executable)) guest.put("SKY_RESOURCE_DIR", originalExecutable.getParent());
         List<String> preloads = new ArrayList<>();
         for (String name : new String[]{"libskyplatform_x64.so", "libskysysv_x64.so",
                 "libskysockets_x64.so", "libskyshim_x64.so", "libcefnosb_x64.so", "libskyshm_x64.so"}) {
@@ -163,23 +156,14 @@ public final class LinuxFexBionicSession {
             if (asset == null) throw new IOException("Android FEX guest shim unavailable: " + name);
             preloads.add(asset.getPath());
         }
-        if (!originalExecutable.equals(executable)) {
-            File adapter = LinuxSession.stageAsset(context, "linux-shim", "libskygamepath_x64.so");
-            if (adapter == null) throw new IOException("BeamNG shared-data adapter unavailable");
-            preloads.add(adapter.getPath());
-            guest.put("SKY_DIRECT_ORIGINAL_EXECUTABLE", originalExecutable.getCanonicalPath());
-            guest.put("SKY_DIRECT_STAGED_EXECUTABLE", executable.getCanonicalPath());
-        }
         JSONObject config = new JSONObject(new String(Files.readAllBytes(
                 new File(home, ".config/fex-emu/Config.json").toPath()), StandardCharsets.UTF_8));
         String libraries = executable.getParent() + ":" + guest.getOrDefault("LD_LIBRARY_PATH", "")
                 .replace("/root", home.getPath());
-        if (!originalExecutable.equals(executable))
-            libraries = libraries.replace(originalExecutable.getParent(), executable.getParent());
         LinuxSession.Launch launch = build(context, imageFs, container, emulator, rootfs, home, home, executable,
                 Arrays.asList(command).subList(first + variables, command.length),
                 guest, libraries, preloads, config, null);
-        File workingDirectory = originalExecutable.getParentFile();
+        File workingDirectory = executable.getParentFile();
         if ("BeamNG.drive.x64".equals(executable.getName()) && "BinLinux".equals(workingDirectory.getName())) {
             String gameRoot = container.getExtra("gameRoot");
             workingDirectory = gameRoot.isEmpty() ? workingDirectory.getParentFile()
@@ -270,6 +254,20 @@ public final class LinuxFexBionicSession {
     private static File stage(Context context, String name) throws IOException {
         File file = LinuxSession.stageAsset(context, "linux-fex-bionic", name, "linux-fex-bionic/" + name);
         if (file == null) throw new IOException("Cannot stage Android FEX asset " + name);
+        // Debug builds only: Winlator/fex-bionic-override/<name> on shared storage (which cannot run programs, hence the copy) replaces the shipped file.
+        File override = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/fex-bionic-override/" + name);
+        if (override.isFile() && com.winlator.cmod.core.AppUtils.isDebugBuild(context)) {
+            File copy = new File(file.getParentFile(), name + "-override");
+            File stamp = new File(copy.getPath() + ".stamp");
+            String id = override.length() + ":" + override.lastModified();
+            if (!copy.isFile() || !stamp.isFile() || !id.equals(com.winlator.cmod.core.FileUtils.readString(stamp))) {
+                if (com.winlator.cmod.core.FileUtils.copy(override, copy)) {
+                    com.winlator.cmod.core.FileUtils.chmod(copy, 0755);
+                    com.winlator.cmod.core.FileUtils.writeString(stamp, id);
+                }
+            }
+            if (copy.isFile()) return copy;
+        }
         return file;
     }
 }
