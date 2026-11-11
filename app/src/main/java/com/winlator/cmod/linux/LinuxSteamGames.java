@@ -375,6 +375,7 @@ public final class LinuxSteamGames {
         try {
             Shortcut shortcut = new Shortcut(container, shortcutFile);
             boolean changed = false;
+            java.util.Map<String, String> executionMode = java.util.Collections.emptyMap();
             if (shortcut.getExtra("customCoverArtPath").isEmpty()) {
                 File art = findArt(new File(steamRoot(container), "appcache/librarycache/" + game.appId));
                 if (art != null) {
@@ -386,7 +387,7 @@ public final class LinuxSteamGames {
                 GameProfileCatalog.IndexEntry entry = GameProfileCatalog.bySteamAppId(context, game.appId);
                 if (entry != null) {
                     shortcut.putExtra(GameProfiles.EXTRA_PROFILE, entry.id);
-                    applyPreferredConfig(context, container, shortcut);
+                    executionMode = applyPreferredConfig(context, container, shortcut);
                     changed = true;
                 }
             }
@@ -394,6 +395,12 @@ public final class LinuxSteamGames {
                 shortcut.saveData();
                 // The profile was found only now: what it recommends is written into the shortcut, as at creation.
                 LinuxShortcutDefaults.applyProfile(context, container, shortcut);
+                // The execution mode (PRoot, bionic, direct FEX) belongs to the selected preset, not to the game's generic defaults
+                // (BeamNG's profile says linuxNoProot=0): as when the shortcut is added by hand, the preset's choice stays on top.
+                if (!executionMode.isEmpty()) {
+                    for (java.util.Map.Entry<String, String> entry : executionMode.entrySet()) shortcut.putExtra(entry.getKey(), entry.getValue());
+                    shortcut.saveData();
+                }
             }
         }
         catch (RuntimeException e) {
@@ -407,28 +414,34 @@ public final class LinuxSteamGames {
      * container does (Box64), which cannot start the native games that need FEX's root filesystem. The profile's own settings,
      * written afterwards, stay on top.
      */
-    private static void applyPreferredConfig(Context context, Container container, Shortcut shortcut) {
+    private static java.util.Map<String, String> applyPreferredConfig(Context context, Container container, Shortcut shortcut) {
+        java.util.Map<String, String> executionMode = new java.util.LinkedHashMap<>();
         GameProfiles.Effective effective = GameProfiles.resolve(context, container, shortcut);
-        if (effective == null || effective.version == null) return;
+        if (effective == null || effective.version == null) return executionMode;
         java.util.Map<String, ContainerConfigCatalog.Config> all = ContainerConfigCatalog.all(context, false);
         ConfigChooser.Choice choice = ConfigChooser.choose(effective.version, DeviceInfo.soc(context).family, all, GameProfile.Platform.LINUX);
         String configId = choice == null ? null : choice.configId;
         // A processor the presets were not made for still gets the profile's first one: Box64, the alternative, cannot start these games.
         if (configId == null) for (String id : effective.version.containers) if (all.containsKey(id)) { configId = id; break; }
-        if (configId == null) return;
+        if (configId == null) return executionMode;
         try {
             org.json.JSONObject data = new org.json.JSONObject(ContainerConfigCatalog.profileText(context, all.get(configId), false))
                     .getJSONObject("container");
             for (java.util.Map.Entry<String, String> entry : LinuxShortcutDefaults
                     .fromData(context, new com.winlator.cmod.container.ContainerManager(context), data).entrySet()) {
-                if (entry.getValue() != null && !entry.getValue().isEmpty() && !entry.getValue().contains("\n"))
+                if (entry.getValue() != null && !entry.getValue().isEmpty() && !entry.getValue().contains("\n")) {
                     shortcut.putExtra(entry.getKey(), entry.getValue());
+                    String key = entry.getKey();
+                    if (key.equals(LinuxSession.EXTRA_NO_PROOT) || key.equals(LinuxBionicSession.EXTRA) || key.equals(LinuxDirectFexBridge.EXTRA))
+                        executionMode.put(key, entry.getValue());
+                }
             }
             shortcut.putExtra("containerConfig", configId);
         }
         catch (org.json.JSONException | RuntimeException e) {
             LinuxFail.w(TAG, "Cannot apply the preferred container preset " + configId, e);
         }
+        return executionMode;
     }
 
     private static File findArt(File dir) {
