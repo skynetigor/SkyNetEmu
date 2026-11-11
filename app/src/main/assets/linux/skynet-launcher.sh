@@ -103,7 +103,8 @@ game_dir="$(dirname "${cmd[0]}")"
 if [ -f "${cmd[0]}" ]; then
     has32=""; has64=""
     for f in "${cmd[0]}" "$game_dir"/bin/*; do
-        [ -f "$f" ] && [ -x "$f" ] || continue
+        # No execute bit is required: on shared storage no file has one, and the ELF header below tells the executables apart.
+        [ -f "$f" ] || continue
         case "$f" in *.so|*.so.*) continue ;; esac
         case "$(od -An -tx1 -j0 -N5 "$f" 2>/dev/null | tr -d ' \n')" in
             7f454c4601) has32=1 ;;
