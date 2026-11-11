@@ -112,6 +112,26 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
         GAMES.put("391220", new Game("391220", "Rise of the Tomb Raider", "bin/RiseOfTheTombRaider", "RiseOfTheTombRaider.sh", false, feral,
                 "usr/lib/x86_64-linux-gnu/libgconf-2.so.4", "usr/lib/x86_64-linux-gnu/libdbus-glib-1.so.2"));
         GAMES.put("750920", new Game("750920", "Shadow of the Tomb Raider", "bin/ShadowOfTheTombRaider", "ShadowOfTheTombRaider.sh", true, feral));
+        // The game bundles OpenSSL 1.0, ICU 51 and curl; what the Ubuntu root filesystem lacks (libpcre 3, SDL2_image, libidn, librtmp, libldap
+        // and the Heimdal Kerberos stack under them) comes from the scout runtime.
+        GAMES.put("214490", new Game("214490", "Alien Isolation", "bin/AlienIsolation", "AlienIsolation.sh", true, Arrays.asList("lib/x86_64", "bin"),
+                "usr/lib/x86_64-linux-gnu/libSDL2_image-2.0.so.0",
+                "usr/lib/x86_64-linux-gnu/libasn1.so.8",
+                "usr/lib/x86_64-linux-gnu/libgssapi.so.3",
+                "usr/lib/x86_64-linux-gnu/libhcrypto.so.4",
+                "usr/lib/x86_64-linux-gnu/libheimbase.so.1",
+                "usr/lib/x86_64-linux-gnu/libheimntlm.so.0",
+                "usr/lib/x86_64-linux-gnu/libhogweed.so.4",
+                "usr/lib/x86_64-linux-gnu/libhx509.so.5",
+                "usr/lib/x86_64-linux-gnu/libidn.so.11",
+                "usr/lib/x86_64-linux-gnu/libkrb5.so.26",
+                "usr/lib/x86_64-linux-gnu/liblber-2.4.so.2",
+                "usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2",
+                "usr/lib/x86_64-linux-gnu/libnettle.so.6",
+                "lib/x86_64-linux-gnu/libpcre.so.3",
+                "usr/lib/x86_64-linux-gnu/libroken.so.18",
+                "usr/lib/x86_64-linux-gnu/librtmp.so.0",
+                "usr/lib/x86_64-linux-gnu/libwind.so.0"));
         GAMES.put("383150", new Game("383150", "DIDE", "DeadIslandGame", null, false, Arrays.asList(""),
                 "lib/x86_64-linux-gnu/libpng12.so.0", "usr/lib/x86_64-linux-gnu/libGLEW.so.1.10"));
         // cs2.sh (patched copy in the launcher) only sets these and starts the ELF from game/; SKY_MMAP32_GUARD is the shim's switch
@@ -303,7 +323,10 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     private LinuxSession.Launch prepare(Game game, List<String> command, Map<String, String> overrides)
             throws IOException, JSONException {
         File home = container.getLinuxHomeDir();
-        File gameRoot = new File(home, ".local/share/Steam/steamapps/common/" + game.folder);
+        // The game's folder in whichever Steam library holds it (the container's own, or one on shared storage).
+        LinuxSteamGames.Game installed = LinuxSteamGames.game(container, game.appId);
+        File gameRoot = installed != null ? LinuxSteamGames.installFolder(container, installed) : null;
+        if (gameRoot == null || !gameRoot.isDirectory()) gameRoot = new File(home, ".local/share/Steam/steamapps/common/" + game.folder);
         File executable = new File(gameRoot, game.executable).getCanonicalFile();
         File requested = LinuxSession.hostFile(environment.getContext(), container, command.get(0));
         if (requested == null || (!requested.getCanonicalFile().equals(executable)

@@ -339,8 +339,8 @@ EOF
 }
 sky_feral_launcher_state
 sky_feral_resolution
-if { [ "$app_id" = 391220 ] || [ "$app_id" = 750920 ] || [ "$app_id" = 383150 ] || [ "$app_id" = 730 ]; } && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
-    [ "$game32" != 1 ] || fail "Direct FEX supports only the native 64-bit ports it knows (Rise, Shadow, Dead Island, Counter-Strike 2)."
+if { [ "$app_id" = 391220 ] || [ "$app_id" = 750920 ] || [ "$app_id" = 383150 ] || [ "$app_id" = 730 ] || [ "$app_id" = 214490 ]; } && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
+    [ "$game32" != 1 ] || fail "Direct FEX supports only the native 64-bit ports it knows (Rise, Shadow, Dead Island, Counter-Strike 2, Alien: Isolation)."
     # The bridge starts the ELF itself (the start script only sets variables, which the bridge sets for this game).
     [ "$app_id" != 730 ] || [ -z "${cs2_root:-}" ] || cmd[0]="$cs2_root/bin/linuxsteamrt64/cs2"
     [ "${#sky_wrap[@]}" = 0 ] || fail "Direct FEX does not support command wrappers."
@@ -351,6 +351,13 @@ if { [ "$app_id" = 391220 ] || [ "$app_id" = 750920 ] || [ "$app_id" = 383150 ] 
     trap 'cancelled=1; kill -TERM "$game" 2>/dev/null' TERM INT
     wait "$game"
     exit $?
+fi
+# A start script on shared storage has no execute permission and the mount is noexec, so the kernel refuses to run it; its interpreter
+# only has to read it.
+if [ -f "${cmd[0]}" ] && [ ! -x "${cmd[0]}" ] && [ "$(head -c 2 "${cmd[0]}" 2>/dev/null)" = "#!" ]; then
+    sky_interpreter=$(head -n 1 "${cmd[0]}" | tr -d '\r' | sed -e 's/^#![[:space:]]*//')
+    # shellcheck disable=SC2206
+    cmd=($sky_interpreter "${cmd[@]}")
 fi
 [ "${#sky_wrap[@]}" -gt 0 ] && cmd=("${sky_wrap[@]}" "${cmd[@]}")
 [ "${#sky_args[@]}" -gt 0 ] && cmd=("${cmd[@]}" "${sky_args[@]}")

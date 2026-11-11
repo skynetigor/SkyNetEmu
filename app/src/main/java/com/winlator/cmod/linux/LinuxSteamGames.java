@@ -1,6 +1,7 @@
 package com.winlator.cmod.linux;
 
 import android.content.Context;
+import android.os.Environment;
 import android.util.Log;
 
 import com.winlator.cmod.container.Container;
@@ -17,6 +18,7 @@ import com.winlator.cmod.gameprofile.GameProfiles;
 import java.io.File;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -50,9 +52,9 @@ public final class LinuxSteamGames {
         public final String installDir;
         /** Steam's build id of the installed version (it only grows); -1 when the manifest has none. */
         public final long buildId;
-        /** The library the game is in, as the host sees it: the container's own Steam folder or the shared library. */
+        /** The library the game is in, as the host sees it: the container's own Steam folder, the old shared library or another library Steam lists. */
         public final File library;
-        /** Where that library is for the guest (the shared library is at the same path on both sides). */
+        /** Where that library is for the guest (a folder on shared storage is /sdcard/... there). */
         public final String libraryGuest;
 
         Game(String appId, String name, String installDir, long buildId, File library, String libraryGuest) {
@@ -88,7 +90,38 @@ public final class LinuxSteamGames {
         readLibrary(games, steamRoot(container), OWN_LIBRARY_GUEST);
         File shared = sharedLibrary(container);
         readLibrary(games, shared, shared.getPath());
+        for (Map.Entry<String, File> extra : registeredLibraries(container).entrySet()) readLibrary(games, extra.getValue(), extra.getKey());
         return games;
+    }
+
+    /**
+     * The other libraries Steam lists in steamapps/libraryfolders.vdf (a folder added in its Storage settings, on shared storage
+     * for one), by the path the guest uses; the value is where the host sees that folder.
+     */
+    private static Map<String, File> registeredLibraries(Container container) {
+        Map<String, File> libraries = new LinkedHashMap<>();
+        String text = FileUtils.readString(new File(steamRoot(container), "steamapps/libraryfolders.vdf"));
+        if (text == null) return libraries;
+        Matcher matcher = PAIR.matcher(text);
+        while (matcher.find()) {
+            if (!matcher.group(1).equalsIgnoreCase("path")) continue;
+            String guest = matcher.group(2).trim();
+            while (guest.length() > 1 && guest.endsWith("/")) guest = guest.substring(0, guest.length() - 1);
+            if (guest.isEmpty() || guest.equals(OWN_LIBRARY_GUEST)) continue;
+            File host = hostOfLibrary(container, guest);
+            if (host != null) libraries.putIfAbsent(guest, host);
+        }
+        return libraries;
+    }
+
+    /** A library path as the guest names it, on the host: shared storage is bound at /sdcard, the home at /root. */
+    private static File hostOfLibrary(Container container, String guest) {
+        String shared = Environment.getExternalStorageDirectory().getPath();
+        for (String prefix : new String[]{"/sdcard", "/storage/self/primary", "/storage/emulated/0"}) {
+            if (guest.equals(prefix) || guest.startsWith(prefix + "/")) return new File(shared + guest.substring(prefix.length()));
+        }
+        if (guest.startsWith("/root/")) return new File(container.getLinuxHomeDir(), guest.substring("/root/".length()));
+        return guest.startsWith("/") ? new File(guest) : null;
     }
 
     private static void readLibrary(Map<String, Game> games, File library, String libraryGuest) {
