@@ -96,6 +96,12 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         Context context = environment.getContext();
         ImageFs imageFs = environment.getImageFs();
         com.winlator.cmod.linux.LinuxStagingCleanup.schedule(context);
+        try {
+            // Steam only knows the libraries it lists: a library of games on shared storage is listed again after a fresh install.
+            if (com.winlator.cmod.steam.SteamContainer.isManaged(container)) com.winlator.cmod.linux.LinuxSteamGames.registerSharedLibraries(container);
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Cannot list the Steam libraries on shared storage", error);
+        }
         startedAt = System.currentTimeMillis();
         phase = "waiting_xserver";
         startupStage(phase);

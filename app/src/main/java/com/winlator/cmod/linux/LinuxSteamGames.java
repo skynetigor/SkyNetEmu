@@ -83,6 +83,11 @@ public final class LinuxSteamGames {
         return new File(container.getLinuxHomeDir(), ".local/share/Steam");
     }
 
+    /** Lists the Steam libraries on shared storage in this container's Steam, before it starts (see {@link #registerLibrariesIn}). */
+    public static void registerSharedLibraries(Container container) {
+        registerLibrariesIn(SteamPaths.GAMES_ROOT, steamRoot(container));
+    }
+
     /** The games Steam has installed, by app id. */
     public static Map<String, Game> installed(Container container) {
         Map<String, Game> games = new HashMap<>();
@@ -221,6 +226,87 @@ public final class LinuxSteamGames {
         }
         if (depth != 0) throw new IllegalArgumentException("Unbalanced Steam library registrations");
         return result.append(text, copied, text.length()).toString();
+    }
+
+    /** Where shared storage is for the guest: the app binds it at /sdcard. */
+    private static final String SHARED_GUEST_ROOT = "/sdcard/SkyNetEmu/Games";
+
+    /** What Steam writes for a fresh install: only its own library. */
+    private static final String DEFAULT_LIBRARIES = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"" + OWN_LIBRARY_GUEST + "\"\n\t\t\"label\"\t\t\"\"\n"
+            + "\t\t\"contentid\"\t\t\"0\"\n\t\t\"totalsize\"\t\t\"0\"\n\t\t\"apps\"\n\t\t{\n\t\t}\n\t}\n}\n";
+
+    /**
+     * The library registrations with another library added at the next free number, or unchanged when a library with that path is
+     * already listed. Steam keeps them in steamapps/libraryfolders.vdf and only knows the libraries named there.
+     */
+    static String withLibrary(String text, String path, String contentId) {
+        Matcher tokens = Pattern.compile("\"(?:\\\\.|[^\"\\\\])*\"|[{}]|//[^\\r\\n]*").matcher(text);
+        int depth = 0, next = 0, rootEnd = -1;
+        String previous = "";
+        while (tokens.find()) {
+            String token = tokens.group();
+            if (token.startsWith("//")) continue;
+            if (token.equals("{")) {
+                depth++;
+            } else if (token.equals("}")) {
+                if (--depth < 0) throw new IllegalArgumentException("Unbalanced Steam library registrations");
+                if (depth == 0) rootEnd = tokens.start();
+            } else {
+                if (depth == 1 && token.matches("\"\\d{1,9}\"")) next = Math.max(next, Integer.parseInt(token.substring(1, token.length() - 1)) + 1);
+                if (depth == 2 && previous.equals("\"path\"") && token.equals("\"" + path + "\"")) return text;
+            }
+            previous = token;
+        }
+        if (depth != 0 || rootEnd < 0) throw new IllegalArgumentException("Unbalanced Steam library registrations");
+        String entry = "\t\"" + next + "\"\n\t{\n\t\t\"path\"\t\t\"" + path + "\"\n\t\t\"label\"\t\t\"\"\n\t\t\"contentid\"\t\t\"" + contentId + "\"\n"
+                + "\t\t\"totalsize\"\t\t\"0\"\n\t\t\"update_clean_bytes_tally\"\t\t\"0\"\n\t\t\"time_last_update_verified\"\t\t\"0\"\n"
+                + "\t\t\"apps\"\n\t\t{\n\t\t}\n\t}\n";
+        return text.substring(0, rootEnd) + entry + text.substring(rootEnd);
+    }
+
+    /** The content id Steam keeps in a library's own libraryfolder.vdf ("0" when there is none), so that Steam recognises the library it made. */
+    static String contentIdOf(String libraryFolderVdf) {
+        if (libraryFolderVdf == null) return "0";
+        Matcher matcher = Pattern.compile("\"contentid\"\\s+\"(\\d+)\"").matcher(libraryFolderVdf);
+        return matcher.find() ? matcher.group(1) : "0";
+    }
+
+    /**
+     * Lists the Steam libraries that sit in a folder of shared storage (each folder with a steamapps folder in it) in Steam's own registrations,
+     * so that a fresh install finds the games that are already there instead of offering to download them again.
+     */
+    static void registerLibrariesIn(File gamesRoot, File steamRoot) {
+        File[] folders = gamesRoot.listFiles(File::isDirectory);
+        if (folders == null) return;
+        java.util.Arrays.sort(folders);
+        File list = new File(steamRoot, "steamapps/libraryfolders.vdf");
+        String text;
+        if (list.isFile()) {
+            text = FileUtils.readString(list);
+            if (text == null) {
+                Log.w(TAG, "Cannot read Steam library registrations");
+                return;
+            }
+        } else if (steamRoot.isDirectory()) {
+            text = DEFAULT_LIBRARIES;
+        } else {
+            return;
+        }
+        String updated = text;
+        for (File folder : folders) {
+            String name = folder.getName();
+            if (!new File(folder, "steamapps").isDirectory() || name.indexOf('"') >= 0 || name.indexOf('\\') >= 0) continue;
+            File marker = new File(folder, "libraryfolder.vdf");
+            try {
+                updated = withLibrary(updated, SHARED_GUEST_ROOT + "/" + name, contentIdOf(marker.isFile() ? FileUtils.readString(marker) : null));
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Cannot add a Steam library to malformed registrations", e);
+                return;
+            }
+        }
+        if (updated.equals(list.isFile() ? text : "")) return;
+        list.getParentFile().mkdirs();
+        FileUtils.writeString(list, updated);
     }
 
     public static int count(Container container) {
