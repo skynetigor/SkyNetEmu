@@ -282,8 +282,8 @@ androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         variant.applicationId.set(releaseAppId)
         variant.outputs.each { output ->
-            output.versionCode.set(providers.gradleProperty("buildVersionCode").map { it.toInteger() }.orElse(2))
-            output.versionName.set(providers.gradleProperty("buildVersionName").orElse("0.1.1")
+            output.versionCode.set(providers.gradleProperty("buildVersionCode").map { it.toInteger() }.orElse(3))
+            output.versionName.set(providers.gradleProperty("buildVersionName").orElse("0.2.0")
                     .zip(buildCommit) { version, commit -> "${version}-stable+${commit}" })
         }
     }
