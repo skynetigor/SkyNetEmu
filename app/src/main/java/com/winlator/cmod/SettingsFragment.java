@@ -504,7 +504,7 @@ public class SettingsFragment extends Fragment {
             default: source = "not available"; break;
         }
         String when = result.time > 0 ? " · " + android.text.format.DateUtils.getRelativeTimeSpanString(result.time) : "";
-        return "Registry branch " + com.winlator.cmod.contents.RegistryCache.branch() + " · " + source + when;
+        return "Registry ref " + com.winlator.cmod.contents.RegistryCache.branch() + " · " + source + when;
     }
 
     private void registerFolderSelection(String preferenceKey, int legacyLabelId) {

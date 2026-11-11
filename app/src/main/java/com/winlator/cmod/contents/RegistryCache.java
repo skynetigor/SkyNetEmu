@@ -20,7 +20,7 @@ import java.util.Map;
  *
  * One lookup goes: the network (when it is allowed: always asked, never trusted to an old copy), then the copy in memory,
  * the copy on disk and the copy bundled in the app (assets/registry). A download is kept only when it parses as JSON, and is written through a temporary file so a
- * dropped connection never leaves half a file. The disk copies are per branch of the components repository (debug builds
+ * dropped connection never leaves half a file. The disk copies are per ref (tag or branch) of the components repository (debug builds
  * read the branch that carries the app's name), so switching branches never serves the other one's files.
  */
 public final class RegistryCache {
@@ -29,6 +29,9 @@ public final class RegistryCache {
     private static final String ASSET_DIR = "registry/";
     /** Where the registry lives in the components repository. */
     private static final String REMOTE_DIR = "registry/";
+    /** The components repository at the registry's ref: a release build reads the tag of its version, a debug build its branch (never main for a release). */
+    private static final String REGISTRY_BASE =
+            "https://raw.githubusercontent.com/skynetigor/winlator-skynet-components/" + BuildConfig.REGISTRY_REF + "/";
 
     public static final long TTL_INDEX = 6L * 60 * 60 * 1000;
     public static final long TTL_GAME = 24L * 60 * 60 * 1000;
@@ -90,7 +93,7 @@ public final class RegistryCache {
             // The network is asked outside the lock: a lookup that never waits (a game starting) must not queue behind a download.
             // The Linux catalog is at the repository root; its bundled copy still lives in assets/registry/.
             String remotePath = "linux.json".equals(relPath) ? relPath : REMOTE_DIR + relPath;
-            String text = Downloader.downloadString(ContentsManager.COMPONENTS_BASE + remotePath);
+            String text = Downloader.downloadString(REGISTRY_BASE + remotePath);
             if (text != null && isJson(text)) {
                 synchronized (LOCK) {
                     long now = System.currentTimeMillis();
@@ -167,7 +170,7 @@ public final class RegistryCache {
     }
 
     public static String branch() {
-        return BuildConfig.COMPONENTS_BRANCH;
+        return BuildConfig.REGISTRY_REF;
     }
 
     private static Result remember(String relPath, Result result, boolean keep) {
@@ -181,7 +184,7 @@ public final class RegistryCache {
     }
 
     private static File file(Context context, String relPath) {
-        return new File(new File(new File(context.getFilesDir(), DIR), safe(BuildConfig.COMPONENTS_BRANCH)), relPath);
+        return new File(new File(new File(context.getFilesDir(), DIR), safe(BuildConfig.REGISTRY_REF)), relPath);
     }
 
     private static String safe(String branch) {
