@@ -33,7 +33,8 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
     private static final List<String> VARIABLES = Arrays.asList(
             "FEX_TSOENABLED", "FEX_VECTORTSOENABLED", "FEX_MEMCPYSETTSOENABLED",
             "FEX_HALFBARRIERTSOENABLED", "FEX_X87REDUCEDPRECISION", "FEX_MULTIBLOCK",
-            "FEX_DYNAMICL1CACHE", "TU_DEBUG", "MESA_VK_WSI_DEBUG", "LD_LIBRARY_PATH");
+            "FEX_DYNAMICL1CACHE", "FEX_SMCCHECKS", "FEX_DISABLEL2CACHE", "FEX_DYNAMICL1CACHEINCREASECOUNTHEURISTIC", "FEX_DYNAMICL1CACHEDECREASECOUNTHEURISTIC",
+            "TU_DEBUG", "MESA_VK_WSI_DEBUG", "LD_LIBRARY_PATH");
     /** A Steam game this bridge may start: its install folder, its x86-64 executable and what it needs around it. */
     private static final class Game {
         final String appId, folder;
