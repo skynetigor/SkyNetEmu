@@ -95,6 +95,8 @@ public class WinHandler {
             @Override
             public void onInputDeviceRemoved(int deviceId) {
                 releaseSlot(deviceId);
+                // The on-screen pad had been part of that controller: it gets a pad of its own again.
+                if (activity.getInputControlsView() != null) sendGamepadState();
             }
 
             @Override
@@ -584,35 +586,84 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
                 && activity.getInputControlsView().isShowTouchscreenControls();
 
         if (useVirtualGamepad) {
+            // With a physical controller connected the on-screen pad is part of it (one pad for the game, player 1), not a second pad:
+            // a game binds its menus and controls to the first controller only, so a pad of its own would be ignored.
+            ExternalController physical = firstPhysicalController();
+            if (physical != null) {
+                releaseSlot(OSC_DEVICE_ID);
+                writeControllerState(physical);
+                return;
+            }
             int slot = assignSlot(OSC_DEVICE_ID);
             if (slot >= 0 && writers[slot] != null) {
                 writers[slot].writeGamepadState(gamepadState);
             }
         } else {
             releaseSlot(OSC_DEVICE_ID);
+            // The physical controller's state goes out as it is again, without the on-screen pad mixed in.
+            ExternalController physical = firstPhysicalController();
+            if (physical != null) writeControllerState(physical);
         }
 
+    }
+
+    /** The physical controller of the lowest slot, or null when none is connected (the on-screen pad is not counted). */
+    private ExternalController firstPhysicalController() {
+        int bestSlot = Integer.MAX_VALUE;
+        ExternalController best = null;
+        for (Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
+            if (entry.getKey() == OSC_DEVICE_ID) continue;
+            ExternalController controller = controllers.get(entry.getKey());
+            if (controller != null && entry.getValue() < bestSlot) {
+                bestSlot = entry.getValue();
+                best = controller;
+            }
+        }
+        return best;
+    }
+
+    /** The state a physical controller sends: its own, mixed with the on-screen pad's when that is shown and this is the first controller. */
+    private GamepadState stateOf(ExternalController controller) {
+        GamepadState own = controller.state;
+        ControlsProfile profile = activity.getInputControlsView().getProfile();
+        if (profile != null) {
+            ExternalController profileController = profile.getController(controller.getDeviceId());
+            if (profileController != null && profileController.getControllerBindingCount() > 0) own = controller.remappedState;
+        }
+        if (profile == null || !profile.isVirtualGamepad() || !activity.getInputControlsView().isShowTouchscreenControls()
+                || firstPhysicalController() != controller) return own;
+        return mix(own, profile.getGamepadState());
+    }
+
+    private static GamepadState mix(GamepadState a, GamepadState b) {
+        GamepadState mixed = new GamepadState();
+        mixed.copy(a);
+        mixed.buttons |= b.buttons;
+        for (int i = 0; i < 4; i++) mixed.dpad[i] |= b.dpad[i];
+        mixed.thumbLX = Math.abs(b.thumbLX) > Math.abs(a.thumbLX) ? b.thumbLX : a.thumbLX;
+        mixed.thumbLY = Math.abs(b.thumbLY) > Math.abs(a.thumbLY) ? b.thumbLY : a.thumbLY;
+        mixed.thumbRX = Math.abs(b.thumbRX) > Math.abs(a.thumbRX) ? b.thumbRX : a.thumbRX;
+        mixed.thumbRY = Math.abs(b.thumbRY) > Math.abs(a.thumbRY) ? b.thumbRY : a.thumbRY;
+        mixed.triggerL = Math.max(a.triggerL, b.triggerL);
+        mixed.triggerR = Math.max(a.triggerR, b.triggerR);
+        return mixed;
+    }
+
+    private void writeControllerState(ExternalController controller) {
+        int slot = assignSlot(controller.getDeviceId());
+        if (slot >= 0 && writers[slot] != null) writers[slot].writeGamepadState(stateOf(controller));
     }
 
     public synchronized void sendGamepadState(ExternalController controller) {
         if (controller == null)
             return;
 
-        ControlsProfile profile = activity.getInputControlsView().getProfile();
-        if (profile != null) {
-            ExternalController profileController = profile.getController(controller.getDeviceId());
-            if (profileController != null && profileController.getControllerBindingCount() > 0) {
-                int slot = assignSlot(controller.getDeviceId());
-                if (slot >= 0 && writers[slot] != null) {
-                    writers[slot].writeGamepadState(controller.remappedState);
-                }
-                return;
-            }
-        }
-
-        int slot = assignSlot(controller.getDeviceId());
-        if (slot >= 0 && writers[slot] != null) {
-            writers[slot].writeGamepadState(controller.state);
+        // A controller that appears while the on-screen pad holds a slot takes over that pad's place: the game sees one pad.
+        boolean first = !deviceToSlot.containsKey(controller.getDeviceId());
+        writeControllerState(controller);
+        if (first && deviceToSlot.containsKey(OSC_DEVICE_ID)) {
+            releaseSlot(OSC_DEVICE_ID);
+            sendGamepadState();
         }
     }
 
