@@ -206,7 +206,7 @@ android {
             buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
             // Game profiles and the other registry/ files come from the tag of this version in the components repository, never from main:
             // a later change to main cannot alter what an installed release reads. -PregistryRef=<tag or branch> selects another one.
-            buildConfigField 'String', 'REGISTRY_REF', "\"${providers.gradleProperty('registryRef').getOrElse('v' + providers.gradleProperty('buildVersionName').getOrElse('0.2.0'))}\""
+            buildConfigField 'String', 'REGISTRY_REF', "\"${providers.gradleProperty('registryRef').getOrElse('v' + providers.gradleProperty('buildVersionName').getOrElse('0.2.1'))}\""
             buildConfigField 'boolean', 'LINUX_TEST_PROGRAMS', 'false'
             minifyEnabled false
             signingConfig signingConfigs.findByName('production')
@@ -286,8 +286,8 @@ androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         variant.applicationId.set(releaseAppId)
         variant.outputs.each { output ->
-            output.versionCode.set(providers.gradleProperty("buildVersionCode").map { it.toInteger() }.orElse(3))
-            output.versionName.set(providers.gradleProperty("buildVersionName").orElse("0.2.0")
+            output.versionCode.set(providers.gradleProperty("buildVersionCode").map { it.toInteger() }.orElse(4))
+            output.versionName.set(providers.gradleProperty("buildVersionName").orElse("0.2.1")
                     .zip(buildCommit) { version, commit -> "${version}-stable+${commit}" })
         }
     }
