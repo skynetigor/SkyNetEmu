@@ -64,7 +64,9 @@ public class FEXCorePresetManager {
             envVars.put("FEX_DYNAMICL1CACHE", "1");
             envVars.put("FEX_DISABLEL2CACHE", "0");
         }
-        // Extreme: Performance with self-modifying-code checks off and the lookup caches tuned (as in Ludashi Plus and DroidDeck). JIT games and DRM may break.
+        // Extreme: Performance with self-modifying-code checks off (FEX_SMCCHECKS=none), the L2 lookup cache off and the L1 cache sized dynamically,
+        // as in Ludashi Plus and DroidDeck. Games that rewrite their own code (JIT, DRM) may hang or crash: BeamNG hung in 2 of 3 West Coast runs
+        // and crashed once at start-up on Downhill with it; without the code checks it runs without such failures.
         else if (id.equals(FEXCorePreset.EXTREME)) {
             envVars.put("FEX_TSOENABLED", "0");
             envVars.put("FEX_VECTORTSOENABLED", "0");
