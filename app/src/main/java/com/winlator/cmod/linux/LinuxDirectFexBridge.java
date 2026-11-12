@@ -376,17 +376,30 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
             link(new File(legacy, name), source);
         }
         // The game ships its own older FreeType/pango; the root filesystem's newer harfbuzz and friends need symbols that FreeType lacks.
-        // The sniper runtime's versions go on the library path after the game's own folders.
+        // The sniper runtime's versions go on the library path after the game's own folders. Steam installs that runtime only for games
+        // that ask for it through their compatibility tool, which the app's own tool does not, so without it the app's bundled copies of
+        // the same Debian 11 libraries are used (assets/linux/sniper-fontlibs): without them the game's Panorama text library fails to
+        // load and the game stops with "A game file appears to be missing or corrupted".
         String sniperPath = "";
         if (!game.sniperLibraries.isEmpty()) {
             File[] runtimes = new File(steam, "steamapps/common/SteamLinuxRuntime_sniper").listFiles((dir, name) -> name.startsWith("sniper_platform_"));
             File fonts = new File(directory, "sniper-" + game.appId);
             Files.createDirectories(fonts.toPath());
-            if (runtimes != null) for (File runtime : runtimes) {
-                File libDir = new File(runtime, "files/lib/x86_64-linux-gnu");
-                for (String name : game.sniperLibraries) {
-                    File[] versions = libDir.listFiles((dir, file) -> file.startsWith(name + "."));
-                    if (versions != null && versions.length > 0) link(new File(fonts, name), versions[0]);
+            for (String name : game.sniperLibraries) {
+                File target = null;
+                if (runtimes != null) for (File runtime : runtimes) {
+                    File[] versions = new File(runtime, "files/lib/x86_64-linux-gnu").listFiles((dir, file) -> file.startsWith(name + "."));
+                    if (versions != null && versions.length > 0) target = versions[0];
+                }
+                File path = new File(fonts, name);
+                if (target != null) {
+                    if (!Files.isSymbolicLink(path.toPath())) Files.deleteIfExists(path.toPath());
+                    link(path, target);
+                } else {
+                    if (Files.isSymbolicLink(path.toPath())) Files.delete(path.toPath());
+                    if (LinuxSession.stageAsset(environment.getContext(), "linux-session/direct-fex/sniper-" + game.appId, name,
+                            "linux/sniper-fontlibs/" + name) == null)
+                        throw new IOException("Cannot prepare the font library " + name);
                 }
             }
             sniperPath = ":" + fonts;
