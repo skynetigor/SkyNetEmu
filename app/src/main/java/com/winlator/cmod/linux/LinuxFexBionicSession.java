@@ -100,6 +100,20 @@ public final class LinuxFexBionicSession {
             if (key.startsWith("FEX_") || key.startsWith("TU_") || key.startsWith("MESA_") || key.equals(key.toLowerCase(java.util.Locale.ROOT)))
                 nativeEnv.put(key, value);
         });
+        // Debugging: KEY=value lines of Winlator/fex-host.env go to the FEX host process only (the one that loads Turnip), not
+        // to the guest, so Mesa's GPU tracing (MESA_GPU_TRACES) does not reach the game's CEF helpers. Local development builds
+        // only: any app that can write shared storage could otherwise put an LD_PRELOAD into the game's host process.
+        File hostExtra = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/fex-host.env");
+        if (com.winlator.cmod.BuildConfig.LINUX_TEST_PROGRAMS && hostExtra.isFile()) {
+            for (String line : new String(Files.readAllBytes(hostExtra.toPath()), StandardCharsets.UTF_8).split("\n")) {
+                int eq = line.indexOf('=');
+                if (eq <= 0 || line.startsWith("#")) continue;
+                String key = line.substring(0, eq).trim(), value = line.substring(eq + 1).trim();
+                // LD_PRELOAD is added to the preloads above, not put in their place
+                if ("LD_PRELOAD".equals(key) && nativeEnv.has(key)) value = nativeEnv.get(key) + ":" + value;
+                nativeEnv.put(key, value);
+            }
+        }
         nativeEnv.put("FEX_APP_CONFIG", configFile.getPath());
         nativeEnv.put("FEX_ROOTFS", rootfs.dir.getPath());
         if (appId != null) {
