@@ -94,8 +94,10 @@ public final class LinuxFexBionicSession {
         }
         if (!hostPreloads.isEmpty()) nativeEnv.put("LD_PRELOAD", String.join(":", hostPreloads));
         nativeEnv.put("LD_LIBRARY_PATH", platformTlsDirectory(directory).getPath() + ":" + nativeEnv.get("LD_LIBRARY_PATH"));
+        // Lower-case names are Mesa driconf options (tu_allow_concurrent_binning, disable_conservative_lrz, ...), which Mesa
+        // also reads from the environment.
         guestEnv.forEach((key, value) -> {
-            if (key.startsWith("FEX_") || key.startsWith("TU_") || key.startsWith("MESA_"))
+            if (key.startsWith("FEX_") || key.startsWith("TU_") || key.startsWith("MESA_") || key.equals(key.toLowerCase(java.util.Locale.ROOT)))
                 nativeEnv.put(key, value);
         });
         nativeEnv.put("FEX_APP_CONFIG", configFile.getPath());
