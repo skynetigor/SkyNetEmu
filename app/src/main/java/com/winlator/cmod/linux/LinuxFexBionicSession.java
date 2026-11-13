@@ -83,7 +83,16 @@ public final class LinuxFexBionicSession {
         Files.write(configFile.toPath(), config.toString().getBytes(StandardCharsets.UTF_8));
         nativeEnv.remove("LD_PRELOAD");
         // Libraries for the FEX process itself (the guest gets its own LD_PRELOAD through FEX's config).
-        if (guestEnv.containsKey(HOST_PRELOAD)) nativeEnv.put("LD_PRELOAD", guestEnv.get(HOST_PRELOAD));
+        List<String> hostPreloads = new ArrayList<>();
+        if (guestEnv.containsKey(HOST_PRELOAD)) hostPreloads.add(guestEnv.get(HOST_PRELOAD));
+        // A system call Android's seccomp filter refuses answers ENOSYS instead of killing the process, and its number is logged to
+        // Winlator/logs/sigsys.log (the filter differs between Android versions; see tools/linux-shim/sigsys.c).
+        File sigsys = LinuxSession.stageAsset(context, "linux-shim", "libskysigsys.so");
+        if (sigsys != null) {
+            hostPreloads.add(sigsys.getPath());
+            nativeEnv.put("SKY_SIGSYS_LOG", new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/logs/sigsys.log").getPath());
+        }
+        if (!hostPreloads.isEmpty()) nativeEnv.put("LD_PRELOAD", String.join(":", hostPreloads));
         nativeEnv.put("LD_LIBRARY_PATH", platformTlsDirectory(directory).getPath() + ":" + nativeEnv.get("LD_LIBRARY_PATH"));
         guestEnv.forEach((key, value) -> {
             if (key.startsWith("FEX_") || key.startsWith("TU_") || key.startsWith("MESA_"))
