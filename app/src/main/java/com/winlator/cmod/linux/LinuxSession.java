@@ -912,7 +912,7 @@ public final class LinuxSession {
         env.put("SKY_STEAM_GPU", "0".equals(container.getExtra(EXTRA_STEAM_GPU)) ? "0" : "1");
 
         // Turnip: an imported Linux driver, or the one the runtime ships.
-        String driverId = container.getExtra(LinuxDriverManager.EXTRA_DRIVER);
+        String driverId = LinuxDriverManager.resolve(context, container.getExtra(LinuxDriverManager.EXTRA_DRIVER));
         if (!driverId.isEmpty() && LinuxDriverManager.isInstalled(context, driverId)) {
             String icd = LinuxDriverManager.icdFile(context, driverId).getPath();
             env.put("VK_DRIVER_FILES", icd);

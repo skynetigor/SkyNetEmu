@@ -33,6 +33,8 @@ public final class LinuxDriverManager {
     private static final String ICD = "icd.json";
     private static final String META = "meta.json";
     public static final String EXTRA_DRIVER = "linuxVulkanDriver";
+    /** The driver value a container config gives to have the one mapped to this device's GPU (linux.json steam.driverByGpu). */
+    public static final String AUTO = "auto";
 
     public static final class Installed {
         public final String id;
@@ -62,6 +64,11 @@ public final class LinuxDriverManager {
     }
 
     private LinuxDriverManager() {}
+
+    /** The driver {@link #AUTO} stands for on this device; any other value as it is. Reads the cached or bundled catalog only. */
+    public static String resolve(Context context, String id) {
+        return AUTO.equals(id) ? com.winlator.cmod.steam.SteamContainer.defaults(context, false).driver : id;
+    }
 
     public static File driversDir(Context context) {
         return new File(context.getFilesDir(), "linux-drivers");

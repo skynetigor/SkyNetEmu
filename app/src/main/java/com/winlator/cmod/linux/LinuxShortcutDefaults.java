@@ -88,7 +88,9 @@ public final class LinuxShortcutDefaults {
         values.put(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU, off(container, LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU));
         values.put(LinuxProot.EXTRA, container.getExtra(LinuxProot.EXTRA, "runtime"));
         // Empty: the driver the Linux runtime brings. The container names no other one, so neither does the shortcut.
-        values.put(LinuxDriverManager.EXTRA_DRIVER, container.getExtra(LinuxDriverManager.EXTRA_DRIVER));
+        // "auto" (a config made for every device): the one mapped to this device's GPU.
+        values.put(LinuxDriverManager.EXTRA_DRIVER,
+                LinuxDriverManager.resolve(context, container.getExtra(LinuxDriverManager.EXTRA_DRIVER)));
         values.put(LinuxSession.EXTRA_GL_DRIVER,
                 "zink".equals(container.getExtra(LinuxSession.EXTRA_GL_DRIVER)) ? "zink" : "software");
         values.put(LinuxSession.EXTRA_VULKAN_PRESENT,

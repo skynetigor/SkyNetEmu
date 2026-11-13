@@ -71,6 +71,18 @@ public final class ContainerImporter {
         public final List<String> unavailable = new ArrayList<>();
     }
 
+    /** Replaces an "auto" Turnip driver with the one for this device's GPU, so one config suits every phone. */
+    private static void resolveAutoDriver(Context context, JSONObject extra) {
+        String key = com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER;
+        String driver = extra.optString(key, "");
+        if (!com.winlator.cmod.linux.LinuxDriverManager.AUTO.equals(driver)) return;
+        try {
+            extra.put(key, com.winlator.cmod.linux.LinuxDriverManager.resolve(context, driver));
+        } catch (org.json.JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /**
      * The runtime, Turnip driver and x86 emulator a Linux container names that are not installed here, looked up in the
      * catalogs. Blocking (reads them from the network); call off the main thread. Nothing is installed.
@@ -79,6 +91,7 @@ public final class ContainerImporter {
         LinuxPlan plan = new LinuxPlan();
         JSONObject extra = data.optJSONObject("extraData");
         if (extra == null) extra = new JSONObject();
+        resolveAutoDriver(context, extra);
 
         String runtime = data.optString("linuxRuntime", "");
         if (runtime.isEmpty() || !com.winlator.cmod.linux.LinuxRuntime.isInstalled(context, runtime)) {
@@ -321,7 +334,8 @@ public final class ContainerImporter {
         String config = data.optString("graphicsDriverConfig", "");
         if (config.isEmpty()) return;
         String driverId = ContainerProfile.readConfigValue(config, "version", ';');
-        if (driverId.isEmpty() || "System".equalsIgnoreCase(driverId)) return;
+        if (driverId.isEmpty() || "System".equalsIgnoreCase(driverId)
+                || com.winlator.cmod.contents.RendererDriverCatalog.AUTO.equalsIgnoreCase(driverId)) return;
 
         AdrenotoolsManager adreno = new AdrenotoolsManager(context);
         if (driverAvailable(adreno, driverId)) return;
@@ -606,6 +620,7 @@ public final class ContainerImporter {
             extra.remove("linuxSteam");
             extra.remove("linuxSteamBigPicture");
 
+            resolveAutoDriver(context, extra);
             String driver = extra.optString(com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER, "");
             if (!driver.isEmpty() && !com.winlator.cmod.linux.LinuxDriverManager.isInstalled(context, driver)) {
                 extra.put(com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER, "");

@@ -3500,6 +3500,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void extractGraphicsDriverFiles() {
         String adrenoToolsDriverId = graphicsDriverConfig.get("version");
+        // "auto": the AdrenoTools driver the renderer catalog maps to this device's GPU (System when none is mapped), so one
+        // container config suits every phone.
+        if (com.winlator.cmod.contents.RendererDriverCatalog.AUTO.equalsIgnoreCase(adrenoToolsDriverId)) {
+            String resolved = com.winlator.cmod.contents.RendererDriverCatalog.resolve(getApplicationContext(),
+                    com.winlator.cmod.contents.RendererDriverCatalog.AUTO, false, preloaderDialog::setStatusText);
+            adrenoToolsDriverId = "system".equalsIgnoreCase(resolved) ? "System" : resolved;
+            graphicsDriverConfig.put("version", adrenoToolsDriverId);
+            Log.i("GraphicsDriverExtraction", "requested=auto selected=" + adrenoToolsDriverId);
+        }
 
         Log.d("GraphicsDriverExtraction", "Adrenotools DriverID: " + adrenoToolsDriverId);
 
