@@ -28,6 +28,34 @@ public final class ContainerProfile {
     public static final int VERSION = 1;
     public static final String EXTENSION = "wcfg";
 
+    /** The largest profile file read, in characters: a profile is a few kilobytes of JSON (the bundled ones about 3 KB). */
+    public static final int MAX_FILE_CHARS = 2 * 1024 * 1024;
+
+    /** A picked profile file that is larger than {@link #MAX_FILE_CHARS}. */
+    public static final class TooLargeException extends java.io.IOException {
+        public TooLargeException() {
+            super("This file is too large to be a container profile");
+        }
+    }
+
+    /**
+     * Reads a picked profile file, at most {@link #MAX_FILE_CHARS} of it: reading a big file picked by mistake whole ran the app
+     * out of memory (a 268 MB one did). Null when the file cannot be opened.
+     */
+    public static String readFile(Context context, android.net.Uri uri) throws java.io.IOException {
+        java.io.InputStream input = context.getContentResolver().openInputStream(uri);
+        if (input == null) return null;
+        try (java.io.Reader reader = new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8)) {
+            char[] buffer = new char[8192];
+            StringBuilder text = new StringBuilder();
+            for (int read; (read = reader.read(buffer)) >= 0; ) {
+                text.append(buffer, 0, read);
+                if (text.length() > MAX_FILE_CHARS) throw new TooLargeException();
+            }
+            return text.toString();
+        }
+    }
+
     /** Device-specific fields dropped on export; importers fall back to local defaults. */
     private static final String[] EXCLUDED_FIELDS = {"id", "drives"};
 

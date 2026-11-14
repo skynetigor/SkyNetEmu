@@ -116,16 +116,20 @@ public final class LinuxFexBionicSession {
         }
         nativeEnv.put("FEX_APP_CONFIG", configFile.getPath());
         nativeEnv.put("FEX_ROOTFS", rootfs.dir.getPath());
+        // The thunk selection: a Steam game's from its launch files, a direct launch's from its FEX configuration. Both lack it when
+        // the container turned FEX's thunks off, but this route draws only through the Vulkan thunk (the GPU driver is Android's), so
+        // that one stays on.
+        JSONObject thunks = config.optJSONObject("ThunksDB");
         if (appId != null) {
-            nativeEnv.put("FEX_THUNKCONFIG",
-                    new File(home, ".skynet/steam-emulator/" + appId + ".thunks64.json").getPath());
-        } else {
-            File thunkConfig = new File(directory, "ThunkConfig64.json");
-            Files.write(thunkConfig.toPath(),
-                    new JSONObject().put("ThunksDB", config.getJSONObject("ThunksDB")).toString()
-                            .getBytes(StandardCharsets.UTF_8));
-            nativeEnv.put("FEX_THUNKCONFIG", thunkConfig.getPath());
+            File steamThunks = new File(home, ".skynet/steam-emulator/" + appId + ".thunks64.json");
+            if (steamThunks.isFile())
+                thunks = new JSONObject(new String(Files.readAllBytes(steamThunks.toPath()), StandardCharsets.UTF_8)).optJSONObject("ThunksDB");
         }
+        if (thunks == null)
+            thunks = new JSONObject("{\"Vulkan\": 1, \"GL\": 0, \"drm\": 0, \"asound\": 0, \"WaylandClient\": 0, \"cuda\": 0}");
+        File thunkConfig = new File(directory, appId != null ? "ThunkConfig64-" + appId + ".json" : "ThunkConfig64.json");
+        Files.write(thunkConfig.toPath(), new JSONObject().put("ThunksDB", thunks).toString().getBytes(StandardCharsets.UTF_8));
+        nativeEnv.put("FEX_THUNKCONFIG", thunkConfig.getPath());
         nativeEnv.put("FEX_SERVERSOCKETPATH", new File(directory, "server").getPath());
         nativeEnv.put("FEX_SHM_DIR", new File(directory, "shm").getPath());
         nativeEnv.put("FEX_NEEDSSECCOMP", "1");

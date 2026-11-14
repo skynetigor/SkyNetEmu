@@ -295,7 +295,10 @@ class ContainersSettingsActivity : AppCompatActivity() {
 
     private fun startImport(uri: Uri) {
         val json = try {
-            contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            ContainerProfile.readFile(this, uri)
+        } catch (e: ContainerProfile.TooLargeException) {
+            Toast.makeText(this, e.message, Toast.LENGTH_LONG).show()
+            return
         } catch (e: Exception) { null }
         if (json.isNullOrEmpty()) {
             Toast.makeText(this, "Couldn't read the profile file", Toast.LENGTH_LONG).show()

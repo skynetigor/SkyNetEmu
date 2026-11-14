@@ -314,7 +314,10 @@ class AddGameFragment : Fragment() {
 
     private fun importFrom(uri: Uri) {
         val text = try {
-            requireContext().contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            ContainerProfile.readFile(requireContext(), uri)
+        } catch (e: ContainerProfile.TooLargeException) {
+            Toast.makeText(requireContext(), e.message, Toast.LENGTH_LONG).show()
+            return
         } catch (e: Exception) { null }
         if (text.isNullOrEmpty()) {
             Toast.makeText(requireContext(), "Couldn't read the profile file", Toast.LENGTH_LONG).show()
