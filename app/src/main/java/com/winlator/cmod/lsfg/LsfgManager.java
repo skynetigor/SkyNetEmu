@@ -2,13 +2,9 @@ package com.winlator.cmod.lsfg;
 
 import android.content.Context;
 import android.net.Uri;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.content.SharedPreferences;
 import androidx.preference.PreferenceManager;
-import android.view.Choreographer;
-import android.view.WindowManager;
 
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.ContainerManager;
@@ -94,6 +90,7 @@ public final class LsfgManager {
         return new File(home, CONFIG_FILE);
     }
 
+    /** The display's vsync phase and period for the layer's pacing; no longer written (see {@link #baseFrameLimit}). */
     private static File vsyncFile(Container container) {
         return new File(configFile(container).getParentFile(), "vsync.txt");
     }
@@ -152,12 +149,22 @@ public final class LsfgManager {
         sessionMultiplier = multiplier;
         sessionFlowScale = flowScale == null ? null : clampFlowScale(flowScale);
         sessionLayer = layer;
+        activeMultiplier = MULTIPLIER_OFF;
     }
 
     public static void endSession() {
         sessionMultiplier = null;
         sessionFlowScale = null;
         sessionLayer = null;
+        activeMultiplier = MULTIPLIER_OFF;
+    }
+
+    /** The multiplier last handed to the running game's layer: 0 or 1 when it generates no frames. */
+    private static volatile int activeMultiplier = MULTIPLIER_OFF;
+
+    /** Whether the running game's layer generates frames, so the X server should space out the presents (see PresentExtension). */
+    public static boolean isGeneratingFrames() {
+        return activeMultiplier >= 2;
     }
 
     /** Whether the layer is loaded into the game (when Lossless.dll is imported): the session's choice, else the container's. */
@@ -533,10 +540,35 @@ public final class LsfgManager {
         toml.append("flow_scale = ").append(formatFlowScale(getFlowScale(context, container))).append('\n');
         toml.append("performance_mode = ").append(isPerformanceMode(context, container)).append('\n');
         toml.append("hdr_mode = false\n");
-        toml.append("fps_limit = 0\n");
+        toml.append("fps_limit = ").append(baseFrameLimit(context, multiplier)).append('\n');
         toml.append("experimental_present_mode = ").append(tomlString(getPresentMode(context, container))).append('\n');
 
-        return writeAtomic(configFile(container), toml.toString());
+        // Left by earlier versions; the layer would read its stale phase.
+        vsyncFile(container).delete();
+        if (!writeAtomic(configFile(container), toml.toString())) return false;
+        activeMultiplier = multiplier;
+        return true;
+    }
+
+    /**
+     * The layer's base frame cap (fps_limit): the display refresh divided by the multiplier, 0 (none) when frames pass
+     * through. Without a cap the layer presents a generated frame and the real one right after each other, and only a
+     * display already filled by them (base rate = refresh / multiplier) spaces them out: a game at 30 FPS with 2x on a
+     * 120 Hz screen showed each pair on adjacent refreshes (8 ms, then 25 ms), so the counter said 60 and motion looked
+     * like 30. With a cap the layer holds the real frame back by its share of the frame time. The output cannot exceed
+     * the refresh rate anyway, so the cap costs nothing. vsync.txt must not exist alongside: the layer then snaps the
+     * real frame to its vsync grid, and a game slower than the cap was uneven again (8 to 33 ms).
+     */
+    private static int baseFrameLimit(Context context, int multiplier) {
+        if (multiplier < 2) return 0;
+        float refreshRate = 60f;
+        try {
+            android.view.Display display = ((android.hardware.display.DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE))
+                    .getDisplay(android.view.Display.DEFAULT_DISPLAY);
+            if (display != null && display.getRefreshRate() > 1f) refreshRate = display.getRefreshRate();
+        }
+        catch (RuntimeException ignored) {}
+        return Math.max(1, Math.round(refreshRate) / Math.min(4, multiplier));
     }
 
     /** In-game "off": layer stays loaded, frames pass through unmodified. */
@@ -570,55 +602,6 @@ public final class LsfgManager {
         }
         final Context appContext = context.getApplicationContext();
         runtimeWriter.execute(() -> writeConfig(appContext, container, m));
-    }
-
-    // ---- Vsync clock -------------------------------------------------------
-
-    private static volatile Handler vsyncHandler;
-    private static final ExecutorService vsyncWriter = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "lsfg-vsync");
-        thread.setDaemon(true);
-        return thread;
-    });
-
-    /**
-     * Publishes the display's vsync timestamp and period to vsync.txt once a second so the
-     * layer can phase-lock its pacing to the display instead of free-running against it.
-     * Choreographer timestamps are CLOCK_MONOTONIC, the clock the layer paces with.
-     */
-    public static void startVsyncClock(Context context, Container container) {
-        stopVsyncClock();
-        if (!isArmed(context, container)) return;
-
-        final File file = vsyncFile(container);
-        final WindowManager windowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-        final Handler handler = new Handler(Looper.getMainLooper());
-        vsyncHandler = handler;
-
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (vsyncHandler != handler) return;
-                Choreographer.getInstance().postFrameCallback(frameTimeNanos -> {
-                    if (vsyncHandler != handler) return;
-                    float refreshRate = 60f;
-                    try {
-                        float rate = windowManager.getDefaultDisplay().getRefreshRate();
-                        if (rate > 1f) refreshRate = rate;
-                    }
-                    catch (RuntimeException ignored) {}
-                    final long periodNs = (long) (1_000_000_000.0 / refreshRate);
-                    vsyncWriter.execute(() -> writeAtomic(file, "vsync_ns=" + frameTimeNanos + "\nperiod_ns=" + periodNs + "\n"));
-                });
-                handler.postDelayed(this, 1000);
-            }
-        });
-    }
-
-    public static void stopVsyncClock() {
-        Handler handler = vsyncHandler;
-        vsyncHandler = null;
-        if (handler != null) handler.removeCallbacksAndMessages(null);
     }
 
     // ---- Helpers -----------------------------------------------------------

@@ -47,6 +47,8 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private final Object limiterLock = new Object();
     private HashMap<Integer, Long> limiterDeadlines;
     private ScheduledThreadPoolExecutor limiterExecutor;
+    private HashMap<Integer, Pacing> pacing;
+    private ScheduledThreadPoolExecutor pacingExecutor;
 
     private static abstract class ClientOpcodes {
         private static final byte QUERY_VERSION = 0;
@@ -208,8 +210,93 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             }
         }
 
-        int targetFps = client.xServer.getXServerView() != null
-                ? client.xServer.getXServerView().getFpsLimit() : 0;
+        if (com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames()) {
+            long now = System.nanoTime();
+            long due = pacedPresentTime(window.id, now);
+            if (due > now || pacingPending(window.id)) {
+                schedulePacedPresent(window, pixmap, serial, idleFence, due - now);
+                return;
+            }
+        }
+        applyPresent(window, pixmap, serial, idleFence);
+    }
+
+    private static class Pacing {
+        private long lastArrivalNs;
+        private long lastApplyNs;
+        private long intervalNs;
+        private int pending;
+    }
+
+    /**
+     * When frame generation is on, when a present should be shown. The layer hands the X server a generated frame and the
+     * real one right after each other, and when the GPU is the limit both are finished at about the same time however the
+     * layer spaces its present calls: shown as they arrive, each pair lands on adjacent display refreshes (8 ms, then
+     * 25 ms at 30 FPS with 2x on a 120 Hz screen) and motion looks like the base frame rate. A present that comes sooner
+     * than 80 % of the average interval after the previous one is held back to that point, never by more than one
+     * interval, so the pair is shown evenly at the cost of that wait for the later frame. 80 % was the steadiest of 70 to
+     * 110 % for BeamNG 0.34 on a RedMagic Astra 2 (2026-11-15; more than 100 % was clearly worse).
+     */
+    private long pacedPresentTime(int windowId, long now) {
+        synchronized (limiterLock) {
+            if (pacing == null) pacing = new HashMap<>();
+            Pacing state = pacing.get(windowId);
+            if (state == null) pacing.put(windowId, state = new Pacing());
+            if (state.lastArrivalNs != 0) {
+                long interval = now - state.lastArrivalNs;
+                // a pause, a loading screen or a stall: start measuring again
+                if (interval > 100_000_000L) state.intervalNs = 0;
+                else state.intervalNs = state.intervalNs == 0 ? interval : (state.intervalNs * 15 + interval) / 16;
+            }
+            state.lastArrivalNs = now;
+            long due = now;
+            if (state.intervalNs > 0)
+                due = Math.max(now, Math.min(state.lastApplyNs + state.intervalNs * 4 / 5, now + state.intervalNs));
+            // presents are shown in the order they came
+            if (state.pending > 0) due = Math.max(due, state.lastApplyNs);
+            state.lastApplyNs = due;
+            return due;
+        }
+    }
+
+    private boolean pacingPending(int windowId) {
+        synchronized (limiterLock) {
+            Pacing state = pacing != null ? pacing.get(windowId) : null;
+            return state != null && state.pending > 0;
+        }
+    }
+
+    private void schedulePacedPresent(Window window, Pixmap pixmap, int serial, int idleFence, long delayNs) {
+        final ScheduledThreadPoolExecutor executor;
+        synchronized (limiterLock) {
+            pacing.get(window.id).pending++;
+            if (pacingExecutor == null) {
+                pacingExecutor = new ScheduledThreadPoolExecutor(1, runnable -> {
+                    Thread thread = new Thread(runnable, "PresentPacing");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+            }
+            executor = pacingExecutor;
+        }
+        executor.schedule(() -> {
+            try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.PIXMAP_MANAGER)) {
+                synchronized (limiterLock) {
+                    pacing.get(window.id).pending--;
+                }
+                // the window or the pixmap went away while the present waited
+                if (xServer.windowManager.getWindow(window.id) != window || xServer.pixmapManager.getPixmap(pixmap.id) != pixmap) return;
+                applyPresent(window, pixmap, serial, idleFence);
+            }
+            catch (RuntimeException e) {
+                Log.w("Present", "Paced present failed", e);
+            }
+        }, Math.max(0L, delayNs), TimeUnit.NANOSECONDS);
+    }
+
+    private void applyPresent(Window window, Pixmap pixmap, int serial, int idleFence) {
+        int targetFps = xServer.getXServerView() != null
+                ? xServer.getXServerView().getFpsLimit() : 0;
         if (targetFps > 1000) targetFps = 1000;
 
         if (targetFps <= 0) {
@@ -269,6 +356,10 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     public void onFreeResource(XResource resource) {
         if (resource instanceof Window) {
             Window window = (Window) resource;
+            synchronized (limiterLock) {
+                Pacing state = pacing != null ? pacing.get(window.id) : null;
+                if (state != null && state.pending == 0) pacing.remove(window.id);
+            }
             synchronized (events) {
                 for (int i = events.size() - 1; i >= 0; i--) {
                     Event event = events.valueAt(i);

@@ -1341,7 +1341,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
             if (xi != null) xi.touch.close();
         }
-        LsfgManager.stopVsyncClock();
         if (environment != null)
             environment.stopEnvironmentComponents();
         if (winHandler != null)
@@ -1407,7 +1406,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             com.winlator.cmod.xserver.extensions.XInput2Extension xi = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
             if (xi != null) xi.touch.close();
         }
-        LsfgManager.stopVsyncClock();
         LsfgManager.endSession();
         super.onDestroy();
     }
@@ -1753,7 +1751,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         startGameSessionRecording();
         environment.startEnvironmentComponents();
         if (performanceSession != null) performanceSession.setGuestRoot(guestProgramLauncherComponent.getPid());
-        LsfgManager.startVsyncClock(this, container);
 
         winHandler.start();
 
