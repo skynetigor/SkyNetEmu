@@ -40,8 +40,9 @@ public final class DeviceInfo {
             this.gpus = Collections.unmodifiableList(new ArrayList<>(gpus));
         }
 
+        /** A processor listed without GPU names (the registry does not know the renderer string yet) matches any GPU. */
         public boolean matchesGpu(String renderer) {
-            return gpus.stream().anyMatch(gpu -> sameGpu(gpu, renderer));
+            return gpus.isEmpty() || gpus.stream().anyMatch(gpu -> sameGpu(gpu, renderer));
         }
 
         public String label() {

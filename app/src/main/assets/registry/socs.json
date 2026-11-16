@@ -61,6 +61,46 @@
       "gpus": [
         "Adreno (TM) 735"
       ]
+    },
+    {
+      "family": "dimensity-9500",
+      "name": "Dimensity 9500",
+      "models": [
+        "MT6993"
+      ],
+      "gpus": []
+    },
+    {
+      "family": "dimensity-9400",
+      "name": "Dimensity 9400",
+      "models": [
+        "MT6991"
+      ],
+      "gpus": []
+    },
+    {
+      "family": "dimensity-9300",
+      "name": "Dimensity 9300",
+      "models": [
+        "MT6989"
+      ],
+      "gpus": []
+    },
+    {
+      "family": "dimensity-9200",
+      "name": "Dimensity 9200",
+      "models": [
+        "MT6985"
+      ],
+      "gpus": []
+    },
+    {
+      "family": "dimensity-9000",
+      "name": "Dimensity 9000",
+      "models": [
+        "MT6983"
+      ],
+      "gpus": []
     }
   ]
 }

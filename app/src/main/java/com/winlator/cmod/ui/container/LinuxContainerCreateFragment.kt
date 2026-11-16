@@ -874,7 +874,7 @@ private fun LinuxContainerEditorBody(
         (error ?: install.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (!GPUInformation.isAdrenoGPU(context)) {
             Text(
-                "The Linux runtime is only known to work on Adreno GPUs.",
+                "The Linux runtime is only known to work on Adreno GPUs. On other GPUs (Mali) it is experimental: the Turnip driver does not apply, so pick the System renderer driver.",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall
             )

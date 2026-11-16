@@ -339,6 +339,28 @@
       "testedOn": [
         "RedMagic Astra 2 Gaming Tablet (SM8850P), Android 16"
       ]
+    },
+    {
+      "id": "proton9-x64-box64-mali-system",
+      "name": "Dimensity / Mali (experimental)",
+      "file": "containers/proton9-x64-box64-mali-system.wcfg",
+      "description": "Untested starting point for MediaTek Dimensity phones: Proton 9.0 x86_64, Box64 0.4.4, DXVK 1.10.3, Vortek (Vulkan client in the guest, renderer in the app, on the phone's own Vulkan driver), Zink OpenGL, FIFO present. Reports welcome.",
+      "channel": "prerelease",
+      "socs": [
+        "dimensity-9500",
+        "dimensity-9400",
+        "dimensity-9300",
+        "dimensity-9200",
+        "dimensity-9000"
+      ],
+      "tags": [
+        "Mali",
+        "Vortek",
+        "Box64",
+        "DXVK 1.10"
+      ],
+      "platform": "windows",
+      "windowsArchitecture": "x86_64"
     }
   ],
   "revision": 28
