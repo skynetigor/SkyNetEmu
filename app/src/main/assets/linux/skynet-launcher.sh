@@ -340,8 +340,8 @@ EOF
 }
 sky_feral_launcher_state
 sky_feral_resolution
-if { [ "$app_id" = 391220 ] || [ "$app_id" = 750920 ] || [ "$app_id" = 383150 ] || [ "$app_id" = 730 ] || [ "$app_id" = 214490 ]; } && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
-    [ "$game32" != 1 ] || fail "Direct FEX supports only the native 64-bit ports it knows (Rise, Shadow, Dead Island, Counter-Strike 2, Alien: Isolation)."
+if { [ "$app_id" = 391220 ] || [ "$app_id" = 750920 ] || [ "$app_id" = 383150 ] || [ "$app_id" = 730 ] || [ "$app_id" = 214490 ] || [ "$app_id" = 412020 ]; } && [ -n "${SKY_DIRECT_FEX_SOCKET:-}" ]; then
+    [ "$game32" != 1 ] || fail "Direct FEX supports only the native 64-bit ports it knows (Rise, Shadow, Dead Island, Counter-Strike 2, Alien: Isolation, Metro Exodus)."
     # The bridge starts the ELF itself (the start script only sets variables, which the bridge sets for this game).
     [ "$app_id" != 730 ] || [ -z "${cs2_root:-}" ] || cmd[0]="$cs2_root/bin/linuxsteamrt64/cs2"
     [ "${#sky_wrap[@]}" = 0 ] || fail "Direct FEX does not support command wrappers."

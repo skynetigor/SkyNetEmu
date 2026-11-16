@@ -147,6 +147,8 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                 // ~30,000 live 32 KiB blocks of the Turnip driver (retained NIR) cost scudo three mappings each and exhaust vm.max_map_count (65,530).
                 .hostPreload("libskyhostpool.so")
                 .sniper("libfribidi.so.0", "libthai.so.0", "libdatrie.so.1", "libharfbuzz.so.0", "libgraphite2.so.3", "libpixman-1.so.0"));
+        // 4A's native Vulkan port: Steam starts the ELF itself, whose SteamStub DRM needs the client.
+        GAMES.put("412020", new Game("412020", "Metro Exodus", "MetroExodus", null, true, Arrays.asList("")));
     }
 
     private final XEnvironment environment;
@@ -451,8 +453,7 @@ public final class LinuxDirectFexBridge implements AutoCloseable {
                 "libskysockets_x64.so", "libskyshim_x64.so", "libcefnosb_x64.so"})
             preloads.add(asset(name).getPath());
         // First in the order: the per-game fixes see a call before the shared shim does (cs2fix passes connect() on to it).
-        for (int index = game.preloads.size() - 1; index >= 0; --index) preloads.add(0, asset(game.preloads.get(index)).getPath());
-        JSONObject config = new JSONObject(new String(Files.readAllBytes(new File(home,
+        for (int index = game.preloads.size() - 1; index >= 0; --index) preloads.add(0, asset(game.preloads.get(index)).getPath());        JSONObject config = new JSONObject(new String(Files.readAllBytes(new File(home,
                 ".skynet/steam-emulator/" + game.appId + ".fex.json").toPath()), StandardCharsets.UTF_8));
         if (LinuxBionicSession.enabled(container)) {
             String libraries = game.libraryPath(gameRoot) + ":" + legacy + sniperPath + ":" + steam + "/linux64";
