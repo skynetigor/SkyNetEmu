@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,6 +57,7 @@ import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.contents.RemoteDriverCatalog
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.core.GpuDriverType
 import com.winlator.cmod.core.ProtonPackageManager
 import com.winlator.cmod.core.WineInfo
 import com.winlator.cmod.core.WineRuntimeGuard
@@ -225,15 +227,17 @@ internal suspend fun loadSettingsCatalog(
     }
 
     val adreno = AdrenotoolsManager(context)
-    val rendererDrivers = linkedMapOf("auto" to "Auto (match GPU)", "system" to "System")
+    // A GPU without a Turnip build runs on the phone's own Vulkan driver: that is its only driver. The Turnip builds are for Adreno GPUs only.
+    val systemDriver = GpuDriverType.forDevice(context) == GpuDriverType.SYSTEM
+    val rendererDrivers = if (systemDriver) linkedMapOf("system" to "System") else linkedMapOf("auto" to "Auto (match GPU)", "system" to "System")
     val driverOptions = linkedMapOf<String, DriverOption>()
 
     context.resources.getStringArray(R.array.wrapper_graphics_driver_version_entries).forEach { version ->
-        if (version.equals("System", ignoreCase = true) || GPUInformation.isDriverSupported(version, context)) {
+        if (version.equals("System", ignoreCase = true) || (!systemDriver && GPUInformation.isDriverSupported(version, context))) {
             driverOptions[version.lowercase()] = DriverOption(version, version, true)
         }
     }
-    runCatching { adreno.enumerateRendererDrivers() }.getOrNull().orEmpty().forEach { id ->
+    if (!systemDriver) runCatching { adreno.enumerateRendererDrivers() }.getOrNull().orEmpty().forEach { id ->
         val label = listOf(adreno.getDriverName(id), adreno.getDriverVersion(id))
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -241,7 +245,7 @@ internal suspend fun loadSettingsCatalog(
         rendererDrivers[id] = label
         driverOptions[id.lowercase()] = DriverOption(id, label, true)
     }
-    runCatching { RemoteDriverCatalog.load(context) }.getOrNull().orEmpty().forEach { remote ->
+    if (!systemDriver) runCatching { RemoteDriverCatalog.load(context) }.getOrNull().orEmpty().forEach { remote ->
         val alreadyInstalled = driverOptions.values.any {
             it.id.equals(remote.name, ignoreCase = true) || it.label.equals(remote.name, ignoreCase = true)
         }
@@ -250,7 +254,7 @@ internal suspend fun loadSettingsCatalog(
                 DriverOption(remote.name, remote.name, false, remote.url)
         }
     }
-    if (selectedDriver.isNotBlank() && driverOptions.values.none { it.id.equals(selectedDriver, ignoreCase = true) }) {
+    if (!systemDriver && selectedDriver.isNotBlank() && driverOptions.values.none { it.id.equals(selectedDriver, ignoreCase = true) }) {
         driverOptions["selected:${selectedDriver.lowercase()}"] = DriverOption(selectedDriver, selectedDriver, true)
     }
 
@@ -451,6 +455,32 @@ private fun WallpaperPreview() {
                 contentScale = ContentScale.Crop
             )
         }
+    }
+}
+
+/** The driver version a settings screen shows: a GPU without a Turnip build has only the System driver, whatever an older or imported config names. */
+internal fun shownDriverVersion(context: Context, stored: String): String =
+    if (GpuDriverType.forDevice(context) == GpuDriverType.SYSTEM) "System" else stored
+
+/** The device's GPU driver type (Turnip or System): shown, not selectable, because the GPU decides which one can work. */
+@Composable
+internal fun SettingGpuDriverType() {
+    val context = LocalContext.current
+    val type = remember { GpuDriverType.forDevice(context) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("GPU Driver Type", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                type.label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+        }
+        Icon(Icons.Outlined.Lock, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
     }
 }
 

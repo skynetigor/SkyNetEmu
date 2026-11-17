@@ -83,6 +83,8 @@ import com.winlator.cmod.ui.settings.DxvkAsyncMode
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
 import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
+import com.winlator.cmod.ui.settings.SettingGpuDriverType
+import com.winlator.cmod.ui.settings.shownDriverVersion
 import com.winlator.cmod.ui.settings.SettingInstallChoice
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.settings.SettingText
@@ -922,6 +924,8 @@ private fun ContainerCategoryV2(
                 }
             }
             SettingsCard {
+                SettingGpuDriverType()
+                SettingsDivider()
                 SettingChoice(
                     "Graphics Driver",
                     graphicsEntries.firstOrNull { StringUtils.parseIdentifier(it).equals(s.graphicsDriver, true) } ?: s.graphicsDriver,
@@ -929,7 +933,7 @@ private fun ContainerCategoryV2(
                 ) { s.selectGraphicsDriver(StringUtils.parseIdentifier(it)) }
                 catalog?.let { c ->
                     SettingsDivider()
-                    SettingDriverChoice("Driver Version", s.driverVersion, c.drivers, installing, installDriver) {
+                    SettingDriverChoice("Driver Version", shownDriverVersion(context, s.driverVersion), c.drivers, installing, installDriver) {
                         s.driverVersion = it
                         s.graphics("version", it)
                     }

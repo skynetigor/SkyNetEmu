@@ -45,10 +45,13 @@ public final class ContainerConfigCatalog {
         public final GameProfile.Platform platform;
         /** Optional Windows guest architecture. Empty on older indexes; ARM64 means native ARM64 games. */
         public final String windowsArchitecture;
+        /** "turnip" for a config that needs a Turnip driver (Adreno GPUs only); empty for any GPU. */
+        public final String gpuDriver;
 
         Config(String id, String name, String file, String description, List<String> socs, List<String> gpus, String channel, List<String> tags, List<String> testedOn,
-               GameProfile.Platform platform, String windowsArchitecture) {
+               GameProfile.Platform platform, String windowsArchitecture, String gpuDriver) {
             this.platform = platform;
+            this.gpuDriver = gpuDriver;
             this.windowsArchitecture = windowsArchitecture;
             this.id = id;
             this.name = name;
@@ -67,7 +70,8 @@ public final class ContainerConfigCatalog {
 
         public boolean suits(DeviceInfo.Soc soc, String renderer) {
             return suits(soc.family) && (socs.isEmpty() || soc.matchesGpu(renderer))
-                    && (gpus.isEmpty() || gpus.stream().anyMatch(gpu -> DeviceInfo.sameGpu(gpu, renderer)));
+                    && (gpus.isEmpty() || gpus.stream().anyMatch(gpu -> DeviceInfo.sameGpu(gpu, renderer)))
+                    && (gpuDriver.isEmpty() || gpuDriver.equals(com.winlator.cmod.core.GpuDriverType.forRenderer(renderer).name().toLowerCase(java.util.Locale.ROOT)));
         }
     }
 
@@ -95,7 +99,8 @@ public final class ContainerConfigCatalog {
                 configs.put(id, new Config(id, c.optString("name", id), file, c.optString("description", ""), strings(c.optJSONArray("socs")), strings(c.optJSONArray("gpus")),
                         channel, strings(c.optJSONArray("tags")), strings(c.optJSONArray("testedOn")),
                         "linux".equals(c.optString("platform")) ? GameProfile.Platform.LINUX : GameProfile.Platform.WINDOWS,
-                        c.optString("windowsArchitecture", "").trim().toLowerCase(Locale.ROOT)));
+                        c.optString("windowsArchitecture", "").trim().toLowerCase(Locale.ROOT),
+                        c.optString("gpuDriver", "").trim().toLowerCase(Locale.ROOT)));
             }
         }
         catch (org.json.JSONException e) {

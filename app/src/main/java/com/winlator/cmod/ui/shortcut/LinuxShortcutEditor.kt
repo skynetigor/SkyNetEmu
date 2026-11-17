@@ -94,7 +94,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val parsed = remember(options, envVars) { LinuxLaunchOptions.parse(options, envVars) }
     val runtimes = remember { LinuxRuntime.listInstalled(context) }
     var runtimeId by remember { mutableStateOf(shortcut.getExtra(LinuxShortcutDefaults.RUNTIME)) }
-    var prootEnabled by remember { mutableStateOf(LinuxSession.prootEnabled(shortcut.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
+    // A GPU without a Turnip driver (System type): programs run on bionic with the phone's own Vulkan driver, nothing else works there.
+    val gpuSystem = remember { com.winlator.cmod.core.GpuDriverType.forDevice(context) == com.winlator.cmod.core.GpuDriverType.SYSTEM }
+    var prootEnabled by remember { mutableStateOf(!gpuSystem && LinuxSession.prootEnabled(shortcut.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
     var fps by remember { mutableStateOf(shortcut.getExtra("graphicsFpsPreset", "0")) }
     var hud by remember { mutableStateOf(shortcut.getExtra("hudMode", "0")) }
     val cpuSelected = remember {
@@ -125,7 +127,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var presetId by remember { mutableStateOf(shortcut.getExtra("containerConfig")) }
     var directFex by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxDirectFexBridge.EXTRA)) }
     // The x86 emulator: empty follows the container. The names are the container's, so the session code is shared.
-    var bionic by remember { mutableStateOf(if (prootEnabled) "0" else shortcut.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA)) }
+    var bionic by remember { mutableStateOf(if (gpuSystem) "1" else if (prootEnabled) "0" else shortcut.getExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA)) }
     var emulatorChoice by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_EMULATOR)) }
     var emulatorId by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_ID)) }
     var emulatorPreset by remember { mutableStateOf(shortcut.getExtra(LinuxEmulator.EXTRA_PRESET)) }
@@ -270,6 +272,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         // The execution mode: PRoot or not, glibc or bionic (bionic never runs under PRoot).
         values[LinuxSession.EXTRA_NO_PROOT]?.let { prootEnabled = LinuxSession.prootEnabled(it) }
         values[com.winlator.cmod.linux.LinuxBionicSession.EXTRA]?.let { bionic = it }
+        if (gpuSystem) bionic = "1"
         if (bionic == "1") prootEnabled = false
         values[com.winlator.cmod.linux.LinuxDirectFexBridge.EXTRA]?.let { directFex = it }
         androidGraphicsConfig = values["graphicsDriverConfig"].orEmpty()
@@ -591,8 +594,10 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     val gameTurnip = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(androidGraphicsConfig)["version"].orEmpty()
                     val shown = if (gameTurnip.isEmpty()) rendererDriverId
                         else if (gameTurnip.equals("System", ignoreCase = true)) "system" else gameTurnip
-                    RendererDriverPicker(shown, rendererDriverPicker, "Turnip driver") { chooseTurnip(it) }
-                    Text("The Turnip build used by the game and by the screen renderer alike (bionic runs without the Linux driver). " +
+                    if (gpuSystem) com.winlator.cmod.ui.settings.SettingGpuDriverType()
+                    RendererDriverPicker(if (gpuSystem) "system" else shown, rendererDriverPicker, if (gpuSystem) "Vulkan driver" else "Turnip driver") { chooseTurnip(it) }
+                    Text(if (gpuSystem) "The phone's own Vulkan driver, used by the game and by the screen renderer alike. Restart the game to apply."
+                        else "The Turnip build used by the game and by the screen renderer alike (bionic runs without the Linux driver). " +
                         "Auto picks one for your GPU. Restart the game to apply.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -752,7 +757,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     if (runtimeId.isNotEmpty() && runtimeId !in this) put(runtimeId, "$runtimeId (not installed)")
                 }) { runtimeId = it }
                 SettingsDivider()
-                SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = "0" }
+                if (!gpuSystem) SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = "0" }
                 if (prootEnabled) {
                     SettingsDivider()
                     SettingMappedChoice("PRoot runtime (experimental)", prootMode,
@@ -778,15 +783,17 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                     emulatorId = ""
                     emulatorPreset = ""
                 }
-                SettingsDivider()
-                SettingMappedChoice(
-                    "Libraries: glibc or bionic",
-                    bionic,
-                    linkedMapOf(
-                        "0" to "glibc: the standard Linux libraries (with or without PRoot)",
-                        "1" to "bionic: Android's own libraries, no PRoot (experimental)"
-                    )
-                ) { bionic = it; if (it == "1") prootEnabled = false }
+                if (!gpuSystem) {
+                    SettingsDivider()
+                    SettingMappedChoice(
+                        "Libraries: glibc or bionic",
+                        bionic,
+                        linkedMapOf(
+                            "0" to "glibc: the standard Linux libraries (with or without PRoot)",
+                            "1" to "bionic: Android's own libraries, no PRoot (experimental)"
+                        )
+                    ) { bionic = it; if (it == "1") prootEnabled = false }
+                }
                 if (effectiveChoice == LinuxEmulator.BOX64 || effectiveChoice == LinuxEmulator.FEX) {
                     val fex = effectiveChoice == LinuxEmulator.FEX
                     val builds = if (fex) fexBuilds else boxBuilds

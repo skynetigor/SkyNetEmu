@@ -304,6 +304,8 @@ public final class LinuxBionicSession {
         env.put("WRAPPER_CACHE_PATH", root + "/usr/var/cache");
         HashMap<String, String> graphics = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(container.getGraphicsDriverConfig());
         String driverId = graphics.get("version");
+        // Turnip builds are for Adreno only: a GPU without one runs on the system driver.
+        if (com.winlator.cmod.core.GpuDriverType.forDevice(context) == com.winlator.cmod.core.GpuDriverType.SYSTEM) driverId = "System";
         AdrenotoolsManager drivers = new AdrenotoolsManager(context);
         if (driverId != null && !driverId.isEmpty() && !"System".equals(driverId)) drivers.setDriverById(env, imageFs, driverId);
         env.put("WRAPPER_VK_VERSION", "1.3.289");

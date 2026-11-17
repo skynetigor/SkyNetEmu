@@ -27,9 +27,14 @@ internal fun rememberRendererDriverPicker(
 ): RendererDriverPickerState {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = remember { RendererDriverPickerState() }
+    // A GPU without a Turnip driver has one Android driver: its own.
+    val systemDriver = remember { com.winlator.cmod.core.GpuDriverType.forDevice(context) == com.winlator.cmod.core.GpuDriverType.SYSTEM }
+    val state = remember {
+        RendererDriverPickerState().also { if (systemDriver) it.options = listOf(DriverOption("system", "System", true)) }
+    }
     val select by rememberUpdatedState(onSelected)
     LaunchedEffect(Unit) {
+        if (systemDriver) { state.loading = false; return@LaunchedEffect }
         state.options = loadAdrenoDriverOptions(context, selected, includeRemote = false)
         val remote = loadAdrenoDriverOptions(context, selected)
         // An install may finish while the registry is loading: retain its actual installed ID.

@@ -90,8 +90,22 @@ public final class SteamContainer {
         return com.winlator.cmod.linux.SharedLinuxContainers.find(manager);
     }
 
+    /** A GPU without a Turnip driver (not Adreno): its Steam container needs none, and runs the client without the GPU. */
+    private static boolean noTurnip(Context context) {
+        return com.winlator.cmod.core.GpuDriverType.forDevice(context) == com.winlator.cmod.core.GpuDriverType.SYSTEM;
+    }
+
     /** The configuration of a new Steam container: the registry's "steam" block, or the built-in one when it cannot be read. */
     public static Defaults defaults(Context context, boolean allowNetwork) {
+        Defaults base = registryDefaults(context, allowNetwork);
+        if (!noTurnip(context)) return base;
+        // No Turnip build exists for this GPU: no Linux driver, and the Steam client draws on the CPU (its web view needs the GPU driver).
+        // On a MediaTek processor (Dimensity) the Vulkan output is a CPU copy too: dma-buf import is not proven on its GPU.
+        String present = com.winlator.cmod.core.DeviceInfo.isMediaTek(context) ? "sw" : base.vulkanPresent;
+        return new Defaults(base.runtime, base.emulator, base.emulatorPreset, "", "software", present, base.fex, base.rootfs, false);
+    }
+
+    private static Defaults registryDefaults(Context context, boolean allowNetwork) {
         Defaults builtIn = new Defaults("bannerlator-r9", "box64-0.4.4-r2", "PERFORMANCE", "turnip-v26.3.0-20261011-a8xx-linux", "zink", "native",
                 "fex-2610", "rootfs-ubuntu-24-04-2026-08-11", false);
         String text = RegistryCache.get(context, "linux.json", RegistryCache.TTL_INDEX, allowNetwork);
@@ -149,6 +163,7 @@ public final class SteamContainer {
     }
 
     private static boolean driverReady(Context context, Defaults defaults) {
+        if (noTurnip(context)) return true;
         return LinuxDriverManager.isInstalled(context, defaults.driver) || (!defaults.gpuDriverMapped && !LinuxDriverManager.list(context).isEmpty());
     }
 
@@ -271,6 +286,14 @@ public final class SteamContainer {
             // Native size: a game's own window (Tomb Raider's 1280x720) is smaller than the screen, so it is fitted and scaled to it.
             container.setFullscreenStretched(true);
             container.putExtra("scaleGameWindow", "1");
+            if (noTurnip(context)) {
+                // The client stays on the glibc runtime under PRoot (its launch is never bionic); the games it starts run on Android's
+                // own libraries with the phone's Vulkan driver, and the client does not use the GPU.
+                container.putExtra(LinuxSession.EXTRA_STEAM_GPU, "0");
+                container.putExtra(LinuxSession.EXTRA_NO_PROOT, "1");
+                container.putExtra(com.winlator.cmod.linux.LinuxBionicSession.EXTRA, "1");
+                container.setRendererDriverId("system");
+            }
             container.saveData();
             Log.i(TAG, "Created the Steam container " + container.id);
             return container;

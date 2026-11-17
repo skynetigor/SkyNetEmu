@@ -126,7 +126,6 @@ import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
-import com.winlator.cmod.xenvironment.components.VortekRendererComponent;
 import com.winlator.cmod.xenvironment.components.XServerComponent;
 import com.winlator.cmod.xserver.Drawable;
 import com.winlator.cmod.xserver.Pointer;
@@ -1721,15 +1720,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new XServerComponent(
                         xServer,
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.XSERVER_PATH)));
-
-        if (isVortekSelected()) {
-            environment.addComponent(
-                    new VortekRendererComponent(
-                            this,
-                            xServer,
-                            UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.VORTEK_SERVER_PATH),
-                            VortekRendererComponent.Options.fromConfig(this, graphicsDriverConfig)));
-        }
 
         if (audioDriver.equals("alsa")) {
             envVars.put("ANDROID_ALSA_SERVER", rootPath + UnixSocketConfig.ALSA_SERVER_PATH);
@@ -3442,25 +3432,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         winHandler.sendGamepadState();
     }
 
-    /** The container (or shortcut) asks for the Vortek Vulkan path (graphicsDriverConfig "vortek=1") instead of the wrapper. */
-    private boolean isVortekSelected() {
-        return graphicsDriverConfig != null && "1".equals(graphicsDriverConfig.get("vortek"));
-    }
-
-    /** Puts Vortek's Vulkan client (libvulkan_vortek.so and its ICD) in the guest and points the Vulkan loader at it. */
-    private void installVortekClient(File rootDir) {
-        File marker = new File(rootDir, "usr/lib/.skynetemu-vortek-client-1");
-        File icd = new File(imageFs.getShareDir(), "vulkan/icd.d/vortek_icd.aarch64.json");
-        if (firstTimeBoot || !marker.isFile() || !icd.isFile()) {
-            Log.d("XServerDisplayActivity", "Installing the Vortek Vulkan client");
-            if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/vortek-client.tzst", rootDir))
-                throw new IllegalStateException("Cannot install the Vortek Vulkan client");
-            FileUtils.writeString(marker, "vortek-client=1");
-        }
-        envVars.put("VK_ICD_FILENAMES", icd.getPath());
-        envVars.put("VORTEK_SERVER_PATH", rootDir.getPath() + UnixSocketConfig.VORTEK_SERVER_PATH);
-    }
-
     private String getSelectedOpenGLDriver() {
         return "freedreno".equalsIgnoreCase(graphicsDriver) ? "freedreno" : "zink";
     }
@@ -3526,6 +3497,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void extractGraphicsDriverFiles() {
         String adrenoToolsDriverId = graphicsDriverConfig.get("version");
+        // Turnip builds are for Adreno only: a GPU without one runs on the system driver.
+        if (com.winlator.cmod.core.GpuDriverType.forDevice(this) == com.winlator.cmod.core.GpuDriverType.SYSTEM) {
+            adrenoToolsDriverId = "System";
+            graphicsDriverConfig.put("version", adrenoToolsDriverId);
+        }
         // "auto": the AdrenoTools driver the renderer catalog maps to this device's GPU (System when none is mapped), so one
         // container config suits every phone.
         if (com.winlator.cmod.contents.RendererDriverCatalog.AUTO.equalsIgnoreCase(adrenoToolsDriverId)) {
@@ -3557,7 +3533,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir() + "/vulkan/icd.d/wrapper_icd.aarch64.json");
-        if (isVortekSelected()) installVortekClient(rootDir);
 
         File graphicsRuntimeMarker = new File(rootDir,
                 "usr/lib/.winlator-graphics-runtime-c7474f7e-25b50a11-v2");
@@ -3574,8 +3549,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         extractOpenGLDriver(rootDir);
 
-        // Vortek loads the custom driver in the app (the renderer), not in the guest.
-        if (!"System".equals(adrenoToolsDriverId) && !isVortekSelected()) {
+        if (!"System".equals(adrenoToolsDriverId)) {
             AdrenotoolsManager adrenotoolsManager = new AdrenotoolsManager(this);
             adrenotoolsManager.setDriverById(envVars, imageFs, adrenoToolsDriverId);
         }

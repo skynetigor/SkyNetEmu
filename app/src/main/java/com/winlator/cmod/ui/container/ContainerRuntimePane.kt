@@ -28,6 +28,8 @@ import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.ui.settings.DriverOption
 import com.winlator.cmod.ui.settings.SettingChoice
 import com.winlator.cmod.ui.settings.SettingDriverChoice
+import com.winlator.cmod.ui.settings.SettingGpuDriverType
+import com.winlator.cmod.ui.settings.shownDriverVersion
 import com.winlator.cmod.ui.settings.SettingInstallChoice
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.settings.SettingText
@@ -200,11 +202,13 @@ internal fun ContainerRuntimePane(
                 }
             }
             SettingsCard {
+                SettingGpuDriverType()
+                SettingsDivider()
                 SettingChoice("Graphics Driver", graphics, graphicsEntries) {
                     graphics = it; container.setGraphicsDriver(StringUtils.parseIdentifier(it)); container.saveData()
                 }
                 catalog?.let { c ->
-                    SettingsDivider(); SettingDriverChoice("Driver Version", driverVersion, c.drivers, installing, ::installDriver) {
+                    SettingsDivider(); SettingDriverChoice("Driver Version", shownDriverVersion(context, driverVersion), c.drivers, installing, ::installDriver) {
                         driverVersion = it; saveGraphics("version", it)
                     }
                 }

@@ -72,6 +72,8 @@ import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.ui.settings.LinuxDriverPicker
+import com.winlator.cmod.ui.settings.SettingGpuDriverType
+import com.winlator.cmod.core.GpuDriverType
 import com.winlator.cmod.ui.settings.rememberLinuxDriverPicker
 import com.winlator.cmod.ui.settings.RendererDriverPicker
 import com.winlator.cmod.ui.settings.rememberRendererDriverPicker
@@ -386,12 +388,15 @@ private fun LinuxContainerEditorBody(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: steam?.defaults?.driver ?: "") }
+    // A GPU without a Turnip driver (System type): Linux programs run on bionic with the phone's own Vulkan driver, nothing else works there.
+    val gpuSystem = remember { GpuDriverType.forDevice(context) == GpuDriverType.SYSTEM }
     var rendererDriverId by remember {
         // On bionic one Turnip driver serves the game and the renderer: show the game's.
         val gameTurnip = editing?.takeIf { it.getExtra(LinuxBionicSession.EXTRA) == "1" }
             ?.let { GraphicsDriverConfigDialog.parseGraphicsDriverConfig(it.graphicsDriverConfig)["version"].orEmpty() }.orEmpty()
         mutableStateOf(
-            if (gameTurnip.equals("System", ignoreCase = true)) "system"
+            if (gpuSystem) "system"
+            else if (gameTurnip.equals("System", ignoreCase = true)) "system"
             else gameTurnip.ifEmpty { editing?.rendererDriverId ?: "auto" })
     }
     val rendererDriverPicker = rememberRendererDriverPicker(rendererDriverId) { rendererDriverId = it }
@@ -416,8 +421,8 @@ private fun LinuxContainerEditorBody(
     var tuSysmem by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_TU_SYSMEM) == "1") }
     var isolateGameGpu by remember { mutableStateOf(editing?.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU) == "1") }
     var prootMode by remember { mutableStateOf(editing?.getExtra(com.winlator.cmod.linux.LinuxProot.EXTRA)?.ifEmpty { "runtime" } ?: "runtime") }
-    var prootEnabled by remember { mutableStateOf(LinuxSession.prootEnabled(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
-    var bionic by remember { mutableStateOf(editing?.getExtra(LinuxBionicSession.EXTRA) == "1" && !prootEnabled) }
+    var prootEnabled by remember { mutableStateOf(!gpuSystem && LinuxSession.prootEnabled(editing?.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
+    var bionic by remember { mutableStateOf(gpuSystem || (editing?.getExtra(LinuxBionicSession.EXTRA) == "1" && !prootEnabled)) }
     var fexGl32 by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_32) != "0") }
     var glVendor by remember { mutableStateOf(editing?.getExtra(LinuxFex.EXTRA_GL_VENDOR)?.ifEmpty { null } ?: "nvidia") }
     var glDriver by remember {
@@ -663,7 +668,14 @@ private fun LinuxContainerEditorBody(
                         runtimes.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
                     ) { chosenRuntimeId = it }
                 }
-                SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = false }
+                if (gpuSystem) {
+                    SettingGpuDriverType()
+                    Text("On this GPU Linux programs run on Android's own libraries (bionic), without PRoot, on the phone's Vulkan driver. " +
+                        "The Steam client itself still runs on the glibc runtime.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                }
+                if (!gpuSystem) SettingToggle("Enable proot", prootEnabled) { prootEnabled = it; if (it) bionic = false }
                 if (prootEnabled) {
                     SettingsDivider()
                     SettingMappedChoice("PRoot runtime (experimental)", prootMode,
@@ -674,8 +686,10 @@ private fun LinuxContainerEditorBody(
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 }
-                SettingsDivider()
-                SettingToggle("Use bionic (Android's own libraries) instead of glibc, without PRoot (experimental)", bionic) { bionic = it; if (it) prootEnabled = false }
+                if (!gpuSystem) {
+                    SettingsDivider()
+                    SettingToggle("Use bionic (Android's own libraries) instead of glibc, without PRoot (experimental)", bionic) { bionic = it; if (it) prootEnabled = false }
+                }
             }
         },
         EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {
@@ -778,10 +792,12 @@ private fun LinuxContainerEditorBody(
                     SettingsDivider()
                     // On bionic this one Turnip driver serves the game and the renderer.
                     RendererDriverPicker(rendererDriverId, rendererDriverPicker,
-                        if (bionic) "Turnip driver" else "Renderer driver") { rendererDriverId = it }
+                        if (gpuSystem) "Vulkan driver" else if (bionic) "Turnip driver" else "Renderer driver") { rendererDriverId = it }
                 }
-                SettingsDivider()
-                SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
+                if (!gpuSystem) {
+                    SettingsDivider()
+                    SettingToggle("Turnip without tiled rendering (TU_DEBUG=sysmem)", tuSysmem) { tuSysmem = it }
+                }
                 SettingsDivider()
                 SettingToggle("Isolate Steam game GPU settings (experimental)", isolateGameGpu) { isolateGameGpu = it }
                 Text("New shortcuts can avoid inheriting the running launcher's TU_DEBUG. Per-game sysmem and explicit variables still apply.",

@@ -3,6 +3,7 @@ package com.winlator.cmod.contents;
 import android.content.Context;
 import android.os.Build;
 import com.winlator.cmod.core.GPUInformation;
+import com.winlator.cmod.core.GpuDriverType;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.File;
@@ -94,6 +95,8 @@ public final class RendererDriverCatalog {
 
     /** Blocking: called only by the launch worker, never the UI thread. Does not overwrite manual selections. */
     public static synchronized String resolve(Context context, String requested, boolean requireDmaBuf, Consumer<String> progress) {
+        // A GPU without a Turnip build (System type) has one Android driver: its own.
+        if (GpuDriverType.forDevice(context) == GpuDriverType.SYSTEM) return "system";
         if (!AUTO.equalsIgnoreCase(requested)) return requested;
         String renderer = GPUInformation.getRenderer(null, context);
         AdrenotoolsManager manager = new AdrenotoolsManager(context);

@@ -51,6 +51,28 @@ public final class DeviceInfo {
     }
 
     private static Soc cached;
+    private static volatile Boolean mediaTek;
+
+    /**
+     * A MediaTek processor (Dimensity, Helio), whichever model: the registry's list may not have it yet, so the vendor Android reports
+     * and the "mt" + digits platform names are read too. GPU rendering on these is new and unproven here: the Steam container starts
+     * with the software paths.
+     */
+    public static boolean isMediaTek(Context context) {
+        Boolean known = mediaTek;
+        if (known != null) return known;
+        boolean result = Build.VERSION.SDK_INT >= 31 && "mediatek".equalsIgnoreCase(Build.SOC_MANUFACTURER);
+        if (!result) {
+            Soc soc = soc(context);
+            result = soc.family != null && soc.family.startsWith("dimensity");
+        }
+        if (!result) {
+            String names = (Build.HARDWARE + " " + Build.BOARD + " " + model() + " " + getprop("ro.board.platform")).toLowerCase(Locale.ROOT);
+            result = java.util.regex.Pattern.compile("(^|\\s)mt\\d{4}").matcher(names).find();
+        }
+        mediaTek = result;
+        return result;
+    }
 
     private DeviceInfo() {}
 
