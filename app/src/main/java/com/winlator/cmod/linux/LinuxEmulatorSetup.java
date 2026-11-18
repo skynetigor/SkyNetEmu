@@ -24,7 +24,7 @@ public final class LinuxEmulatorSetup {
             LinuxEmulator.EXTRA_FEX_PRESET, LinuxEmulator.EXTRA_FEX_THUNKS, LinuxFex.EXTRA_GL_32,
             LinuxFex.EXTRA_GL_VENDOR, EXTRA_TU_SYSMEM, EXTRA_ISOLATE_GAME_GPU,
             LinuxDriverManager.EXTRA_DRIVER, LinuxGpuMemory.EXTRA, LinuxSession.EXTRA_GL_DRIVER, LinuxSession.EXTRA_VULKAN_PRESENT,
-            LinuxBionicSession.EXTRA, LinuxSession.EXTRA_NO_PROOT, LinuxDirectFexBridge.EXTRA, LinuxProot.EXTRA, LinuxTouchMode.EXTRA,
+            LinuxBionicSession.EXTRA, LinuxLiftedBionicSession.EXTRA, LinuxSession.EXTRA_NO_PROOT, LinuxDirectFexBridge.EXTRA, LinuxProot.EXTRA, LinuxTouchMode.EXTRA,
             com.winlator.cmod.lsfg.LsfgManager.EXTRA_PERFORMANCE_MODE, com.winlator.cmod.lsfg.LsfgManager.EXTRA_PRESENT_MODE
     };
 

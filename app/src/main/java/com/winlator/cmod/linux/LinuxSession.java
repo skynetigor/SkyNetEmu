@@ -533,6 +533,10 @@ public final class LinuxSession {
                 "1".equals(container.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU)));
         for (String part : guestCommand) argv.add(part);
 
+        if (LinuxLiftedBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
+            Launch lifted = LinuxLiftedBionicSession.build(context, imageFs, container, guestCommand, guestEnv, home);
+            if (lifted != null) return lifted;
+        }
         if (LinuxBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
             if (LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))) {
                 try {
