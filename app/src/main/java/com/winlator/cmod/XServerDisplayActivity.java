@@ -1930,7 +1930,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (!desktopSession && com.winlator.cmod.linux.LinuxLiftedBionicSession.enabled(linuxContainer)) {   // a translated game's UI: its own page, served by the engine
             runOnUiThread(() -> {   // this method runs on a worker thread; a WebView belongs to the main one
                 FrameLayout uiRoot = findViewById(R.id.FLXServerDisplay);
-                if (uiRoot != null && liftedUi == null && !isFinishing()) liftedUi = com.winlator.cmod.linux.LinuxLiftedUiOverlay.attach(this, uiRoot);
+                if (uiRoot != null && liftedUi == null && !isFinishing()) liftedUi = com.winlator.cmod.linux.LinuxLiftedUiOverlay.attach(this, uiRoot, inputControlsView);
+                // the game takes a pad: the on-screen one is its controller (after the startup code that applies the saved profile choice)
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                    if (isFinishing()) return;
+                    if (inputControlsView != null && inputControlsView.getProfile() == null) showDefaultVirtualGamepad();
+                    if (liftedUi != null) liftedUi.requestFocus();   // showing the controls took the focus; the page needs it for the pad's "ok"
+                }, 3000);
             });
         }
     }

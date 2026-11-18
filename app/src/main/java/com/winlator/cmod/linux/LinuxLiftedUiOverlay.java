@@ -35,6 +35,8 @@ public final class LinuxLiftedUiOverlay {
     private static final String HIDE_DEV_STRIP = "(function(){if(window.__bngStripHider)return;"
             // the page ignores the loading screen unless it believes it runs inside the game (CEF); the engine's hooks reach it the same way
             + "var ig=setInterval(function(){if(window.beamng){window.beamng.ingame=true;clearInterval(ig);}},200);"
+            // the pad's X starts the level ("Start Freeroam" answers it only while focused, which the pad cannot reach in the grid)
+            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){if(a==='action_2'&&v===1){var b=document.querySelector('.play-button');if(b)b.click();}});}},500);"
             // the page paints the main menu's backdrop on the body; in CEF that layer is transparent, here it would hide the game
             + "var st=document.createElement('style');st.textContent='html,body{background:transparent!important;background-image:none!important}';document.head.appendChild(st);"
             + "var pending=0;function hide(){pending=0;document.querySelectorAll('div').forEach(function(e){"
@@ -63,10 +65,14 @@ public final class LinuxLiftedUiOverlay {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    public static WebView attach(Activity activity, FrameLayout root) {
+    /** @param controls the on-screen controls: the page goes just below it, so the virtual gamepad stays drawn (and touchable) over the page */
+    public static WebView attach(Activity activity, FrameLayout root, View controls) {
         UiWebView web = new UiWebView(activity);
         Handler handler = new Handler(Looper.getMainLooper());
         web.setBackgroundColor(Color.TRANSPARENT);
+        // the page tracks its gamepad focus through DOM focus events, which a page without window focus never gets (the pad's "ok" would do nothing)
+        web.setFocusable(true);
+        web.setFocusableInTouchMode(true);
         web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -104,8 +110,19 @@ public final class LinuxLiftedUiOverlay {
                 return true;
             }
         });
-        root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        int at = controls != null ? root.indexOfChild(controls) : -1;
+        root.addView(web, at >= 0 ? at : root.getChildCount(), new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         web.loadUrl(URL);
+        web.requestFocus();
+        // the on-screen controls and other views ask for the focus too; the page needs it for the pad's "ok"
+        Runnable keepFocus = new Runnable() {
+            @Override public void run() {
+                if (web.getParent() == null) return;
+                if (!web.hasFocus()) web.requestFocus();
+                handler.postDelayed(this, 500);
+            }
+        };
+        handler.postDelayed(keepFocus, 500);
         return web;
     }
 

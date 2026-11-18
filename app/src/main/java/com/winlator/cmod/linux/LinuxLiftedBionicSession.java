@@ -118,6 +118,19 @@ public final class LinuxLiftedBionicSession {
                 if (eq > 0 && !line.startsWith("#")) env.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
             }
         }
+        // Gamepads: the program is an aarch64 bionic executable, so the shim (built for bionic) is preloaded here; it hands the app's controller files out
+        // as evdev devices and SDL, which lists pads only through SDL_JOYSTICK_DEVICE without udev, opens them.
+        File shim = LinuxSession.stageAsset(context, "linux-bionic", "libskyshim_bionic.so");
+        if (shim != null) {
+            String preload = env.get("LD_PRELOAD");
+            env.put("LD_PRELOAD", preload == null || preload.isEmpty() ? shim.getPath() : shim.getPath() + ":" + preload);
+            env.put("SKY_INPUT_DIR", LinuxSession.inputDir(context).getPath());
+            env.put("SKY_INPUT_PROTOCOL", com.winlator.cmod.inputcontrols.NativeInputTransport.isEnabled() ? "2" : "1");
+            env.put("SDL_JOYSTICK_DEVICE", "/dev/input/event0:/dev/input/event1:/dev/input/event2:/dev/input/event3");
+            env.put("SDL_JOYSTICK_DISABLE_UDEV", "1");
+            env.put("SDL_HIDAPI_JOYSTICK_DISABLE_UDEV", "1");
+            env.put("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+        }
         env.put("SKY_SHM_DIR", LinuxSession.sessionDirectory(context, "shm").getPath());
         env.put("SKY_X11_DIR", new File(imageFs.getRootDir(), "usr/tmp/.X11-unix").getPath());   // libxcb connects to /tmp/.X11-unix: the runtime maps it here
         if (env.get("SKY_EXE_PATH") == null) env.put("SKY_EXE_PATH", program.getPath());
