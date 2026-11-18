@@ -33,6 +33,8 @@ public final class LinuxLiftedUiOverlay {
 
     /** The page draws a developer strip (UI / Shortcuts / Covers / ... / To top) at the bottom, which is no part of the game: hidden now and whenever the page changes. */
     private static final String HIDE_DEV_STRIP = "(function(){if(window.__bngStripHider)return;"
+            // the page ignores the loading screen unless it believes it runs inside the game (CEF); the engine's hooks reach it the same way
+            + "var ig=setInterval(function(){if(window.beamng){window.beamng.ingame=true;clearInterval(ig);}},200);"
             // the page paints the main menu's backdrop on the body; in CEF that layer is transparent, here it would hide the game
             + "var st=document.createElement('style');st.textContent='html,body{background:transparent!important;background-image:none!important}';document.head.appendChild(st);"
             + "var pending=0;function hide(){pending=0;document.querySelectorAll('div').forEach(function(e){"
