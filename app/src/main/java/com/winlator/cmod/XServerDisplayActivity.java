@@ -167,6 +167,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     public static String NOTIFICATION_CHANNEL_ID = "Winlator";
     public static int NOTIFICATION_ID = -1;
     private XServerRendererView xServerView;
+    private android.webkit.WebView liftedUi;
     private InputControlsView inputControlsView;
     private TouchpadView touchpadView;
     private XEnvironment environment;
@@ -1382,6 +1383,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (winHandler != null && !exiting.get()) winHandler.stop();
+        if (liftedUi != null) { com.winlator.cmod.linux.LinuxLiftedUiOverlay.detach(findViewById(R.id.FLXServerDisplay), liftedUi); liftedUi = null; }
         com.winlator.cmod.perf.GameModeSignal.report(this, false);
         if (steamGameLaunchMonitor != null) steamGameLaunchMonitor.stop();
         if (steamConsoleBridge != null) steamConsoleBridge.stop();
@@ -1925,6 +1927,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 launcher::processSnapshot, launcher::crashEvidence);
         environment.startEnvironmentComponents();
         if (performanceSession != null) performanceSession.setGuestRoot(launcher.getPid());
+        if (!desktopSession && com.winlator.cmod.linux.LinuxLiftedBionicSession.enabled(linuxContainer)) {   // a translated game's UI: its own page, served by the engine
+            runOnUiThread(() -> {   // this method runs on a worker thread; a WebView belongs to the main one
+                FrameLayout uiRoot = findViewById(R.id.FLXServerDisplay);
+                if (uiRoot != null && liftedUi == null && !isFinishing()) liftedUi = com.winlator.cmod.linux.LinuxLiftedUiOverlay.attach(this, uiRoot);
+            });
+        }
     }
 
     private void createWrapperScript(String path, String content) {

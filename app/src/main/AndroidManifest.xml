@@ -27,6 +27,7 @@
 
     <application
         android:name="com.winlator.cmod.SkyNetApplication"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:label="${appLabel}"
         android:icon="@mipmap/ic_launcher_sky"
         android:roundIcon="@mipmap/ic_launcher_sky_round"
