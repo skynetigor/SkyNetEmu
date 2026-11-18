@@ -35,8 +35,8 @@ public final class LinuxLiftedUiOverlay {
     private static final String HIDE_DEV_STRIP = "(function(){if(window.__bngStripHider)return;"
             // the page ignores the loading screen unless it believes it runs inside the game (CEF); the engine's hooks reach it the same way
             + "var ig=setInterval(function(){if(window.beamng){window.beamng.ingame=true;clearInterval(ig);}},200);"
-            // the pad's X starts the level ("Start Freeroam" answers it only while focused, which the pad cannot reach in the grid)
-            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){if(a==='action_2'&&v===1){var b=document.querySelector('.play-button');if(b)b.click();}});}},500);"
+            // the pad's X, or A on a level that is already selected, starts the level ("Start Freeroam" answers it only while focused, which the pad cannot reach in the grid)
+            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){var b=document.querySelector('.play-button');if(a==='action_2'&&v===1){if(b)b.click();}else if(a==='ok'&&v===1&&b){var el=document.activeElement;if(el&&el===window.__bngSel){b.click();}else{setTimeout(function(){window.__bngSel=el&&el.classList&&el.classList.contains('is-current-selection')?el:null;},300);}}});}},500);"
             // the page paints the main menu's backdrop on the body; in CEF that layer is transparent, here it would hide the game
             + "var st=document.createElement('style');st.textContent='html,body{background:transparent!important;background-image:none!important}';document.head.appendChild(st);"
             + "var pending=0;function hide(){pending=0;document.querySelectorAll('div').forEach(function(e){"
