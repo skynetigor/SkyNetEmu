@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2150" height="560" viewBox="0 0 2150 560">
+<defs>
+<linearGradient id="d" gradientUnits="userSpaceOnUse" x1="118" y1="250" x2="906" y2="770"><stop offset="0" stop-color="#5EE7FF"/><stop offset="1" stop-color="#B07CFF"/></linearGradient>
+<linearGradient id="sh" gradientUnits="userSpaceOnUse" x1="360" y1="0" x2="660" y2="0"><stop offset="0" stop-color="#5EE7FF"/><stop offset="1" stop-color="#B07CFF"/></linearGradient>
+<linearGradient id="g" gradientUnits="userSpaceOnUse" x1="1440" y1="0" x2="2020" y2="0"><stop offset="0" stop-color="#5EE7FF"/><stop offset="1" stop-color="#B07CFF"/></linearGradient>
+<linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<mask id="word" maskUnits="userSpaceOnUse" x="0" y="0" width="2150" height="560"><text x="820" y="300" font-family="Helvetica Neue, Arial" font-size="240" font-weight="800" fill="#fff" letter-spacing="-6">SkyNetEmu</text></mask>
+<style>
+:root { --t: 6s; }
+.a { animation-duration: var(--t); animation-iteration-count: infinite; animation-timing-function: cubic-bezier(.4,0,.2,1); animation-fill-mode: both; transform-box: fill-box; transform-origin: center; }
+
+/* controller outline draws on, then holds and dissolves */
+.body { stroke-dasharray: 1; animation-name: draw; }
+@keyframes draw { 0% { stroke-dashoffset: 1; opacity: 1 } 24% { stroke-dashoffset: 0 } 90% { stroke-dashoffset: 0; opacity: 1 } 100% { stroke-dashoffset: 0; opacity: 0 } }
+
+/* S: draws on after the body */
+.s { stroke-dasharray: 1; animation-name: sdraw; }
+@keyframes sdraw { 0%, 12% { stroke-dashoffset: 1; opacity: 1 } 36% { stroke-dashoffset: 0 } 90% { stroke-dashoffset: 0; opacity: 1 } 100% { opacity: 0 } }
+
+.pop20 { animation-name: pop20; }
+@keyframes pop20 { 0%,20% { transform: scale(0); opacity: 0 } 25% { transform: scale(1.35); opacity: 1 } 29% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pop24 { animation-name: pop24; }
+@keyframes pop24 { 0%,24% { transform: scale(0); opacity: 0 } 29% { transform: scale(1.35); opacity: 1 } 33% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pop28 { animation-name: pop28; }
+@keyframes pop28 { 0%,28% { transform: scale(0); opacity: 0 } 33% { transform: scale(1.35); opacity: 1 } 37% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pop30 { animation-name: pop30; }
+@keyframes pop30 { 0%,30% { transform: scale(0); opacity: 0 } 35% { transform: scale(1.35); opacity: 1 } 39% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pop32 { animation-name: pop32; }
+@keyframes pop32 { 0%,32% { transform: scale(0); opacity: 0 } 37% { transform: scale(1.35); opacity: 1 } 41% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pop34 { animation-name: pop34; }
+@keyframes pop34 { 0%,34% { transform: scale(0); opacity: 0 } 39% { transform: scale(1.35); opacity: 1 } 43% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pop36 { animation-name: pop36; }
+@keyframes pop36 { 0%,36% { transform: scale(0); opacity: 0 } 41% { transform: scale(1.35); opacity: 1 } 45% { transform: scale(1) } 90% { transform: scale(1); opacity: 1 } 100% { opacity: 0; transform: scale(1) } }
+.pin40 { animation-name: pin40; }
+@keyframes pin40 { 0%,40% { opacity: 0 } 44% { opacity: 1 } 52% { opacity: .35 } 90% { opacity: .35 } 100% { opacity: 0 } }
+.led40 { animation-name: led40; }
+@keyframes led40 { 0%,40% { opacity: 0; transform: scale(0) } 44% { opacity: 1; transform: scale(1.8) } 50% { opacity: 1; transform: scale(1) } 90% { opacity: 1; transform: scale(1) } 100% { opacity: 0 } }
+.pin44 { animation-name: pin44; }
+@keyframes pin44 { 0%,44% { opacity: 0 } 48% { opacity: 1 } 56% { opacity: .35 } 90% { opacity: .35 } 100% { opacity: 0 } }
+.led44 { animation-name: led44; }
+@keyframes led44 { 0%,44% { opacity: 0; transform: scale(0) } 48% { opacity: 1; transform: scale(1.8) } 54% { opacity: 1; transform: scale(1) } 90% { opacity: 1; transform: scale(1) } 100% { opacity: 0 } }
+.pin48 { animation-name: pin48; }
+@keyframes pin48 { 0%,48% { opacity: 0 } 52% { opacity: 1 } 60% { opacity: .35 } 90% { opacity: .35 } 100% { opacity: 0 } }
+.led48 { animation-name: led48; }
+@keyframes led48 { 0%,48% { opacity: 0; transform: scale(0) } 52% { opacity: 1; transform: scale(1.8) } 58% { opacity: 1; transform: scale(1) } 90% { opacity: 1; transform: scale(1) } 100% { opacity: 0 } }
+
+/* glow breathes once everything is lit */
+.glow { animation-name: glow; }
+@keyframes glow { 0%, 35% { filter: drop-shadow(0 0 0 rgba(94,231,255,0)) } 55% { filter: drop-shadow(0 0 22px rgba(94,231,255,.75)) } 75% { filter: drop-shadow(0 0 8px rgba(176,124,255,.5)) } 90% { filter: drop-shadow(0 0 22px rgba(94,231,255,.6)) } 100% { filter: drop-shadow(0 0 0 rgba(94,231,255,0)) } }
+
+/* wordmark slides in, a light sweep crosses it, tagline fades up */
+.word { animation-name: word; }
+@keyframes word { 0%, 18% { opacity: 0; transform: translateX(-60px) } 38% { opacity: 1; transform: translateX(0) } 90% { opacity: 1; transform: translateX(0) } 100% { opacity: 0 } }
+.sweep { animation-name: sweep; }
+@keyframes sweep { 0%, 46% { transform: translateX(-500px) } 66%, 100% { transform: translateX(2100px) } }
+.tag { animation-name: tag; }
+@keyframes tag { 0%, 34% { opacity: 0; transform: translateY(14px) } 50% { opacity: 1; transform: translateY(0) } 90% { opacity: 1 } 100% { opacity: 0 } }
+</style>
+</defs>
+
+<g class="a glow" transform="translate(-50 -210) scale(.78)">
+<g transform="translate(0 -20)">
+<path class="a body" pathLength="1" d="M310 270H714C795 270 840 330 872 480C900 610 906 720 852 745C800 768 758 722 718 664C698 636 678 626 648 626H376C346 626 326 636 306 664C266 722 224 768 172 745C118 720 124 610 152 480C184 330 229 270 310 270Z" fill="none" stroke="url(#d)" stroke-width="24" stroke-linejoin="round" stroke-linecap="round"/>
+<g class="a pop20" stroke="url(#d)" stroke-width="26" stroke-linecap="round" fill="none"><path d="M262 420V500M222 460H302"/></g>
+<g fill="url(#d)">
+<circle class="a pop24" cx="780" cy="400" r="19"/>
+<circle class="a pop28" cx="825" cy="448" r="19"/>
+<circle class="a pop32" cx="780" cy="496" r="19"/>
+<circle class="a pop36" cx="735" cy="448" r="19"/>
+</g>
+<g stroke="url(#d)" stroke-width="20" stroke-linecap="round">
+<path class="a pin40" d="M440 626V690"/>
+<path class="a pin44" d="M512 626V690"/>
+<path class="a pin48" d="M584 626V690"/>
+</g>
+<g fill="#fff">
+<circle class="a led40" cx="440" cy="702" r="14"/>
+<circle class="a led44" cx="512" cy="702" r="14"/>
+<circle class="a led48" cx="584" cy="702" r="14"/>
+</g>
+<g transform="translate(175 105) scale(.66)">
+<path class="a s" pathLength="1" d="M660,395C640,300 370,320 370,450C370,570 650,470 650,600C650,725 380,720 360,610" stroke="url(#sh)" stroke-width="64" stroke-linecap="round" fill="none"/>
+<g fill="#fff"><circle class="a pop30" cx="660" cy="395" r="32"/><circle class="a pop34" cx="360" cy="610" r="32"/></g>
+</g>
+</g>
+</g>
+
+<g class="a word">
+<text x="820" y="300" font-family="Helvetica Neue, Arial" font-size="240" font-weight="800" fill="#fff" letter-spacing="-6">SkyNet<tspan fill="url(#g)">Emu</tspan></text>
+<g mask="url(#word)"><rect class="a sweep" x="0" y="60" width="160" height="300" fill="url(#sweep)" transform="skewX(-20)"/></g>
+</g>
+<text class="a tag" x="828" y="390" font-family="Helvetica Neue, Arial" font-size="46" fill="#8FA0D8" letter-spacing="12">PC GAMES ON ANDROID</text>
+</svg>
