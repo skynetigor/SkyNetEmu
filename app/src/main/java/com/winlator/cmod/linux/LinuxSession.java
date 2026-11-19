@@ -87,6 +87,34 @@ public final class LinuxSession {
         }
     }
 
+    /** The dynamic loader an ELF executable asks for (its PT_INTERP, e.g. /system/bin/linker64 for a program built for Android's C library); null when it has none or is no ELF file. */
+    public static String elfInterpreter(File file) {
+        if (file == null || !file.isFile()) return null;
+        try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(file, "r")) {
+            byte[] h = new byte[64];
+            if (in.read(h) < 64 || h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F' || h[4] != 2) return null;   // 64-bit ELF only
+            java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(h).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            long phoff = b.getLong(0x20); int phentsize = b.getShort(0x36) & 0xffff, phnum = b.getShort(0x38) & 0xffff;
+            for (int i = 0; i < phnum && i < 64; i++) {
+                byte[] ph = new byte[56];
+                in.seek(phoff + (long) i * phentsize);
+                if (in.read(ph) < 56) return null;
+                java.nio.ByteBuffer p = java.nio.ByteBuffer.wrap(ph).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                if (p.getInt(0) != 3) continue;   // PT_INTERP
+                long off = p.getLong(8), size = p.getLong(32);
+                if (size <= 1 || size > 256) return null;
+                byte[] name = new byte[(int) size - 1];
+                in.seek(off);
+                in.readFully(name);
+                return new String(name, java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        catch (java.io.IOException e) {
+            return null;
+        }
+        return null;
+    }
+
     /** Where a program, given as the guest sees its path, lives on the host (null if it cannot be told). */
     public static File hostFile(Context context, Container container, String guestPath) {
         if (guestPath.startsWith("/root/")) return new File(container.getLinuxHomeDir(), guestPath.substring(6));
@@ -533,7 +561,7 @@ public final class LinuxSession {
                 "1".equals(container.getExtra(LinuxEmulatorSetup.EXTRA_ISOLATE_GAME_GPU)));
         for (String part : guestCommand) argv.add(part);
 
-        if (LinuxLiftedBionicSession.enabled(container) && !java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {
+        if (!java.util.Arrays.asList(guestCommand).contains(STEAM_MARKER)) {   // an AArch64 program built for Android's C library runs there, never under proot (build() returns null for any other program)
             Launch lifted = LinuxLiftedBionicSession.build(context, imageFs, container, guestCommand, guestEnv, home);
             if (lifted != null) return lifted;
         }

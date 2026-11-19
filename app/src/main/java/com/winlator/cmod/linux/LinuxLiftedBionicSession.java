@@ -21,7 +21,7 @@ import java.util.Map;
  * Android Box64 and FEX sessions (the imagefs's X server socket, PulseAudio, the Wine wrapper ICD over an adrenotools driver); the program reads
  * the game's folder on shared storage itself.
  *
- * Experimental, for a shortcut with {@link #EXTRA} = "1" whose program is such an executable (tools/binary-translation-poc/build-bionic.sh).
+ * For any shortcut whose program is such an executable (an AArch64 ELF whose interpreter is Android's linker; {@link #EXTRA} = "1" is no longer needed) (tools/binary-translation-poc/build-bionic.sh).
  * Shortcut variables used here and not passed on: SKY_LIFTED_CWD, the folder to start in (the game's BinLinux folder).
  */
 public final class LinuxLiftedBionicSession {
@@ -32,8 +32,11 @@ public final class LinuxLiftedBionicSession {
 
     private LinuxLiftedBionicSession() {}
 
+    /** Set when a program was started by this session: the UI overlay and the on-screen gamepad belong to such a session. */
+    private static volatile boolean active;
+
     public static boolean enabled(Container container) {
-        return "1".equals(container.getExtra(EXTRA));
+        return active || "1".equals(container.getExtra(EXTRA));
     }
 
     /**
@@ -42,6 +45,7 @@ public final class LinuxLiftedBionicSession {
      * @return null when this session cannot run the command (it then runs the usual way)
      */
     static LinuxSession.Launch build(Context context, ImageFs imageFs, Container container, String[] guestCommand, List<String> guestEnv, File home) {
+        active = false;
         int at = -1;
         for (int i = 0; i < guestCommand.length; i++) if ("bannerlator-run".equals(guestCommand[i])) at = i;
         if (at < 0 || at + 4 >= guestCommand.length) return null;
@@ -61,7 +65,12 @@ public final class LinuxLiftedBionicSession {
             return null;
         }
         if (LinuxSession.elfMachine(program) != 183) {
-            Log.w(TAG, "Not an AArch64 program: " + program);
+            Log.d(TAG, "Not an AArch64 program: " + program);
+            return null;
+        }
+        String interpreter = LinuxSession.elfInterpreter(program);
+        if (interpreter == null || !interpreter.startsWith("/system/bin/linker")) {   // a glibc AArch64 program needs the runtime's loader: the usual session
+            Log.i(TAG, "Not built for Android's C library (" + interpreter + "): " + program);
             return null;
         }
         File parent = LinuxSession.stageAsset(context, "linux-bionic", "bionic-launch-parent");
@@ -144,6 +153,7 @@ public final class LinuxLiftedBionicSession {
         for (String word : argv) dump.append("ARG ").append(word).append('\n');
         for (String entry : env.toStringArray()) dump.append("ENV ").append(entry).append('\n');
         FileUtils.writeString(new File(Environment.getExternalStorageDirectory(), "Winlator/logs/linux-lifted-bionic-launch.txt"), dump.toString());
+        active = true;
         return new LinuxSession.Launch(argv.toArray(new String[0]), env.toStringArray(), workingDir, "bionic");
     }
 }
