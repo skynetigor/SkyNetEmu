@@ -31,10 +31,12 @@ public final class LinuxProgramInstaller {
 
     /**
      * Programs already in this container's Linux home can run there with any emulator. Box64 can also read an x86-64
-     * program from shared storage. FEX normally needs importing; direct bionic BeamNG runs from shared storage as it is.
+     * program from shared storage. FEX normally needs importing; direct bionic BeamNG runs from shared storage as it is. An AArch64 program built for
+     * Android's C library (a translated game) runs from shared storage too: the launch parent loads it into memory (see launch-parent.c).
      */
     public static boolean needsCopy(Container container, File file) {
         if (LinuxProgramPaths.inHome(container.getLinuxHomeDir(), file) != null) return false;
+        if (LinuxLiftedBionicSession.isBionicProgram(file) && LinuxProgramPaths.isWithin(Environment.getExternalStorageDirectory(), file)) return false;
         if (LinuxSession.elfMachine(file) != 62) return true;
         if (LinuxProgramPaths.isBeamNG(file) && LinuxBionicSession.enabled(container)
                 && LinuxEmulator.FEX.equals(LinuxEmulator.choice(container))

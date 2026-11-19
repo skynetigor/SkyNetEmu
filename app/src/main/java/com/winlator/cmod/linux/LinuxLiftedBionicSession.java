@@ -35,6 +35,13 @@ public final class LinuxLiftedBionicSession {
     /** Set when a program was started by this session: the UI overlay and the on-screen gamepad belong to such a session. */
     private static volatile boolean active;
 
+    /** An AArch64 executable whose interpreter is Android's linker (built for Android's C library): this session runs it, wherever it lies. */
+    static boolean isBionicProgram(File file) {
+        if (LinuxSession.elfMachine(file) != 183) return false;
+        String interpreter = LinuxSession.elfInterpreter(file);
+        return interpreter != null && interpreter.startsWith("/system/bin/linker");
+    }
+
     public static boolean enabled(Container container) {
         return active || "1".equals(container.getExtra(EXTRA));
     }
@@ -64,13 +71,8 @@ public final class LinuxLiftedBionicSession {
             Log.w(TAG, "The translated program is missing: " + guestCommand[at + 1]);
             return null;
         }
-        if (LinuxSession.elfMachine(program) != 183) {
-            Log.d(TAG, "Not an AArch64 program: " + program);
-            return null;
-        }
-        String interpreter = LinuxSession.elfInterpreter(program);
-        if (interpreter == null || !interpreter.startsWith("/system/bin/linker")) {   // a glibc AArch64 program needs the runtime's loader: the usual session
-            Log.i(TAG, "Not built for Android's C library (" + interpreter + "): " + program);
+        if (!isBionicProgram(program)) {   // a glibc AArch64 program needs the runtime's loader: the usual session
+            Log.d(TAG, "Not an AArch64 program built for Android's C library: " + program);
             return null;
         }
         File parent = LinuxSession.stageAsset(context, "linux-bionic", "bionic-launch-parent");
@@ -88,7 +90,12 @@ public final class LinuxLiftedBionicSession {
         catch (java.io.IOException e) {
             Log.w(TAG, "Cannot link the platform's libcrypto: " + e.getMessage());
         }
+        boolean beamng = isBeamNG(program);
         File workingDir = program.getParentFile();
+        if (beamng && "BinLinuxArm64".equals(workingDir.getName())) {   // the game knows its own BinLinux folder
+            File binLinux = new File(workingDir.getParentFile(), "BinLinux");
+            if (binLinux.isDirectory()) workingDir = binLinux;
+        }
         for (String entry : guestEnv) {
             int eq = entry.indexOf('=');
             if (eq <= 0) continue;
@@ -108,6 +115,10 @@ public final class LinuxLiftedBionicSession {
             String key = entry.substring(0, eq), value = entry.substring(eq + 1).replace("/root", homePath);
             if (key.equals("SKY_LIFTED_CWD")) workingDir = new File(value);
             else env.put(key, value);
+        }
+        if (beamng) {   // what a translated BeamNG needs: no ALSA (FMOD's own audio backend crashes without a sound card), the threads on the performance cores
+            if (!env.has("SKY_DLOPEN_DENY")) env.put("SKY_DLOPEN_DENY", "libasound");
+            if (!env.has("SKY_PIN")) env.put("SKY_PIN", "auto");
         }
         Map<String, String> memoryEnv = new LinkedHashMap<>();
         for (String pair : env.toStringArray()) {
@@ -142,12 +153,20 @@ public final class LinuxLiftedBionicSession {
         }
         env.put("SKY_SHM_DIR", LinuxSession.sessionDirectory(context, "shm").getPath());
         env.put("SKY_X11_DIR", new File(imageFs.getRootDir(), "usr/tmp/.X11-unix").getPath());   // libxcb connects to /tmp/.X11-unix: the runtime maps it here
-        if (env.get("SKY_EXE_PATH") == null) env.put("SKY_EXE_PATH", program.getPath());
+        if (!env.has("SKY_EXE_PATH")) {   // the path the program answers for /proc/self/exe: BeamNG finds its game folder from it, and knows only BinLinux
+            File exe = program;
+            if (beamng && "BinLinuxArm64".equals(program.getParentFile().getName())) {
+                File x86 = new File(program.getParentFile().getParentFile(), "BinLinux/" + program.getName());
+                if (x86.isFile()) exe = x86;
+            }
+            env.put("SKY_EXE_PATH", exe.getPath());
+        }
 
         List<String> argv = new ArrayList<>();
         argv.add(parent.getPath());
         argv.add(program.getPath());
         for (int i = first + nenv + nwrap; i < guestCommand.length; i++) argv.add(guestCommand[i].replace("/root", homePath));
+        if (beamng) addBeamNGArguments(context, program, argv);
         Log.i(TAG, "Session on Android's C library: " + program + " in " + workingDir);
         StringBuilder dump = new StringBuilder();
         for (String word : argv) dump.append("ARG ").append(word).append('\n');
@@ -155,5 +174,36 @@ public final class LinuxLiftedBionicSession {
         FileUtils.writeString(new File(Environment.getExternalStorageDirectory(), "Winlator/logs/linux-lifted-bionic-launch.txt"), dump.toString());
         active = true;
         return new LinuxSession.Launch(argv.toArray(new String[0]), env.toStringArray(), workingDir, "bionic");
+    }
+
+    /** BeamNG's Linux executable or its translated build: BinLinux/BeamNG.drive.x64 or BinLinuxArm64/BeamNG.drive.x64. */
+    private static boolean isBeamNG(File program) {
+        File folder = program.getParentFile();
+        return "BeamNG.drive.x64".equals(program.getName()) && folder != null
+                && ("BinLinux".equals(folder.getName()) || "BinLinuxArm64".equals(folder.getName()));
+    }
+
+    /**
+     * The game's arguments a translated BeamNG needs and the shortcut did not give: no sound engine (no sound card for FMOD), no Steam, no bindless
+     * graphics, and the extension that serves the game's own UI to the app's WebView (it is copied into the game's lua/ge/extensions).
+     */
+    private static void addBeamNGArguments(Context context, File program, List<String> argv) {
+        for (String flag : new String[]{"-nosfx", "-nosteam", "-nogfxbindless"}) if (!argv.contains(flag)) argv.add(flag);
+        if (argv.contains("-lua")) return;
+        File game = program.getParentFile().getParentFile();
+        File target = game == null ? null : new File(game, "lua/ge/extensions/skynetwebui.lua");
+        if (target == null) return;
+        try (java.io.InputStream in = context.getAssets().open("linux/skynetwebui.lua")) {
+            byte[] data = in.readAllBytes();
+            if (!target.isFile() || !java.util.Arrays.equals(java.nio.file.Files.readAllBytes(target.toPath()), data)) {
+                target.getParentFile().mkdirs();
+                java.nio.file.Files.write(target.toPath(), data);
+            }
+            argv.add("-lua");
+            argv.add("extensions.load('skynetwebui')");
+        }
+        catch (java.io.IOException e) {
+            Log.w(TAG, "Cannot install the UI extension: " + e.getMessage());
+        }
     }
 }

@@ -1,0 +1,65 @@
+-- serves the game's own UI to a browser/WebView over HTTP + WebSocket (the UI's "external client mode", comms.js) on 127.0.0.1: the app shows it as an overlay
+local M = {}
+local port = 8084
+local server
+local origTrigger
+local stats = os.getenv('SKY_WEBUI_STATS') and {n = {}, bytes = {}, t = 0} or nil   -- SKY_WEBUI_STATS=1: log what the forwarder sends
+local noForward = os.getenv('SKY_WEBUI_NOFWD') ~= nil
+
+-- The engine's web server answers hooks fired while it runs a page's command (GL...) only when that command returns (a level load is one command, so
+-- the loading screen's progress would arrive after the load) and drops the ones fired anywhere else (route data, snapshots): the stock UI gets all
+-- of them through CEF. Broadcast every hook to the connected pages right away; a command's own reply stays with the engine.
+local function installHookForward()
+  if origTrigger or not guihooks or not guihooks.trigger then return end
+  origTrigger = guihooks.trigger
+  guihooks.trigger = function(name, ...)
+    origTrigger(name, ...)
+    if server and name ~= 'onBNGAPICallback' and not noForward then
+      local args = {}
+      for i = 1, select('#', ...) do
+        local ok, j = pcall(jsonEncode, (select(i, ...)))
+        args[i] = ok and j or 'null'
+      end
+      local ok, hook = pcall(jsonEncode, name)
+      if ok then
+        local msg = 'H#[[' .. hook .. ',[' .. table.concat(args, ',') .. ']]]'
+        if stats then stats.n[name] = (stats.n[name] or 0) + 1; stats.bytes[name] = (stats.bytes[name] or 0) + #msg end
+        server:broadcastData(msg)
+      end
+    end
+  end
+end
+-- a level load unloads ordinary extensions, which would stop the server (and the page with it): keep this one across levels
+local function onInit()
+  setExtensionUnloadMode(M, "manual")
+end
+local function onExtensionLoaded()
+  server = BNGWebWSServer.getOrCreate('127.0.0.1', port, './', 'bng-ext-app-v1', '/ui/entrypoints/main/index.html', false, false)
+  if not os.getenv('SKY_WEBUI_NOSTREAMS') then server:enableDataStreams() end
+  installHookForward()
+  print('skynetwebui: ui server on http://127.0.0.1:' .. tostring(port) .. '/')
+end
+local function onExtensionUnloaded()
+  if server then BNGWebWSServer.destroy(server); server = nil end
+end
+local function onUpdate(dtReal)
+  if not server then return end
+  server:getPeerEvents()
+  if stats then
+    stats.t = stats.t + (dtReal or 0)
+    if stats.t > 5 then
+      local rows = {}
+      for k, n in pairs(stats.n) do rows[#rows + 1] = {k, n, stats.bytes[k]} end
+      table.sort(rows, function(a, b) return a[3] > b[3] end)
+      local out = {}
+      for i = 1, math.min(6, #rows) do out[#out + 1] = rows[i][1] .. ' x' .. rows[i][2] .. ' ' .. rows[i][3] .. 'B' end
+      log('I', 'skynetwebui', 'hooks in ' .. string.format('%.1f', stats.t) .. 's: ' .. table.concat(out, ', '))
+      stats.n = {}; stats.bytes = {}; stats.t = 0
+    end
+  end
+end
+M.onInit = onInit
+M.onExtensionLoaded = onExtensionLoaded
+M.onExtensionUnloaded = onExtensionUnloaded
+M.onUpdate = onUpdate
+return M

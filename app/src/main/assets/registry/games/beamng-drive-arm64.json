@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "revision": 1,
+  "id": "beamng-drive-arm64",
+  "name": "BeamNG.drive (translated ARM64)",
+  "linux": {
+    "executables": [
+      "BinLinuxArm64/BeamNG.drive.x64"
+    ],
+    "defaults": {
+      "executable": "BinLinuxArm64/BeamNG.drive.x64",
+      "noSteam": {
+        "default": true,
+        "arg": "-nosteam"
+      }
+    }
+  },
+  "versions": [
+    {
+      "id": "0.40",
+      "label": "0.40.x",
+      "preferredPlatform": "linux",
+      "default": true,
+      "status": "untested",
+      "notes": "BeamNG's x86-64 Linux program translated ahead of time to ARM64 for Android's C library (no emulator, no PRoot): BinLinuxArm64/BeamNG.drive.x64 beside BinLinux. Runs from the game's folder on shared storage. The game's own UI is shown by the app (web UI extension).",
+      "match": {
+        "versionFile": {
+          "path": "integrity.json",
+          "tail": 256,
+          "regex": "\"version\":\\s*\"([0-9.]+)\"",
+          "from": "0.40",
+          "until": "0.41"
+        }
+      },
+      "linux": {
+        "userData": {
+          "arg": "-userpath",
+          "links": {
+            "current/settings": "userdata/settings",
+            "current/mods": "userdata/mods"
+          }
+        },
+        "resolution": "native",
+        "args": [
+          "-nogfxbindless"
+        ]
+      }
+    }
+  ]
+}

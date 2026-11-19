@@ -8,6 +8,11 @@
    "config": "games/beamng-drive.json"
   },
   {
+   "id": "beamng-drive-arm64",
+   "name": "BeamNG.drive (translated ARM64)",
+   "config": "games/beamng-drive-arm64.json"
+  },
+  {
    "id": "tomb-raider-2013",
    "name": "Tomb Raider (2013)",
    "steamAppId": 203160,
