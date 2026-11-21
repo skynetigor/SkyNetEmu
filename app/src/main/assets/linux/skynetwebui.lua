@@ -5,12 +5,29 @@ local server
 local origTrigger
 local stats = os.getenv('SKY_WEBUI_STATS') and {n = {}, bytes = {}, t = 0} or nil   -- SKY_WEBUI_STATS=1: log what the forwarder sends
 local noForward = os.getenv('SKY_WEBUI_NOFWD') ~= nil
+local noRaw = os.getenv('SKY_WEBUI_NORAW') ~= nil   -- SKY_WEBUI_NORAW=1: do not forward the hooks sent as JSON text (triggerRawJS)
 
 -- The engine's web server answers hooks fired while it runs a page's command (GL...) only when that command returns (a level load is one command, so
 -- the loading screen's progress would arrive after the load) and drops the ones fired anywhere else (route data, snapshots): the stock UI gets all
 -- of them through CEF. Broadcast every hook to the connected pages right away; a command's own reply stays with the engine.
+local origTriggerRaw
 local function installHookForward()
   if origTrigger or not guihooks or not guihooks.trigger then return end
+  -- hooks whose payload is already JSON text (guihooks.triggerRawJS(name, json): 0.39's controls service sends "ControllersChanged" this way, and the page's binding code fails without it)
+  if guihooks.triggerRawJS and not noRaw then
+    origTriggerRaw = guihooks.triggerRawJS
+    guihooks.triggerRawJS = function(name, rawJs, ...)
+      origTriggerRaw(name, rawJs, ...)
+      if server and name ~= 'onBNGAPICallback' and not noForward then
+        local ok, hook = pcall(jsonEncode, name)
+        if ok then
+          local msg = 'H#[[' .. hook .. ',[' .. tostring(rawJs) .. ']]]'
+          if stats then stats.n[name] = (stats.n[name] or 0) + 1; stats.bytes[name] = (stats.bytes[name] or 0) + #msg end
+          server:broadcastData(msg)
+        end
+      end
+    end
+  end
   origTrigger = guihooks.trigger
   guihooks.trigger = function(name, ...)
     origTrigger(name, ...)
