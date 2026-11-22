@@ -22,6 +22,8 @@ import android.view.View;
 import com.winlator.cmod.XServerDisplayActivity;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.core.CPUStatus;
+import com.winlator.cmod.core.CpuCoreStats;
+import com.winlator.cmod.core.GpuClock;
 import com.winlator.cmod.core.GpuLoad;
 import com.winlator.cmod.core.GPUInformation;
 
@@ -178,6 +180,24 @@ public class WinlatorHUD extends View {
     private final GpuLoad gpuLoad = new GpuLoad();
     private boolean battFailed = false;
 
+    // ---- Advanced style (hudMode 3): the modern strip plus a telemetry block below it with the
+    // per-core load and clock, the GPU clock, memory in gigabytes and the 1% low of the FPS. ----
+    private volatile boolean advanced = false;
+    private final CpuCoreStats coreStats = new CpuCoreStats();
+    private final GpuClock gpuClock = new GpuClock();
+    private volatile int[] snapCoreBusy = new int[0];
+    private volatile short[] snapCoreMhz = new short[0];
+    private volatile int snapGpuMhz = -1;
+    private volatile String strMem = "N/A";
+    private volatile String strLow1 = "--";
+    private static final int FT_CAP = 512;
+    private final float[] ftRing = new float[FT_CAP];   // per-present frame intervals (ms) for the percentile low
+    private int ftHead = 0, ftSize = 0;
+    private long lastFrameNs = 0;
+    private final Paint pBar = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pDim = new Paint(TEXT_FLAGS);
+    private float advBarW, advBarGap, advCellW, wAdvLabel;
+
     private final Runnable redrawRunnable = () -> {
         redrawScheduled = false;
         boolean coordinated = XServerRendererView.coordinatesOverlays(getContext());
@@ -207,6 +227,7 @@ public class WinlatorHUD extends View {
 
         initPaints(density);
         gpuLoad.detect();
+        gpuClock.detect();
         detectGpuNameOnce();
         loadPrefs();
         refreshBackendRenderer(false);
@@ -255,6 +276,13 @@ public class WinlatorHUD extends View {
         wDynFps = pVal.measureText(strFps);
         wDynRend = pRend.measureText(strRend);
         wDynGpuName = 0f;
+
+        pDim.setTextSize(TS); pDim.setTypeface(mono); pDim.setColor(Color.rgb(0x9E, 0x9E, 0x9E));
+        pBar.setStyle(Paint.Style.FILL);
+        advBarW = 3.5f * density;
+        advBarGap = 2f * density;
+        wAdvLabel = pVal.measureText("GHZ ");
+        advCellW = advBarW + advBarGap + pVal.measureText("100") + wInnerSpace;
     }
 
     private void detectGpuNameOnce() {
@@ -342,6 +370,33 @@ public class WinlatorHUD extends View {
     public void onFrame() {
         if (!rendererActive && !userEnabled) return;
         frameAccum.incrementAndGet();
+        if (advanced) {
+            long now = System.nanoTime();
+            synchronized (ftRing) {
+                if (lastFrameNs != 0) {
+                    float ms = (now - lastFrameNs) / 1_000_000f;
+                    // skip implausibly long gaps (paused, minimised) so a stall does not poison the percentile
+                    if (ms > 0f && ms < 1000f) {
+                        ftRing[ftHead] = ms;
+                        ftHead = (ftHead + 1) % FT_CAP;
+                        if (ftSize < FT_CAP) ftSize++;
+                    }
+                }
+                lastFrameNs = now;
+            }
+        }
+    }
+
+    /** The advanced style: the modern strip plus the per-core/GPU-clock/memory/1%-low block below it. */
+    public void setAdvanced(boolean value) {
+        if (advanced == value) return;
+        advanced = value;
+        synchronized (ftRing) { ftHead = 0; ftSize = 0; lastFrameNs = 0; strLow1 = "--"; }
+        uiHandler.post(this::requestRelayout);
+    }
+
+    public boolean isAdvanced() {
+        return advanced;
     }
 
     public void update() {
@@ -375,6 +430,32 @@ public class WinlatorHUD extends View {
         if ((mask & (SHOW_CPU_USAGE | SHOW_CPU_TEMP)) != 0) readCpu();
         if ((mask & SHOW_RAM) != 0) readRam();
         if ((mask & (SHOW_POWER | SHOW_BATTERY_TEMP | SHOW_CHARGE_STATE)) != 0) readBattery();
+        if (advanced) readAdvanced();
+    }
+
+    private void readAdvanced() {
+        int n = coreStats.coreCount();
+        int[] busy = new int[n];
+        short[] mhz = new short[n];
+        coreStats.sample(busy, mhz);
+        snapCoreBusy = busy;
+        snapCoreMhz = mhz;
+        if (!gpuClock.unavailable()) {
+            int clock = gpuClock.read();
+            if (clock > 0) snapGpuMhz = clock;
+        }
+        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
+            long total = -1, avail = -1;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("MemTotal:")) total = parseMeminfoKb(line);
+                else if (line.startsWith("MemAvailable:")) { avail = parseMeminfoKb(line); break; }
+            }
+            if (total > 0 && avail >= 0) {
+                strMem = String.format(Locale.US, "%.1f/%.1fG",
+                        (total - avail) / 1048576f, total / 1048576f);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void readGpu() {
@@ -555,6 +636,23 @@ public class WinlatorHUD extends View {
             wDynFps = pVal.measureText(strFps);
             if (wDynFps > wValFps) requestRelayout();
         }
+
+        if (advanced) {
+            float[] copy;
+            int size;
+            synchronized (ftRing) {
+                size = ftSize;
+                copy = new float[size];
+                System.arraycopy(ftRing, 0, copy, 0, size);
+            }
+            if (size >= 64) {
+                java.util.Arrays.sort(copy);
+                int worst = Math.max(1, size / 100);   // the 1% slowest frames
+                float sumMs = 0f;
+                for (int i = size - worst; i < size; i++) sumMs += copy[i];
+                strLow1 = String.format(Locale.US, "%.0f", 1000f * worst / sumMs);
+            }
+        }
     }
 
     @Override
@@ -577,10 +675,15 @@ public class WinlatorHUD extends View {
         float x = PAD;
         float rowH = TS + PAD * 2;
         float baseline = PAD + TS;
-        float contentWidth = Math.min(getWidth(), measureHorizontalContent());
+        float stripWidth = Math.min(getWidth(), measureHorizontalContent());
+        float contentWidth = advanced
+                ? Math.min(getWidth(), Math.max(stripWidth, measureAdvancedWidth()))
+                : stripWidth;
 
-        bgRect.set(0, 0, contentWidth, rowH);
+        bgRect.set(0, 0, contentWidth, advanced ? rowH + advBlockHeight() : rowH);
         canvas.drawRoundRect(bgRect, CORNER, CORNER, pBg);
+
+        if (advanced) drawAdvancedBlock(canvas, rowH);
 
         boolean hasGroup = false;
 
@@ -672,11 +775,14 @@ public class WinlatorHUD extends View {
     private void drawVertical(Canvas canvas) {
         float lineH = TS + PAD * 2;
         float rows = countVerticalRows();
-        float width = Math.min(getWidth(), measureVerticalContent());
-        float height = rows * lineH + PAD;
+        float stripWidth = measureVerticalContent();
+        float width = Math.min(getWidth(), advanced ? Math.max(stripWidth, measureAdvancedWidth()) : stripWidth);
+        float height = rows * lineH + PAD + (advanced ? advBlockHeight() : 0f);
 
         bgRect.set(0, 0, width, height);
         canvas.drawRoundRect(bgRect, CORNER, CORNER, pBg);
+
+        if (advanced) drawAdvancedBlock(canvas, rows * lineH + PAD);
 
         float y = PAD;
 
@@ -748,6 +854,90 @@ public class WinlatorHUD extends View {
     private float drawSep(Canvas canvas, float x, float baseline) {
         canvas.drawText(" | ", x, baseline, pSep);
         return wSep;
+    }
+
+    // ---- The advanced telemetry block: three compact rows under the strip. Row one is the per-core
+    // load (a mini bar coloured by load next to the percent), row two each core's clock in GHz, row
+    // three the GPU clock, memory used/total in gigabytes and the 1% low of the FPS. ----
+
+    private float advLineHeight() {
+        return TS + PAD;
+    }
+
+    private float advBlockHeight() {
+        return 3 * advLineHeight() + PAD;
+    }
+
+    private float measureAdvancedWidth() {
+        float coreRow = PAD * 2 + wAdvLabel + coreStats.coreCount() * advCellW;
+        float extrasRow = PAD * 2
+                + wLabelGpu + pVal.measureText(snapGpuMhz > 0 ? snapGpuMhz + "MHz" : "N/A") + wSep
+                + pRam.measureText("MEM ") + pVal.measureText(strMem) + wSep
+                + pFps.measureText("1%LOW ") + pVal.measureText(strLow1);
+        return Math.max(coreRow, extrasRow);
+    }
+
+    private float measureAdvancedReserved() {
+        float coreRow = PAD * 2 + wAdvLabel + coreStats.coreCount() * advCellW;
+        float extrasRow = PAD * 2
+                + wLabelGpu + pVal.measureText("9999MHz") + wSep
+                + pRam.measureText("MEM ") + pVal.measureText("88.8/88.8G") + wSep
+                + pFps.measureText("1%LOW ") + pVal.measureText("999");
+        return Math.max(coreRow, extrasRow);
+    }
+
+    private void drawAdvancedBlock(Canvas canvas, float top) {
+        float lineH = advLineHeight();
+        canvas.drawLine(PAD, top, bgRect.right - PAD, top, pSep);
+
+        int[] busy = snapCoreBusy;
+        short[] mhz = snapCoreMhz;
+        int n = Math.min(busy.length, mhz.length);
+        float yLoad = top + lineH;
+        float yClk = top + 2 * lineH;
+        float yExtra = top + 3 * lineH;
+
+        canvas.drawText("CPU ", PAD, yLoad, pCpu);
+        canvas.drawText("GHZ ", PAD, yClk, pDim);
+        float x = PAD + wAdvLabel;
+        for (int i = 0; i < n; i++) {
+            int load = busy[i];
+            if (load >= 0) {
+                float h = Math.max(2f, TS * load / 100f);
+                pBar.setColor(loadColor(load));
+                canvas.drawRect(x, yLoad - h, x + advBarW, yLoad, pBar);
+            } else {
+                pBar.setColor(C_SEP);
+                canvas.drawRect(x, yLoad - 2f, x + advBarW, yLoad, pBar);
+            }
+            float tx = x + advBarW + advBarGap;
+            canvas.drawText(load >= 0 ? String.valueOf(load) : "--", tx, yLoad, pVal);
+            canvas.drawText(mhz[i] > 0 ? String.format(Locale.US, "%.1f", mhz[i] / 1000f) : "--", tx, yClk, pDim);
+            x += advCellW;
+        }
+
+        x = PAD;
+        canvas.drawText("GPU ", x, yExtra, pGpuUsage);
+        x += wLabelGpu;
+        String gpuClk = snapGpuMhz > 0 ? snapGpuMhz + "MHz" : "N/A";
+        canvas.drawText(gpuClk, x, yExtra, pVal);
+        x += pVal.measureText(gpuClk);
+        x += drawSep(canvas, x, yExtra);
+        canvas.drawText("MEM ", x, yExtra, pRam);
+        x += pRam.measureText("MEM ");
+        canvas.drawText(strMem, x, yExtra, pVal);
+        x += pVal.measureText(strMem);
+        x += drawSep(canvas, x, yExtra);
+        canvas.drawText("1%LOW ", x, yExtra, pFps);
+        x += pFps.measureText("1%LOW ");
+        canvas.drawText(strLow1, x, yExtra, pVal);
+    }
+
+    /** Green at idle through amber to red at full load. */
+    private int loadColor(int load) {
+        int r = load <= 50 ? (int) (255 * (load / 50f)) : 255;
+        int g = load <= 50 ? 230 : (int) (230 * (1f - (load - 50) / 50f)) + 25;
+        return Color.rgb(r, Math.max(40, g), 40);
     }
 
     private float measureHorizontalContent() {
@@ -943,6 +1133,10 @@ public class WinlatorHUD extends View {
         float lineH = TS + PAD * 2;
         float width = vertical ? measureVerticalReserved() : measureHorizontalReserved();
         float height = vertical ? (countVerticalRows() * lineH + PAD) : lineH;
+        if (advanced) {
+            width = Math.max(width, measureAdvancedReserved());
+            height += advBlockHeight();
+        }
         setMeasuredDimension((int) Math.ceil(width), (int) Math.ceil(height));
     }
 

@@ -512,7 +512,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
         Spinner sHudMode = view.findViewById(R.id.SHudMode);
         ArrayAdapter<String> hudAdapter = new ArrayAdapter<>(context,
                 android.R.layout.simple_spinner_item,
-                new String[]{"Off", "Classic", "Modern"});
+                new String[]{"Off", "Modern", "Advanced"});
         hudAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         sHudMode.setAdapter(hudAdapter);
 
@@ -522,10 +522,11 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
             if (!hudModeExtra.isEmpty()) {
                 savedHudMode = Integer.parseInt(hudModeExtra);
             } else if (container.isShowFPS()) {
-                savedHudMode = 1;
+                savedHudMode = 2;
             }
+            if (savedHudMode == 1) savedHudMode = 2;   // the removed classic style shows as Modern
         }
-        sHudMode.setSelection(savedHudMode);
+        sHudMode.setSelection(savedHudMode == 3 ? 2 : (savedHudMode == 2 ? 1 : 0));
 
         final CheckBox cbFullscreenStretched = view.findViewById(R.id.CBFullscreenStretched);
         cbFullscreenStretched.setChecked(isEditMode() && container.isFullscreenStretched());
@@ -734,7 +735,8 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
                 String emulator = StringUtils.parseIdentifier(sEmulator.getSelectedItem());
                 String wincomponents = getWinComponents(view);
                 String drives = getDrives(view);
-                int hudMode = sHudMode.getSelectedItemPosition();
+                int hudPosition = sHudMode.getSelectedItemPosition();
+                int hudMode = hudPosition == 2 ? 3 : (hudPosition == 1 ? 2 : 0);   // Off, Modern, Advanced
                 boolean showFPS = hudMode != 0;
                 boolean fullscreenStretched = cbFullscreenStretched.isChecked();
                 boolean exclusiveXInput = cbExclusiveXInput.isChecked();

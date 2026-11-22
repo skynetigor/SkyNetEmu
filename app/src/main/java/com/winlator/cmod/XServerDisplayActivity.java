@@ -103,7 +103,6 @@ import com.winlator.cmod.math.Mathf;
 import com.winlator.cmod.math.XForm;
 import com.winlator.cmod.midi.MidiHandler;
 import com.winlator.cmod.midi.MidiManager;
-import com.winlator.cmod.widget.FrameRating;
 import com.winlator.cmod.widget.SeekBar;
 import com.winlator.cmod.widget.WinlatorHUD;
 import com.winlator.cmod.widget.InputControlsView;
@@ -177,7 +176,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private XServer xServer;
     private InputControlsManager inputControlsManager;
     private ImageFs imageFs;
-    private FrameRating classicHud = null;
     private WinlatorHUD modernHud = null;
     private Runnable editInputControlsCallback;
     private Shortcut shortcut;
@@ -837,13 +835,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (xServerView != null) xServerView.setSessionWindowId(window.id);
                 }
                 if (frameRatingWindowId != -1) return;
-                if (!((modernHud != null && modernHud.isUserEnabled())
-                        || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) return;
+                if (!(modernHud != null && modernHud.isUserEnabled())) return;
                 frameRatingWindowId = window.id;
                 activeRendererWindowId = window.id;
                 if (xServerView != null) xServerView.setFpsWindowId(window.id);
                 if (modernHud != null) runOnUiThread(() -> modernHud.onRendererDetected(null));
-                if (classicHud != null) classicHud.update();
             }
 
             @Override
@@ -862,19 +858,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (window.id == activeRendererWindowId) GameSessionRecorder.onFrame();
 
                 if (frameRatingWindowId == window.id) {
-                    if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
                 } else if (frameRatingWindowId == -1 && (lastRendererName != null || linuxSession)
                         && isSessionApplicationWindow(window)
-                        && ((modernHud != null && modernHud.isUserEnabled())
-                         || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) {
+                        && modernHud != null && modernHud.isUserEnabled()) {
 
                     frameRatingWindowId = window.id;
                     activeRendererWindowId = window.id;
                     if (xServerView != null) xServerView.setSessionWindowId(window.id);
                     if (xServerView != null) xServerView.setFpsWindowId(window.id);
-                    if (classicHud != null) classicHud.update();
-                    if (modernHud != null) modernHud.onFrame();
+                    modernHud.onFrame();
                 }
             }
 
@@ -2108,17 +2101,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String hudModeExtra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             int hudMode = !hudModeExtra.isEmpty()
                     ? Integer.parseInt(hudModeExtra)
-                    : (container.isShowFPS() ? 1 : 0);
+                    : (container.isShowFPS() ? 2 : 0);
 
-            if (hudMode == 1) {
-
-                classicHud = new FrameRating(this, graphicsDriverConfig);
-                classicHud.setVisibility(View.GONE);
-                rootView.addView(classicHud);
-                renderer.setFrameRating(classicHud);
-            } else if (hudMode == 2) {
-
+            if (hudMode != 0) {
+                // 1 was the removed classic style: legacy containers and shortcuts that carry it get the modern strip
                 modernHud = new WinlatorHUD(this);
+                modernHud.setAdvanced(hudMode == 3);
                 modernHud.setVisibility(View.GONE);
                 rootView.addView(modernHud);
                 modernHud.enableByUser();
@@ -2562,25 +2550,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
         View         btResetHud      = findViewById(R.id.BTResetHud);
 
         int currentMode = 0;
-        if      (modernHud  != null) currentMode = 2;
-        else if (classicHud != null) currentMode = 1;
+        if      (modernHud  != null) currentMode = modernHud.isAdvanced() ? 3 : 2;
         else if (container  != null) {
             String extra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             if (!extra.isEmpty())           currentMode = Integer.parseInt(extra);
-            else if (container.isShowFPS()) currentMode = 1;
+            else if (container.isShowFPS()) currentMode = 2;
+            if (currentMode == 1) currentMode = 2;   // the removed classic style
         }
 
-        boolean hudOn    = currentMode != 0;
-        boolean isModern = currentMode == 2;
+        boolean hudOn = currentMode != 0;
 
         if (spHudStyle != null) {
-            ArrayAdapter<String> styleAdapter = createSidebarSpinnerAdapter(new String[]{"Classic", "Modern"});
+            ArrayAdapter<String> styleAdapter = createSidebarSpinnerAdapter(new String[]{"Modern", "Advanced"});
             styleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
             spHudStyle.setAdapter(styleAdapter);
-            spHudStyle.setSelection(isModern ? 1 : 0, false);
+            spHudStyle.setSelection(currentMode == 3 ? 1 : 0, false);
         }
         if (llHudStyleRow  != null) llHudStyleRow.setVisibility(hudOn ? View.VISIBLE : View.GONE);
-        if (llModernOptions != null) llModernOptions.setVisibility(isModern ? View.VISIBLE : View.GONE);
+        if (llModernOptions != null) llModernOptions.setVisibility(hudOn ? View.VISIBLE : View.GONE);
 
         if (modernHud != null) {
             syncModernHudSidebarUI(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbGraph, cbRenderer, sbScale, sbAlpha);
@@ -2593,7 +2580,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (modernHud != null) modernHud.setHudAlpha(v / 100f, isFinal);
         });
         if (btResetHud != null) btResetHud.setOnClickListener(v -> {
-            if (swHudMaster != null && swHudMaster.isChecked() && spHudStyle != null && spHudStyle.getSelectedItemPosition() == 1) {
+            if (swHudMaster != null && swHudMaster.isChecked()) {
                 if (modernHud != null) {
                     modernHud.forceReset();
                     syncModernHudSidebarUI(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbGraph, cbRenderer, sbScale, sbAlpha);
@@ -2608,15 +2595,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (checked) {
                     enableHudLazily(style);
                     if (llHudStyleRow  != null) llHudStyleRow.setVisibility(View.VISIBLE);
-                    if (llModernOptions != null)
-                        llModernOptions.setVisibility(style == 2 ? View.VISIBLE : View.GONE);
-                    if (style == 2 && modernHud != null) {
+                    if (llModernOptions != null) llModernOptions.setVisibility(View.VISIBLE);
+                    if (modernHud != null) {
                         syncModernHudSidebarUI(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbGraph, cbRenderer, sbScale, sbAlpha);
                         bindModernHudCheckboxes(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbRenderer);
                     }
                     saveHudModeToContainer(style);
                 } else {
-                    if (classicHud != null) classicHud.disableByUser();
                     if (modernHud  != null) modernHud.disableByUser();
                     if (llHudStyleRow  != null) llHudStyleRow.setVisibility(View.GONE);
                     if (llModernOptions != null) llModernOptions.setVisibility(View.GONE);
@@ -2631,13 +2616,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     @Override
                     public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                         if (swHudMaster == null || !swHudMaster.isChecked()) return;
-                        int newStyle = (pos == 1) ? 2 : 1;
-                        if (classicHud != null) classicHud.disableByUser(false);
-                        if (modernHud  != null) modernHud.disableByUser(false);
+                        int newStyle = (pos == 1) ? 3 : 2;
                         enableHudLazily(newStyle);
-                        if (llModernOptions != null)
-                            llModernOptions.setVisibility(newStyle == 2 ? View.VISIBLE : View.GONE);
-                        if (newStyle == 2 && modernHud != null) {
+                        if (llModernOptions != null) llModernOptions.setVisibility(View.VISIBLE);
+                        if (modernHud != null) {
                             syncModernHudSidebarUI(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbGraph, cbRenderer, sbScale, sbAlpha);
                             bindModernHudCheckboxes(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbRenderer);
                         }
@@ -2665,36 +2647,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean rendererAlreadyActive = (activeRendererWindowId != -1);
 
-        if (style == 2) {
-            if (modernHud == null) {
-                modernHud = new WinlatorHUD(this);
-                modernHud.setVisibility(View.GONE);
-                rootView.addView(modernHud);
-                renderer.setFrameRating(modernHud);
-                if (rendererAlreadyActive) {
+        if (modernHud == null) {
+            modernHud = new WinlatorHUD(this);
+            modernHud.setVisibility(View.GONE);
+            rootView.addView(modernHud);
+            renderer.setFrameRating(modernHud);
+            if (rendererAlreadyActive) {
 
-                    frameRatingWindowId = activeRendererWindowId;
-                    renderer.setFpsWindowId(frameRatingWindowId);
+                frameRatingWindowId = activeRendererWindowId;
+                renderer.setFpsWindowId(frameRatingWindowId);
 
-                    final String name = lastRendererName;
-                    modernHud.onRendererDetected(name);
-                }
+                final String name = lastRendererName;
+                modernHud.onRendererDetected(name);
             }
-            modernHud.enableByUser();
-        } else {
-            if (classicHud == null) {
-                classicHud = new FrameRating(this, graphicsDriverConfig);
-                classicHud.setVisibility(View.GONE);
-                rootView.addView(classicHud);
-                renderer.setFrameRating(classicHud);
-                if (rendererAlreadyActive) {
-                    frameRatingWindowId = activeRendererWindowId;
-                    renderer.setFpsWindowId(frameRatingWindowId);
-                    runOnUiThread(() -> classicHud.update());
-                }
-            }
-            classicHud.enableByUser();
         }
+        modernHud.setAdvanced(style == 3);
+        modernHud.enableByUser();
     }
 
     private void bindModernHudCheckboxes(CheckBox cbFps, CheckBox cbGpu, CheckBox cbCpuRam,
@@ -2709,8 +2677,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private int resolveSelectedStyle(Spinner spHudStyle) {
-        if (spHudStyle == null) return 1;
-        return spHudStyle.getSelectedItemPosition() == 1 ? 2 : 1;
+        if (spHudStyle == null) return 2;
+        return spHudStyle.getSelectedItemPosition() == 1 ? 3 : 2;
     }
 
     private void saveHudModeToContainer(int mode) {
@@ -4135,7 +4103,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public void updateFrameRating(Window window) {
         if (window == null || frameRatingWindowId != window.id) return;
-        if (classicHud != null) classicHud.update();
         if (modernHud != null) modernHud.onFrame();
     }
 
@@ -4175,15 +4142,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (xServerView != null) xServerView.setSessionWindowId(-1);
         }
 
-        if (classicHud == null && modernHud == null) return;
+        if (modernHud == null) return;
 
         if (property != null) {
             if (frameRatingWindowId == -1 && propName.contains("_MESA_DRV")) {
                 frameRatingWindowId = window.id;
                 if (xServerView != null) xServerView.setFpsWindowId(window.id);
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
-                if (classicHud != null) classicHud.update();
-
                 if (modernHud != null) {
                     final String nameToPass = lastRendererName;
                     runOnUiThread(() -> modernHud.onRendererDetected(nameToPass));
@@ -4192,12 +4157,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             if (propName.contains("_MESA_DRV_ENGINE_NAME") && window.id == frameRatingWindowId) {
                 String rendererName = property.toString();
-                if (classicHud != null) runOnUiThread(() -> classicHud.setRenderer(rendererName));
                 if (modernHud != null) runOnUiThread(() -> modernHud.setRenderer(rendererName));
             }
             if (propName.contains("_MESA_DRV_GPU_NAME") && window.id == frameRatingWindowId) {
                 String gpuName = property.toString();
-                if (classicHud != null) runOnUiThread(() -> classicHud.setGpuName(gpuName));
                 if (modernHud != null) runOnUiThread(() -> modernHud.setGpuName(gpuName));
             }
         } else if (frameRatingWindowId != -1 && window.id == frameRatingWindowId) {
@@ -4205,10 +4168,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             frameRatingWindowId = -1;
             if (xServerView != null) xServerView.setFpsWindowId(-1);
             Log.d("XServerDisplayActivity", "Hiding hud for Window " + window.getName());
-            if (classicHud != null) runOnUiThread(() -> {
-                classicHud.setVisibility(View.GONE);
-                classicHud.reset();
-            });
             if (modernHud != null) runOnUiThread(() -> modernHud.onRendererGone());
         }
     }

@@ -690,7 +690,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 SettingsDivider()
                 SettingMappedChoice("FPS limit", fps, linkedMapOf("0" to "Off", "1" to "30 FPS", "2" to "60 FPS", "3" to "90 FPS", "4" to "120 FPS")) { fps = it }
                 SettingsDivider()
-                SettingMappedChoice("HUD", hud, linkedMapOf("0" to "Off", "1" to "Classic", "2" to "Modern")) { hud = it }
+                SettingMappedChoice("HUD", if (hud == "1") "2" else hud, linkedMapOf("0" to "Off", "2" to "Modern", "3" to "Advanced")) { hud = it }
             }
         },
         EditorCategory(

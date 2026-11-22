@@ -190,7 +190,7 @@ private class RuntimeInstallUi {
 }
 
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
-private val HUD_LABELS = listOf("Off", "Classic", "Modern")
+private val HUD_LABELS = linkedMapOf("0" to "Off", "2" to "Modern", "3" to "Advanced")
 
 /** What the Steam settings screen adds to the container editor. */
 private class SteamScreen(
@@ -445,7 +445,8 @@ private fun LinuxContainerEditorBody(
     var fpsIndex by remember { mutableStateOf(editing?.getExtra("graphicsFpsPreset")?.toIntOrNull()?.coerceIn(0, 4) ?: 0) }
     var hudMode by remember {
         mutableStateOf(
-            editing?.getExtra("hudMode")?.toIntOrNull()?.coerceIn(0, 2) ?: if (editing?.isShowFPS == true) 1 else 0
+            editing?.getExtra("hudMode")?.toIntOrNull()?.let { if (it == 1) 2 else it.coerceIn(0, 3) }
+                ?: if (editing?.isShowFPS == true) 2 else 0
         )
     }
     // Scaled to fit the window with the proportions kept; unchecked, the screen is drawn 1:1 in the middle.
@@ -818,7 +819,7 @@ private fun LinuxContainerEditorBody(
                 SettingMappedChoice(
                     "HUD",
                     hudMode.toString(),
-                    HUD_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
+                    HUD_LABELS
                 ) { hudMode = it.toInt() }
             }
         },

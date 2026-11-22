@@ -137,8 +137,9 @@ public class SidebarCleanupView extends View implements SharedPreferences.OnShar
         if (storedMode == null || storedMode.isEmpty()) {
             container.putExtra("hudMode", "2");
             container.saveData();
-            if (style.getCount() > 1 && style.getSelectedItemPosition() != 1) {
-                style.setSelection(1);
+            // position 0 of the style spinner is Modern (mode 2); Advanced (mode 3) is position 1
+            if (style.getCount() > 0 && style.getSelectedItemPosition() != 0) {
+                style.setSelection(0);
             }
         }
 

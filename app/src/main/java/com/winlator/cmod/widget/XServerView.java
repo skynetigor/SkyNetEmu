@@ -58,7 +58,6 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
     /** The game's render window, for the telemetry recorder; set whether or not a HUD exists. */
     private volatile int sessionWindowId = -1;
     private WinlatorHUD hudRef;
-    private FrameRating classicHudRef;
     private boolean pipMode;
     private volatile int fpsLimit;
     private volatile boolean destroyed;
@@ -204,7 +203,6 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
         if (windowId == sessionWindowId) com.winlator.cmod.telemetry.GameSessionRecorder.onFrame();
         if (windowId != fpsWindowId) return;
         if (hudRef != null) hudRef.onFrame();
-        if (classicHudRef != null) classicHudRef.update();
     }
 
     @Override
@@ -250,7 +248,6 @@ public class XServerView extends XServerRendererView implements SurfaceHolder.Ca
     @Override
     public void setFrameRating(Object frameRating) {
         hudRef = frameRating instanceof WinlatorHUD ? (WinlatorHUD) frameRating : null;
-        classicHudRef = frameRating instanceof FrameRating ? (FrameRating) frameRating : null;
     }
 
     public void setShowFPS(boolean showFPS) {

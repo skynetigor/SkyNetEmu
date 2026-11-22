@@ -117,7 +117,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private boolean pendingSwapRB         = false;
 
     private WinlatorHUD hudRef = null;
-    private FrameRating classicHudRef = null;
     private volatile int fpsWindowId = -1;
     private volatile int sessionWindowId = -1;
     private volatile int fpsLimit = 0;
@@ -678,7 +677,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         if (window.id == sessionWindowId) com.winlator.cmod.telemetry.GameSessionRecorder.onFrame();
         if (window.id == fpsWindowId) {
             if (hudRef != null) hudRef.onFrame();
-            if (classicHudRef != null) classicHudRef.update();
         }
     }
 
@@ -907,7 +905,6 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public void setSessionWindowId(int id) { sessionWindowId = id; com.winlator.cmod.linux.FramePipelineDiagnostics.targetWindow(id); }
     public void setFrameRating(Object fr) {
         if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
-        else if (fr instanceof FrameRating) classicHudRef = (FrameRating) fr;
     }
     public int getFpsLimit() {
         return fpsLimit;

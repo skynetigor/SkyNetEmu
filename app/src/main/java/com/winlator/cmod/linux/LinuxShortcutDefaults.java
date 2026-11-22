@@ -52,7 +52,7 @@ public final class LinuxShortcutDefaults {
         values.put("envVars", Container.DEFAULT_ENV_VARS.equals(container.getEnvVars()) ? "" : container.getEnvVars());
         values.put("cpuList", container.getCPUList(true));
         values.put("graphicsFpsPreset", container.getExtra("graphicsFpsPreset", "0"));
-        values.put("hudMode", container.getExtra("hudMode", container.isShowFPS() ? "1" : "0"));
+        values.put("hudMode", container.getExtra("hudMode", container.isShowFPS() ? "2" : "0"));
         values.put(LinuxSession.EXTRA_NO_PROOT, off(container, LinuxSession.EXTRA_NO_PROOT));
         values.put(LinuxDirectFexBridge.EXTRA, off(container, LinuxDirectFexBridge.EXTRA));
 

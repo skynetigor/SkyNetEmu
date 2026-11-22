@@ -63,7 +63,7 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
     }
     var name by remember { mutableStateOf(container.getName()) }
     var hudMode by remember {
-        mutableStateOf(container.getExtra("hudMode").toIntOrNull() ?: if (container.isShowFPS()) 1 else 0)
+        mutableStateOf((container.getExtra("hudMode").toIntOrNull() ?: if (container.isShowFPS()) 2 else 0).let { if (it == 1) 2 else it })
     }
     var desktopTheme by remember {
         mutableStateOf(if (themeInfo.theme == WineThemeManager.Theme.LIGHT) "Light" else "Dark")
@@ -109,8 +109,8 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
             shape = RoundedCornerShape(10.dp)
         )
         SSDivider()
-        SSChoice("HUD", arrayOf("Off", "Classic", "Modern")[hudMode.coerceIn(0, 2)], arrayOf("Off", "Classic", "Modern")) {
-            hudMode = arrayOf("Off", "Classic", "Modern").indexOf(it).coerceAtLeast(0)
+        SSChoice("HUD", if (hudMode == 3) "Advanced" else if (hudMode == 0) "Off" else "Modern", arrayOf("Off", "Modern", "Advanced")) {
+            hudMode = when (it) { "Advanced" -> 3; "Modern" -> 2; else -> 0 }
         }
         SSDivider()
         SSChoice("Theme", desktopTheme, arrayOf("Light", "Dark")) { desktopTheme = it }
