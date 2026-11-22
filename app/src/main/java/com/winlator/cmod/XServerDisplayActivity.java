@@ -1383,6 +1383,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (winHandler != null && !exiting.get()) winHandler.stop();
+        if (liftedUi != null && inputControlsView != null) inputControlsView.setUiTouchTarget(null);
         if (liftedUi != null) { com.winlator.cmod.linux.LinuxLiftedUiOverlay.detach(findViewById(R.id.FLXServerDisplay), liftedUi); liftedUi = null; }
         com.winlator.cmod.perf.GameModeSignal.report(this, false);
         if (steamGameLaunchMonitor != null) steamGameLaunchMonitor.stop();
@@ -1931,6 +1932,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             runOnUiThread(() -> {   // this method runs on a worker thread; a WebView belongs to the main one
                 FrameLayout uiRoot = findViewById(R.id.FLXServerDisplay);
                 if (uiRoot != null && liftedUi == null && !isFinishing()) liftedUi = com.winlator.cmod.linux.LinuxLiftedUiOverlay.attach(this, uiRoot, inputControlsView);
+                if (inputControlsView != null) inputControlsView.setUiTouchTarget(liftedUi);   // the controls are above the page and took every touch: they hand it the ones that hit no control while a menu is shown
                 // the game takes a pad: the on-screen one is its controller (after the startup code that applies the saved profile choice)
                 new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                     if (isFinishing()) return;
@@ -3182,9 +3184,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         };
 
+        sidebarProfileSpinner = spInputControlsProfile;
         spInputControlsProfile.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (position == sidebarSyncedPosition) { sidebarSyncedPosition = -2; return; }   // the spinner following the controls (syncSidebarInputControls), not the user
                 applySidebarInputControls.run();
             }
 
@@ -3427,6 +3431,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         inputControlsView.invalidate();
         winHandler.sendGamepadState();
+        syncSidebarInputControls();
+    }
+
+    /** The left flyout's profile list is built once, when the activity starts: controls shown or hidden by code afterwards (the lifted-bionic session shows the virtual gamepad
+     *  three seconds after the start) left it on "disabled" while the pad was on screen, and choosing "disabled" again did nothing (no change, no event). It now follows the
+     *  controls; the selection change this makes is not the user's and is not applied again (nor saved as the choice). */
+    private Spinner sidebarProfileSpinner;
+    private int sidebarSyncedPosition = -2;
+    private void syncSidebarInputControls() {
+        if (sidebarProfileSpinner == null || inputControlsManager == null || inputControlsView == null) return;
+        ControlsProfile current = inputControlsView.getProfile();
+        ArrayList<ControlsProfile> profiles = inputControlsManager.getProfiles(true);
+        int position = 0;
+        if (current != null) for (int i = 0; i < profiles.size(); i++) if (profiles.get(i).id == current.id) position = i + 1;
+        if (sidebarProfileSpinner.getSelectedItemPosition() == position) return;
+        sidebarSyncedPosition = position;
+        sidebarProfileSpinner.setSelection(position, false);
     }
 
     private void hideInputControls() {
@@ -3444,6 +3465,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         inputControlsView.invalidate();
         winHandler.sendGamepadState();
+        syncSidebarInputControls();
     }
 
     private String getSelectedOpenGLDriver() {

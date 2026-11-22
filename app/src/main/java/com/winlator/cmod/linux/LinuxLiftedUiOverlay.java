@@ -35,8 +35,13 @@ public final class LinuxLiftedUiOverlay {
     private static final String HIDE_DEV_STRIP = "(function(){if(window.__bngStripHider)return;"
             // the page ignores the loading screen unless it believes it runs inside the game (CEF); the engine's hooks reach it the same way
             + "var ig=setInterval(function(){if(window.beamng){window.beamng.ingame=true;clearInterval(ig);}},200);"
-            // the pad's X, or A on a level that is already selected, starts the level ("Start Freeroam" answers it only while focused, which the pad cannot reach in the grid)
-            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){var b=document.querySelector('.play-button');if(a==='action_2'&&v===1){if(b)b.click();}else if(a==='ok'&&v===1&&b){var el=document.activeElement;if(el&&el===window.__bngSel){b.click();}else{setTimeout(function(){window.__bngSel=el&&el.classList&&el.classList.contains('is-current-selection')?el:null;},300);}}});}},500);"
+            // taps and the pad's A: the page's ngMaterial cancels every click that has coordinates and is not its own (clickHijacker, on because this is an Android WebView). Its exception is a click at
+            // 0,0, so a script's click() passes, but the page's own re-dispatch of a single click after the double-click wait (a CustomEvent without coordinates: how a tap on a level tile, and the
+            // pad's A, finally select it) did not: both did nothing. This window-level capture listener runs before it and marks every click as passing; ngMaterial's own synthetic copy of a tap (already
+            // marked, untrusted) is dropped, else a tap would click twice and the page would take it for a double click (a level would start at once)
+            + "window.addEventListener('click',function(e){if(!e.isTrusted&&e.$material){e.stopImmediatePropagation();e.preventDefault();return}e.$material=true},true);"
+            // X starts the level ("Start Freeroam" answers it only while focused, which the pad cannot reach in the grid); A selects like a tap (level, vehicle, start)
+            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){if(a==='action_2'&&v===1){var b=document.querySelector('.play-button');if(b)b.click();}});}},500);"
             // the page paints the main menu's backdrop on the body; in CEF that layer is transparent, here it would hide the game
             + "var st=document.createElement('style');st.textContent='html,body{background:transparent!important;background-image:none!important}';document.head.appendChild(st);"
             + "var pending=0;function hide(){pending=0;document.querySelectorAll('div').forEach(function(e){"

@@ -67,6 +67,10 @@ public class InputControlsView extends View {
     private ControlsProfile profile;
     private float overlayOpacity = DEFAULT_OVERLAY_OPACITY;
     private TouchpadView touchpadView;
+    /** The game's own UI page in a WebView below these controls (lifted-bionic session): a touch that hits no control element goes to the page while it shows a menu
+     *  (the view takes the touch only then), else to the touchpad as before. Without this the full-screen controls took every touch and the page could not be tapped. */
+    private android.view.View uiTouchTarget;
+    private boolean forwardingToUi;
     private XServer xServer;
     private final android.util.SparseArray<Bitmap> icons = new android.util.SparseArray<>();
     private Timer mouseMoveTimer;
@@ -598,11 +602,21 @@ public class InputControlsView extends View {
     }
     private boolean routeNativeInput(MotionEvent event) {
         int action = event.getActionMasked(), index = event.getActionIndex(), id = event.getPointerId(index);
+        if (forwardingToUi && action != MotionEvent.ACTION_DOWN) {   // a gesture the page took (see uiTouchTarget): the rest of it goes there, not to the guest
+            if (uiTouchTarget != null) uiTouchTarget.dispatchTouchEvent(event);
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) forwardingToUi = false;
+            return true;
+        }
         if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_DOWN) cancelNativeInput();
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             java.util.List<ControlElement> captured = new java.util.ArrayList<>();
             if (profile != null && showTouchscreenControls) for (ControlElement element : profile.getElements())
                 if (element.handleTouchDown(id, event.getX(index), event.getY(index))) captured.add(element);
+            if (action == MotionEvent.ACTION_DOWN) forwardingToUi = false;
+            if (action == MotionEvent.ACTION_DOWN && captured.isEmpty() && uiTouchTarget != null && uiTouchTarget.dispatchTouchEvent(event)) {
+                forwardingToUi = true;   // no control element there and the page shows a menu: the page takes the touch
+                return true;
+            }
             if (!captured.isEmpty()) {
                 nativeControls.put(id, captured);
                 if (preferences.getBoolean("touchscreen_haptics_enabled", true)) performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
@@ -620,6 +634,12 @@ public class InputControlsView extends View {
         touchpadView.onGuestTouchEvent(event, nativeControls.keySet());
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) nativeControls.remove(id);
         return true;
+    }
+
+    /** The view (the lifted-bionic session's WebView) that gets the touches that hit no control element while it takes touches; null: they go to the touchpad. */
+    public void setUiTouchTarget(android.view.View target) {
+        uiTouchTarget = target;
+        forwardingToUi = false;
     }
 
     @Override
@@ -706,10 +726,14 @@ public class InputControlsView extends View {
                             touchpadView.setPointerButtonLeftEnabled(false);
                         }
                     }
-                    if (!handled) touchpadView.onTouchEvent(event);
+                    if (!handled) {
+                        if (actionMasked == MotionEvent.ACTION_DOWN && uiTouchTarget != null && uiTouchTarget.dispatchTouchEvent(event)) forwardingToUi = true;   // the page takes it (a menu is shown)
+                        else if (!forwardingToUi) touchpadView.onTouchEvent(event);
+                    }
                     break;
                 }
                 case MotionEvent.ACTION_MOVE: {
+                    boolean anyHandled = false;
                     for (byte i = 0, count = (byte)event.getPointerCount(); i < count; i++) {
                         float x = event.getX(i);
                         float y = event.getY(i);
@@ -719,15 +743,22 @@ public class InputControlsView extends View {
                         for (ControlElement element : profile.getElements()) {
                             if (element.handleTouchMove(pid, x, y)) handled = true;
                         }
-                        if (!handled) touchpadView.onTouchEvent(event);
+                        if (handled) anyHandled = true;
+                        else if (!forwardingToUi) touchpadView.onTouchEvent(event);
                     }
+                    if (forwardingToUi && !anyHandled) uiTouchTarget.dispatchTouchEvent(event);
                     break;
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_POINTER_UP:
                 case MotionEvent.ACTION_CANCEL:
                     for (ControlElement element : profile.getElements()) if (element.handleTouchUp(pointerId)) handled = true;
-                    if (!handled) touchpadView.onTouchEvent(event);
+                    if (!handled) {
+                        if (forwardingToUi) {
+                            uiTouchTarget.dispatchTouchEvent(event);
+                            if (actionMasked == MotionEvent.ACTION_UP || actionMasked == MotionEvent.ACTION_CANCEL) forwardingToUi = false;
+                        } else touchpadView.onTouchEvent(event);
+                    }
                     break;
             }
         }

@@ -22,7 +22,7 @@
 struct shared_cursor {
     pthread_mutex_t lock;
     uint32_t generation, cursor;
-    int initial, ended, flags, clock, xbox_axes, slot;
+    int initial, ended, idle, flags, clock, xbox_axes, slot;   /* ended: unused since the pad stays; idle: the writer is away and the neutral state was reported */
     struct input_event pending[32];
     size_t position, count;
 };
@@ -246,16 +246,21 @@ static void add_event(struct shared_cursor *s, int type, int code, int value) {
 static int refill(struct reader *r) {
     struct shared_cursor *s = r->state;
     struct sky_input_ring *ring = r->ring;
-    if (s->ended) return -1;
+    /* The device never ends: a game that opened it cannot find a new one (SDL's hotplug scan of /dev/input is denied inside the app), so a writer that leaves
+     * (the on-screen controls handing the slot to a real controller, a controller reconnecting) must not kill the descriptor for good, which it did until 2026-11-21
+     * (the pad stopped answering for the rest of the session). A writer that is away reports the neutral state once; one that comes back (a new generation) is
+     * resynchronised with its current state. */
     for (int attempt = 0; attempt < 32; attempt++) {
         uint32_t revision = sky_load(&ring->revision);
         if (revision & 1) continue;
         uint32_t head = sky_load(&ring->head);
         uint32_t generation = sky_load(&ring->generation);
-        int gone = !sky_load(&ring->connected) || generation != s->generation;
-        int overflow = (uint32_t)(head - s->cursor) > SKY_INPUT_CAPACITY;
+        int gone = !sky_load(&ring->connected);
+        int regenerated = !gone && generation != s->generation;
+        int overflow = !regenerated && (uint32_t)(head - s->cursor) > SKY_INPUT_CAPACITY;   /* a new generation restarts the head at 0: not an overflow */
+        int resync = s->initial || regenerated || overflow || gone != s->idle;
         s->position = s->count = 0;
-        if (s->initial || gone || overflow) {
+        if (resync) {
             if (overflow) { add_event(s, EV_SYN, SYN_DROPPED, 0); add_event(s, EV_SYN, SYN_REPORT, 0); }
             for (int i = 0; i < 10; i++) add_event(s, EV_KEY, button_codes[i], gone ? 0 : (int)sky_load(&ring->buttons[i]));
             for (int i = 0; i < 8; i++) add_event(s, EV_ABS, axis_codes[i], gone ? 0 : (int)sky_load(&ring->axes[i]));
@@ -270,9 +275,10 @@ static int refill(struct reader *r) {
             }
         }
         if (revision != sky_load(&ring->revision)) continue;
-        s->cursor = s->initial || gone || overflow ? head : s->cursor + (uint32_t)s->count;
+        s->cursor = resync ? head : s->cursor + (uint32_t)s->count;
         s->initial = 0;
-        s->ended = gone;
+        s->generation = generation;
+        s->idle = gone;
         return (int)s->count;
     }
     s->count = s->position = 0;
@@ -284,8 +290,8 @@ static void update_readiness(struct reader *r) {
     if (syscall(SYS_read, r->notify, &value, sizeof(value)) < 0 && errno != EAGAIN)
         fprintf(stderr, "SkyInput: eventfd drain failed: %s\n", strerror(errno));
     struct shared_cursor *s = r->state;
-    if (s->position < s->count || s->ended || s->cursor != sky_load(&r->ring->head)
-            || !sky_load(&r->ring->connected) || s->generation != sky_load(&r->ring->generation)) {
+    int connected = sky_load(&r->ring->connected) != 0;
+    if (s->position < s->count || (connected ? (s->idle || s->cursor != sky_load(&r->ring->head) || s->generation != sky_load(&r->ring->generation)) : !s->idle)) {
         value = 1;
         if (syscall(SYS_write, r->notify, &value, sizeof(value)) < 0 && errno != EAGAIN)
             fprintf(stderr, "SkyInput: eventfd rearm failed: %s\n", strerror(errno));
@@ -361,7 +367,7 @@ int sky_input_ioctl(int fd, unsigned long request, void *arg) {
             for (int attempt = 0; attempt < 32; attempt++) {
                 uint32_t revision = sky_load(&r->ring->revision);
                 if (revision & 1) continue;
-                int gone = !sky_load(&r->ring->connected) || s->generation != sky_load(&r->ring->generation);
+                int gone = !sky_load(&r->ring->connected);
                 if (nr == 0x18) {
                     memset(arg, 0, bytes);
                     for (int i = 0; i < 10; i++)
