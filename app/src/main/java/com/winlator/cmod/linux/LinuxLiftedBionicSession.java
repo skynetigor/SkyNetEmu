@@ -116,7 +116,7 @@ public final class LinuxLiftedBionicSession {
             if (key.equals("SKY_LIFTED_CWD")) workingDir = new File(value);
             else env.put(key, value);
         }
-        if (beamng) {   // what a translated BeamNG needs: no ALSA (FMOD's own audio backend crashes without a sound card), the threads on the performance cores
+        if (beamng) {   // what a translated BeamNG needs: no ALSA (FMOD's aserver-plugin path crashes; its PulseAudio output is the one that works), the threads on the performance cores
             if (!env.has("SKY_DLOPEN_DENY")) env.put("SKY_DLOPEN_DENY", "libasound");
             if (!env.has("SKY_PIN")) env.put("SKY_PIN", "auto");
         }
@@ -184,11 +184,13 @@ public final class LinuxLiftedBionicSession {
     }
 
     /**
-     * The game's arguments a translated BeamNG needs and the shortcut did not give: no sound engine (no sound card for FMOD), no Steam, no bindless
-     * graphics, and the extension that serves the game's own UI to the app's WebView (it is copied into the game's lua/ge/extensions).
+     * The game's arguments a translated BeamNG needs and the shortcut did not give: no Steam, no bindless graphics, and the extension that serves the
+     * game's own UI to the app's WebView (it is copied into the game's lua/ge/extensions). Sound stays on: FMOD's PulseAudio output drives the plain
+     * pa_mainloop itself through the runtime's dlopen/dlsym bridge against the imagefs's native libpulse and the app's PulseAudio server (ALSA stays
+     * denied — its aserver plugin crashed FMOD). A shortcut that wants silence can carry -nosfx itself.
      */
     private static void addBeamNGArguments(Context context, File program, List<String> argv) {
-        for (String flag : new String[]{"-nosfx", "-nosteam", "-nogfxbindless"}) if (!argv.contains(flag)) argv.add(flag);
+        for (String flag : new String[]{"-nosteam", "-nogfxbindless"}) if (!argv.contains(flag)) argv.add(flag);
         if (argv.contains("-lua")) return;
         File game = program.getParentFile().getParentFile();
         File target = game == null ? null : new File(game, "lua/ge/extensions/skynetwebui.lua");
