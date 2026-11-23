@@ -41,7 +41,7 @@ public final class LinuxLiftedUiOverlay {
             // marked, untrusted) is dropped, else a tap would click twice and the page would take it for a double click (a level would start at once)
             + "window.addEventListener('click',function(e){if(!e.isTrusted&&e.$material){e.stopImmediatePropagation();e.preventDefault();return}e.$material=true},true);"
             // X starts the level ("Start Freeroam" answers it only while focused, which the pad cannot reach in the grid); A selects like a tap (level, vehicle, start)
-            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){if(a==='action_2'&&v===1){var b=document.querySelector('.play-button');if(b)b.click();}});}},500);"
+            + "setInterval(function(){var bus=window.vueEventBus;if(bus&&window.__bngPadBus!==bus){window.__bngPadBus=bus;bus.on('UINavigation',function(a,v){if(a==='action_2'&&v===1){var h=location.hash||'';if(h.indexOf('/play')>=0||h.indexOf('/loading')>=0)return;var now=Date.now();if(window.__skyPlayAt&&now-window.__skyPlayAt<2000)return;var b=document.querySelector('.play-button');if(b){window.__skyPlayAt=now;b.click();}}});}},500);"
             // the page paints the main menu's backdrop on the body; in CEF that layer is transparent, here it would hide the game
             + "var st=document.createElement('style');st.textContent='html,body{background:transparent!important;background-image:none!important}';document.head.appendChild(st);"
             + "var pending=0;function hide(){pending=0;document.querySelectorAll('div').forEach(function(e){"

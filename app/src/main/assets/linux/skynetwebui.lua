@@ -50,16 +50,72 @@ end
 local function onInit()
   setExtensionUnloadMode(M, "manual")
 end
+-- No CEF means server.createGame runs its level callback inside the first loading-screen request, and only
+-- then asks for worldReadyState. The screen therefore hides when the level appears and comes back while the
+-- vehicle materials finish. Hold worldReadyState first so that exit cannot show the world early.
+local function installLoadHold()
+  local gs = rawget(_G, 'core_gamestate')
+  if not gs or gs.__skyHold or type(gs.requestEnterLoadingScreen) ~= 'function' then return false end
+  local orig = gs.requestEnterLoadingScreen
+  gs.requestEnterLoadingScreen = function(tagName, func, ...)
+    if func and tagName == 'server.lua' and not (gs.getLoadingStatus and gs.getLoadingStatus('worldReadyState')) then
+      orig('worldReadyState')
+    end
+    return orig(tagName, func, ...)
+  end
+  gs.__skyHold = true
+  log('I', 'skynetwebui', 'worldReadyState held across the synchronous level load')
+  return true
+end
+
+-- A second freeroam start while the level is still loaded unloads it and loads it again (the menu's delayed-start
+-- path). A pad press and the page's own play button can both send that command; the world is on screen for a
+-- second or two, then the loading screen returns. Ignore that second start. A later start, or one after the
+-- level has been unloaded, still goes through.
+local function levelKey(level)
+  if type(level) == 'table' then return tostring(level.levelName or level.misFilePath or level) end
+  return tostring(level)
+end
+
+local function installStartGuard()
+  local fr = rawget(_G, 'freeroam_freeroam')
+  if not fr or fr.__skyGuard or type(fr.startFreeroam) ~= 'function' then return false end
+  local orig = fr.startFreeroam
+  fr.startFreeroam = function(level, startPointName, wasDelayed, ...)
+    local key = levelKey(level)
+    local now = os.clock()
+    -- wasDelayed is the game's own retry after it unloaded the previous level; that one must run.
+    if not wasDelayed and fr.__skyLevel == key and fr.__skyAt and (now - fr.__skyAt) < 180
+        and scenetree and scenetree.MissionGroup then
+      log('I', 'skynetwebui', 'ignored a second freeroam start for ' .. key .. ' while that level is still loaded')
+      return
+    end
+    fr.__skyLevel = key
+    fr.__skyAt = now
+    return orig(level, startPointName, wasDelayed, ...)
+  end
+  fr.__skyGuard = true
+  log('I', 'skynetwebui', 'freeroam start guard installed')
+  return true
+end
+
+local function installLoadFixes()
+  installLoadHold()
+  installStartGuard()
+end
+
 local function onExtensionLoaded()
   server = BNGWebWSServer.getOrCreate('127.0.0.1', port, './', 'bng-ext-app-v1', '/ui/entrypoints/main/index.html', false, false)
   if not os.getenv('SKY_WEBUI_NOSTREAMS') then server:enableDataStreams() end
   installHookForward()
+  installLoadFixes()
   print('skynetwebui: ui server on http://127.0.0.1:' .. tostring(port) .. '/')
 end
 local function onExtensionUnloaded()
   if server then BNGWebWSServer.destroy(server); server = nil end
 end
 local function onUpdate(dtReal)
+  installLoadFixes()
   if not server then return end
   server:getPeerEvents()
   if stats then
