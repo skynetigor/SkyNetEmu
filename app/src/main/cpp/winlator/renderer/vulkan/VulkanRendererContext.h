@@ -209,6 +209,14 @@ public:
     void setSwapRB(bool enabled);
     void setPresentMode(VkPresentModeKHR mode);
     void setFrameCoordination(int cap);
+    /** Display refresh, used to quantize presents onto a vsync multiple. */
+    void setDisplayRefreshHz(int hz);
+    /**
+     * When true (the default), content presents are held to a sustainable vsync multiple so a second
+     * present in the same frame (cursor, duplicate damage) cannot land on the next refresh.
+     * Frame generation turns this off; it spaces its own presents.
+     */
+    void setPresentCadence(bool enabled);
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
@@ -405,7 +413,32 @@ public:
     std::mutex        renderMutex;
     std::mutex        dirtyMutex;
     std::atomic<int> coordinatedCap{0};
+    std::atomic<int> displayRefreshHz{120};
+    std::atomic<bool> presentCadenceEnabled{true};
     unsigned pacingVersion = 0;
+    int64_t contentIntervalNs = 0;
+    int64_t lastContentArrivalNs = 0;
+    int64_t lastPresentSteadyNs = 0;
+    int64_t loggedSlotNs = 0;
+    int64_t committedSlotNs = 0;
+    int64_t lastSlotChangeNs = 0;
+    int slotStepHold = 0;
+    int slotStepDir = 0;
+    int64_t fgLastArrivalNs = 0;
+    int64_t fgLastApplyNs = 0;
+    int64_t fgLastShortNs = 0;
+    int64_t fgIntervalNs = 0;
+    int64_t fgLoggedSlotNs = 0;
+    std::atomic<int64_t> fgDisplayDelayNs{0};
+    int64_t fgPresentDueNs(int64_t nowNs, int64_t lastPresentNs);
+    int64_t cadencePhaseNs = 0;
+    std::atomic<int64_t> producerIntervalNs{0};
+    int64_t lastProducerArrivalNs = 0;
+    std::mutex producerMutex;
+    int64_t vsyncPeriodNs() const;
+    int64_t presentSlotNs();
+    void noteContentArrival(int64_t nowNs);
+    void noteProducerFrame();
     std::condition_variable dirtyCV;
     std::shared_mutex frameMutex;
 

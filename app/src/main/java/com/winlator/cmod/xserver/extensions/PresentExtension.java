@@ -49,6 +49,7 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private ScheduledThreadPoolExecutor limiterExecutor;
     private HashMap<Integer, Pacing> pacing;
     private ScheduledThreadPoolExecutor pacingExecutor;
+    private long pacedLogNs;
 
     private static abstract class ClientOpcodes {
         private static final byte QUERY_VERSION = 0;
@@ -214,7 +215,12 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
             long now = System.nanoTime();
             long due = pacedPresentTime(window.id, now);
             if (due > now || pacingPending(window.id)) {
-                schedulePacedPresent(window, pixmap, serial, idleFence, due - now);
+                long delay = due - now;
+                if (delay > 1_000_000L && now - pacedLogNs > 1_000_000_000L) {
+                    pacedLogNs = now;
+                    Log.i("Present", "FG pace hold " + (delay / 1_000_000L) + " ms");
+                }
+                schedulePacedPresent(window, pixmap, serial, idleFence, delay);
                 return;
             }
         }
@@ -225,6 +231,8 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
         private long lastArrivalNs;
         private long lastApplyNs;
         private long intervalNs;
+        private long lastShortNs;
+        private long pairPeriodNs;
         private int pending;
     }
 
@@ -235,23 +243,47 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
      * 25 ms at 30 FPS with 2x on a 120 Hz screen) and motion looks like the base frame rate. A present that comes sooner
      * than 80 % of the average interval after the previous one is held back to that point, never by more than one
      * interval, so the pair is shown evenly at the cost of that wait for the later frame. 80 % was the steadiest of 70 to
-     * 110 % for BeamNG 0.34 on a RedMagic Astra 2 (2026-11-15; more than 100 % was clearly worse).
+     * 110 % for BeamNG 0.34 on a RedMagic Astra 2 (2026-11-15; more than 100 % was clearly worse). A lifted build's
+     * layer has already spent the start of the slot generating, so that pair arrives at about 8 ms then 25 ms and 80 %
+     * of the mean only reaches 15 ms. That early frame is held to half the measured pair instead. The hold stays on
+     * this thread: delaying the compositor keeps the game's buffer outstanding and the GPU falls off its clocks.
      */
     private long pacedPresentTime(int windowId, long now) {
         synchronized (limiterLock) {
             if (pacing == null) pacing = new HashMap<>();
             Pacing state = pacing.get(windowId);
             if (state == null) pacing.put(windowId, state = new Pacing());
+            long interval = 0;
             if (state.lastArrivalNs != 0) {
-                long interval = now - state.lastArrivalNs;
+                interval = now - state.lastArrivalNs;
                 // a pause, a loading screen or a stall: start measuring again
-                if (interval > 100_000_000L) state.intervalNs = 0;
-                else state.intervalNs = state.intervalNs == 0 ? interval : (state.intervalNs * 15 + interval) / 16;
+                if (interval > 100_000_000L) {
+                    state.intervalNs = 0;
+                    state.lastShortNs = 0;
+                    state.pairPeriodNs = 0;
+                } else state.intervalNs = state.intervalNs == 0 ? interval : (state.intervalNs * 15 + interval) / 16;
             }
+            // The Android layer's generated frame is not back-to-back: frame generation
+            // already used the start of the slot, so the pair arrives about 8-17 ms then
+            // 25-40 ms once the copy through X is in the path. 80 % of the mean only
+            // stretches 8 ms to 15 ms. Half the measured pair is the even point. A
+            // near-zero gap is the FEX case and stays on 80 %.
+            if (state.lastShortNs >= 4_000_000L && state.lastShortNs < 18_000_000L
+                    && interval > 16_000_000L && interval < 45_000_000L) {
+                long period = state.lastShortNs + interval;
+                if (period >= 20_000_000L && period <= 60_000_000L
+                        && (state.pairPeriodNs == 0 || (period > state.pairPeriodNs / 2 && period < state.pairPeriodNs * 3 / 2)))
+                    state.pairPeriodNs = state.pairPeriodNs == 0 ? period : (state.pairPeriodNs * 7 + period) / 8;
+            }
+            if (interval > 0 && interval <= 100_000_000L) state.lastShortNs = interval;
             state.lastArrivalNs = now;
             long due = now;
             if (state.intervalNs > 0)
                 due = Math.max(now, Math.min(state.lastApplyNs + state.intervalNs * 4 / 5, now + state.intervalNs));
+            if (interval >= 4_000_000L && interval < 18_000_000L && state.pairPeriodNs > 0) {
+                long half = state.pairPeriodNs / 2;
+                due = Math.max(due, Math.min(state.lastApplyNs + half, now + state.pairPeriodNs));
+            }
             // presents are shown in the order they came
             if (state.pending > 0) due = Math.max(due, state.lastApplyNs);
             state.lastApplyNs = due;

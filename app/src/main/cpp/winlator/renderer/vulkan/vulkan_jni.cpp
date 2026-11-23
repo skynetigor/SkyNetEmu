@@ -422,6 +422,22 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetFrameCoordination(
     if (r) r->setFrameCoordination(cap);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetDisplayRefreshHz(
+    JNIEnv*, jobject, jlong handle, jint hz)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setDisplayRefreshHz(hz);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPresentCadence(
+    JNIEnv*, jobject, jlong handle, jboolean enabled)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setPresentCadence(enabled == JNI_TRUE);
+}
+
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetSupportedPresentModes(
     JNIEnv* env, jobject, jlong handle)

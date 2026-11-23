@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <utility>
 #include <chrono>
+#include <ctime>
 #include <inttypes.h>
 #include <dlfcn.h>
 #include <unistd.h>
@@ -362,7 +363,7 @@ void VulkanRendererContext::createLogicalDevice() {
     RLOG("dma-buf import %s", hasDmaBufImport ? "available" : "NOT available on this device");
     for (const char* ext : extList)
         RLOG("Enabled Vulkan device extension: %s", ext);
-    if (pipelineEnabled && hasDisplayTiming) extList.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
+    if (hasDisplayTiming) extList.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
@@ -370,7 +371,7 @@ void VulkanRendererContext::createLogicalDevice() {
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
-    if (pipelineEnabled && hasDisplayTiming) {
+    if (hasDisplayTiming) {
         getPastTiming=reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(vk_.GetDeviceProcAddr(device,"vkGetPastPresentationTimingGOOGLE"));
         displayTimingEnabled=getPastTiming!=nullptr;
     }
@@ -1355,9 +1356,9 @@ void VulkanRendererContext::renderLoop() {
         { std::unique_lock<std::mutex> lk(dirtyMutex);
            auto ready=[this]{ return !isRunning||(!rendererFailed.load()&&!surfaceDetached.load()&&
                    (needsRender.load()||fbResized.load()||cursorMoved.load()||swapchainRetryPending.load())); };
-           if (pipelineEnabled && displayTimingEnabled) dirtyCV.wait_for(lk,std::chrono::seconds(1),ready);
+           if (displayTimingEnabled) dirtyCV.wait_for(lk,std::chrono::seconds(1),ready);
            else dirtyCV.wait(lk,ready); }
-        if (pipelineEnabled && displayTimingEnabled && !rendererFailed.load() && !surfaceDetached.load()) pollDisplayTiming();
+        if (displayTimingEnabled && !rendererFailed.load() && !surfaceDetached.load()) pollDisplayTiming();
         if (!isRunning) break;
         {
             std::unique_lock<std::mutex> lock(dirtyMutex);
@@ -1373,8 +1374,40 @@ void VulkanRendererContext::renderLoop() {
                 if (!isRunning) break;
                 if (surfaceDetached.load() || version != pacingVersion) continue;
                 nextFrame = std::chrono::steady_clock::now() + std::chrono::nanoseconds(1000000000LL / cap);
+            } else {
+                auto stopped = [this, version] {
+                    return !isRunning || surfaceDetached.load() || pacingVersion != version
+                        || fbResized.load() || swapchainRetryPending.load();
+                };
+                bool resize = fbResized.load() || swapchainRetryPending.load();
+                if (!resize && !needsRender.load() && cursorMoved.load() && lastPresentSteadyNs != 0) {
+                    // Cursor motion must not take its own refresh. Wait for the next content frame.
+                    auto deadline = std::chrono::steady_clock::time_point(std::chrono::nanoseconds(
+                        lastPresentSteadyNs + 40000000));
+                    dirtyCV.wait_until(lock, deadline, [this, version] {
+                        return !isRunning || surfaceDetached.load() || pacingVersion != version
+                            || fbResized.load() || swapchainRetryPending.load() || needsRender.load();
+                    });
+                    if (!isRunning) break;
+                    if (surfaceDetached.load() || version != pacingVersion) continue;
+                }
+                resize = fbResized.load() || swapchainRetryPending.load();
+                // Frame generation is already spaced by PresentExtension before this damage
+                // exists. Holding or timestamping here keeps the game buffer outstanding, or
+                // re-pairs a present the X server already spaced. Show generated frames now.
+                if (!resize && needsRender.load() && presentCadenceEnabled.load(std::memory_order_relaxed)) {
+                    // Hold the first damage of a burst for two refreshes so the 8 ms duplicate
+                    // (cursor or a second damage) is included in the same present. A learned
+                    // full-frame slot chased GPU hitch noise and that chase was the stutter.
+                    auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::nanoseconds(vsyncPeriodNs() * 2);
+                    dirtyCV.wait_until(lock, deadline, stopped);
+                    if (!isRunning) break;
+                    if (surfaceDetached.load() || version != pacingVersion) continue;
+                }
             }
         }
+        uint64_t presentsBefore = rendererPresents.load(std::memory_order_relaxed);
         try { renderFrame(); }
         catch (const std::exception& e) {
             if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: %s",e.what());
@@ -1385,6 +1418,13 @@ void VulkanRendererContext::renderLoop() {
             if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: unknown exception");
             { std::lock_guard<std::mutex> lk(renderMutex); pendingFrameSerial=0; }
             fbResized.store(true);
+        }
+        if (rendererPresents.load(std::memory_order_relaxed) != presentsBefore) {
+            lastPresentSteadyNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            // A frame that arrived during the hold was shown but not sampled. Measure the next
+            // interval from this present, or a short duplicate looks like a 60 ms frame.
+            if (lastContentArrivalNs < lastPresentSteadyNs) lastContentArrivalNs = lastPresentSteadyNs;
         }
         if (swapchainRetryPending.load()) {
             std::unique_lock<std::mutex> lk(dirtyMutex);
@@ -1403,6 +1443,167 @@ void VulkanRendererContext::setFrameCoordination(int cap) {
         ++pacingVersion;
     }
     dirtyCV.notify_all();
+}
+
+void VulkanRendererContext::setDisplayRefreshHz(int hz) {
+    if (hz < 30 || hz > 240) return;
+    displayRefreshHz.store(hz, std::memory_order_relaxed);
+}
+
+void VulkanRendererContext::setPresentCadence(bool enabled) {
+    {
+        std::lock_guard<std::mutex> lock(dirtyMutex);
+        if (presentCadenceEnabled.load() == enabled) return;
+        presentCadenceEnabled.store(enabled);
+        fgLastArrivalNs = 0;
+        fgLastApplyNs = 0;
+        fgLastShortNs = 0;
+        fgIntervalNs = 0;
+        fgLoggedSlotNs = 0;
+        fgDisplayDelayNs.store(0, std::memory_order_relaxed);
+        ++pacingVersion;
+    }
+    dirtyCV.notify_all();
+}
+
+int64_t VulkanRendererContext::fgPresentDueNs(int64_t nowNs, int64_t lastPresentNs) {
+    // Hold only the generated frame. It arrives within 12 ms; the real frame is the
+    // 16-40 ms gap after it. Holding every frame, or treating a hitch as that pair,
+    // stalled the game down to the teens. A pause clears the previous gap but keeps
+    // a period that already proved to be a real pair.
+    int64_t interval = 0;
+    if (fgLastArrivalNs != 0) interval = nowNs - fgLastArrivalNs;
+    if (interval > 100000000LL) {
+        fgLastShortNs = 0;
+    } else if (fgLastShortNs > 0 && fgLastShortNs < 12000000LL
+               && interval > 16000000LL && interval < 40000000LL) {
+        int64_t period = fgLastShortNs + interval;
+        if (period >= 20000000LL && period <= 50000000LL
+            && (fgIntervalNs == 0 || (period > fgIntervalNs / 2 && period < fgIntervalNs * 3 / 2)))
+            fgIntervalNs = fgIntervalNs == 0 ? period : (fgIntervalNs * 7 + period) / 8;
+    }
+    if (interval > 0 && interval <= 100000000LL) fgLastShortNs = interval;
+    fgLastArrivalNs = nowNs;
+
+    int64_t slot = 0;
+    if (fgIntervalNs > 0) {
+        slot = fgIntervalNs / 2;
+        if (slot < 8000000LL) slot = 8000000LL;
+        if (slot > 20000000LL) slot = 20000000LL;
+    }
+    if (llabs(slot - fgLoggedSlotNs) >= 2000000LL) {
+        fgLoggedSlotNs = slot;
+        __android_log_print(ANDROID_LOG_INFO, "Winlator_Renderer",
+            "FG present slot %" PRId64 " us (game period %" PRId64 " us, refresh %d)",
+            slot / 1000, fgIntervalNs / 1000, displayRefreshHz.load(std::memory_order_relaxed));
+    }
+    // Queue immediately. The delay is applied as a present timestamp so the game
+    // is not blocked waiting for this thread to wake up.
+    int64_t delay = 0;
+    bool early = interval > 0 && interval < 12000000LL;
+    if (early && slot > 0 && lastPresentNs != 0) {
+        int64_t target = lastPresentNs + slot;
+        if (target > nowNs) delay = std::min(target - nowNs, slot);
+    }
+    fgDisplayDelayNs.store(delay, std::memory_order_relaxed);
+    fgLastApplyNs = nowNs + delay;
+    return nowNs;
+}
+
+int64_t VulkanRendererContext::vsyncPeriodNs() const {
+    int hz = displayRefreshHz.load(std::memory_order_relaxed);
+    if (hz < 30 || hz > 240) hz = 120;
+    return 1000000000LL / hz;
+}
+
+int64_t VulkanRendererContext::presentSlotNs() {
+    int64_t vsync = vsyncPeriodNs();
+    // Producer arrivals are the game rate. Render-loop arrivals include the hold, so a
+    // slow slot would otherwise measure itself and never step back down. A single hitch
+    // must not replace a learned slot either.
+    int64_t interval = producerIntervalNs.load(std::memory_order_relaxed);
+    if (interval <= 0) {
+        if (committedSlotNs == 0) committedSlotNs = vsync * 4;
+        return committedSlotNs;
+    }
+    int64_t multiples = (interval + vsync / 2) / vsync;
+    if (multiples < 1) multiples = 1;
+    if (multiples > 8) multiples = 8;
+    int64_t target = multiples * vsync;
+    if (committedSlotNs == 0) {
+        committedSlotNs = target;
+        lastSlotChangeNs = lastProducerArrivalNs;
+        return committedSlotNs;
+    }
+    int dir = 0;
+    if (interval > committedSlotNs + vsync && committedSlotNs < vsync * 8) dir = 1;
+    else if (interval + vsync < committedSlotNs && committedSlotNs > vsync) dir = -1;
+    if (dir == 0 || dir != slotStepDir) {
+        slotStepDir = dir;
+        slotStepHold = dir == 0 ? 0 : 1;
+        return committedSlotNs;
+    }
+    // About half a second of the new rate, and no more than one change per second.
+    // Flipping 25 ms and 33 ms on a noisy average is the stutter.
+    if (++slotStepHold >= 12) {
+        int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (lastSlotChangeNs == 0 || now - lastSlotChangeNs >= 1000000000LL) {
+            committedSlotNs = dir > 0 ? committedSlotNs + vsync
+                                      : std::max(target, committedSlotNs - vsync);
+            lastSlotChangeNs = now;
+            slotStepHold = 0;
+        }
+    }
+    return committedSlotNs;
+}
+
+void VulkanRendererContext::noteContentArrival(int64_t nowNs) {
+    if (lastContentArrivalNs != 0) {
+        int64_t interval = nowNs - lastContentArrivalNs;
+        if (interval > 100000000LL) {
+            contentIntervalNs = 0;
+            committedSlotNs = 0;
+        } else if (interval >= vsyncPeriodNs() + vsyncPeriodNs() / 2) {
+            contentIntervalNs = contentIntervalNs == 0 ? interval : (contentIntervalNs * 15 + interval) / 16;
+            int64_t slot = presentSlotNs();
+            if (slot != loggedSlotNs) {
+                loggedSlotNs = slot;
+                __android_log_print(ANDROID_LOG_INFO, WLOG_TAG,
+                    "present cadence slot %.2f ms (content %.2f ms, producer %.2f ms, refresh %d Hz)",
+                    slot / 1e6, contentIntervalNs / 1e6,
+                    producerIntervalNs.load(std::memory_order_relaxed) / 1e6,
+                    displayRefreshHz.load(std::memory_order_relaxed));
+            }
+        } else {
+            // A present that follows the previous content by one refresh is the stutter pair, not a new rate.
+            return;
+        }
+    }
+    lastContentArrivalNs = nowNs;
+}
+
+void VulkanRendererContext::noteProducerFrame() {
+    int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    std::lock_guard<std::mutex> lk(producerMutex);
+    int64_t prev = lastProducerArrivalNs;
+    if (prev == 0) {
+        lastProducerArrivalNs = now;
+        return;
+    }
+    int64_t interval = now - prev;
+    if (interval > 100000000LL) {
+        // Level loads and camera hitches are not a new frame rate.
+        lastProducerArrivalNs = now;
+        return;
+    }
+    // Sub-refresh updates are the duplicate damage/cursor pair, not a faster game.
+    if (interval < vsyncPeriodNs() + vsyncPeriodNs() / 2) return;
+    lastProducerArrivalNs = now;
+    int64_t smoothed = producerIntervalNs.load(std::memory_order_relaxed);
+    smoothed = smoothed == 0 ? interval : (smoothed * 15 + interval) / 16;
+    producerIntervalNs.store(smoothed, std::memory_order_relaxed);
 }
 
 void VulkanRendererContext::flushDeleteQueue() {
@@ -1707,7 +1908,20 @@ void VulkanRendererContext::renderFrame() {
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
-    VkPresentTimeGOOGLE displayTime{nextDisplayId++,0};
+    int64_t desiredPresent = 0;
+    fgDisplayDelayNs.store(0, std::memory_order_relaxed);
+    if (displayTimingEnabled && presentCadenceEnabled.load(std::memory_order_relaxed) && cadencePhaseNs != 0) {
+        timespec mono{};
+        clock_gettime(CLOCK_MONOTONIC, &mono);
+        int64_t nowMono = mono.tv_sec * 1000000000LL + mono.tv_nsec;
+        int64_t vsync = vsyncPeriodNs();
+        int64_t phase = cadencePhaseNs % vsync;
+        int64_t next = nowMono - (nowMono % vsync) + phase;
+        if (next <= nowMono + 1000000LL) next += vsync;
+        // The render loop already waited out the slot. Snap to the next refresh, not a second slot ahead.
+        if (next <= nowMono + vsync + 1000000LL) desiredPresent = next;
+    }
+    VkPresentTimeGOOGLE displayTime{nextDisplayId++, (uint64_t)desiredPresent};
     VkPresentTimesInfoGOOGLE displayTimes{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
     displayTimes.swapchainCount=1; displayTimes.pTimes=&displayTime;
     if (displayTimingEnabled) pi.pNext=&displayTimes;
@@ -1850,6 +2064,7 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
         auto it=texMap.find(id);
         if (it!=texMap.end()) it->second.dirty=true;
     }
+    noteProducerFrame();
     needsRender.store(true); dirtyCV.notify_one();
 }
 
@@ -1878,6 +2093,7 @@ void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* 
     wt.needsTransition = false; // The first-use layout belongs to the cached VkImage.
     retireReleasedDmaBufs();
     if (pipelineEnabled && id==pipelineTarget) pipe.accept();
+    noteProducerFrame();
     needsRender.store(true); dirtyCV.notify_one();
 }
 
@@ -1953,6 +2169,7 @@ bool VulkanRendererContext::updateWindowContentDmaBuf(int64_t id, int64_t key, i
     retireReleasedDmaBufs();
     ++dmaAccepted;
     if (pipelineEnabled && id==pipelineTarget) pipe.accept();
+    noteProducerFrame();
     needsRender.store(true); dirtyCV.notify_one();
     return true;
 }
@@ -2387,7 +2604,7 @@ void VulkanRendererContext::pollDisplayTiming() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
     if (surfaceDetached.load()) return;
     uint64_t now=(uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    if (!getPastTiming || swapchain==VK_NULL_HANDLE || now-lastDisplayPollNs<1000000000ULL) return;
+    if (!getPastTiming || swapchain==VK_NULL_HANDLE || now-lastDisplayPollNs<200000000ULL) return;
     lastDisplayPollNs=now;
     uint32_t count=0;
     VkResult result=getPastTiming(device,swapchain,&count,nullptr);
@@ -2399,5 +2616,10 @@ void VulkanRendererContext::pollDisplayTiming() {
     if (result!=VK_SUCCESS && result!=VK_INCOMPLETE) return;
     std::lock_guard<std::mutex> lk(renderMutex);
     std::sort(timings.begin(),timings.begin()+count,[](const auto& a,const auto& b){return a.presentID<b.presentID;});
-    for(uint32_t i=0;i<count;i++) if(timings[i].actualPresentTime>0) displayFeedback.record(timings[i].presentID);
+    uint64_t latestActual = 0;
+    for(uint32_t i=0;i<count;i++) {
+        if(timings[i].actualPresentTime>0) displayFeedback.record(timings[i].presentID);
+        if(timings[i].actualPresentTime>latestActual) latestActual=timings[i].actualPresentTime;
+    }
+    if (latestActual != 0) cadencePhaseNs = (int64_t)latestActual;
 }

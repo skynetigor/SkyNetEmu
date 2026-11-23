@@ -404,7 +404,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             getWindow().setAttributes(params);
         } else {
             android.view.Display display = getWindowManager().getDefaultDisplay();
-            refreshRate = display.getRefreshRate();
+            // getRefreshRate() can report the window's 60 Hz preference while the panel
+            // is still at 120. The present slot has to follow the mode actually scanning out.
+            refreshRate = display.getMode().getRefreshRate();
+            if (refreshRate < 30f) refreshRate = display.getRefreshRate();
         }
 
         cursorLock = preferences.getBoolean("cursor_lock", true);
@@ -2005,6 +2008,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         } else {
             VulkanXServerView.loadNativeLibrary();
             xServerView = new VulkanXServerView(this, xServer);
+            ((VulkanXServerView) xServerView).setDisplayRefreshHz(Math.round(refreshRate));
         }
         final XServerRendererView renderer = xServerView;
         renderer.setCursorVisible(false);
@@ -4089,6 +4093,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     public void setRefreshRate(float refreshRate) {
         this.refreshRate = refreshRate;
+        if (xServerView instanceof VulkanXServerView)
+            ((VulkanXServerView) xServerView).setDisplayRefreshHz(Math.round(refreshRate));
     }
 
     public float getRefreshRate() {

@@ -96,6 +96,12 @@ target_compile_options(wine_pe_cache PRIVATE -Wall -Wextra -fvisibility=hidden)
 target_link_options(wine_pe_cache PRIVATE "-Wl,--exclude-libs,ALL")
 target_link_libraries(wine_pe_cache log dl)
 
+# Spaces Lossless Scaling's native presents. Loaded only while frame generation is on.
+add_library(lsfg_pace SHARED winlator/lsfg_pace_layer.c)
+target_compile_options(lsfg_pace PRIVATE -Wall -Wextra -fvisibility=hidden)
+target_link_options(lsfg_pace PRIVATE "-Wl,--exclude-libs,ALL")
+target_link_libraries(lsfg_pace log)
+
 # Keep the Pypetto DisplayX/EGL target above untouched.  The optional Vulkan
 # renderer is a separate JNI library so selecting it cannot change the native
 # presentation path used by DisplayX or EGL.

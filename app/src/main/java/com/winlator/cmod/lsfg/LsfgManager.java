@@ -157,6 +157,8 @@ public final class LsfgManager {
         sessionFlowScale = null;
         sessionLayer = null;
         activeMultiplier = MULTIPLIER_OFF;
+        Runnable listener = presentCadenceListener;
+        if (listener != null) listener.run();
     }
 
     /** The multiplier last handed to the running game's layer: 0 or 1 when it generates no frames. */
@@ -547,7 +549,17 @@ public final class LsfgManager {
         vsyncFile(container).delete();
         if (!writeAtomic(configFile(container), toml.toString())) return false;
         activeMultiplier = multiplier;
+        Runnable listener = presentCadenceListener;
+        if (listener != null) listener.run();
         return true;
+    }
+
+    /** The compositor asks this so it can stop quantizing presents while frames are being generated. */
+    private static volatile Runnable presentCadenceListener;
+
+    public static void setPresentCadenceListener(Runnable listener) {
+        presentCadenceListener = listener;
+        if (listener != null) listener.run();
     }
 
     /**
@@ -565,7 +577,14 @@ public final class LsfgManager {
         try {
             android.view.Display display = ((android.hardware.display.DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE))
                     .getDisplay(android.view.Display.DEFAULT_DISPLAY);
-            if (display != null && display.getRefreshRate() > 1f) refreshRate = display.getRefreshRate();
+            // getRefreshRate() stays at 60 on a 120 Hz panel (RedMagic Astra 2). The mode is the
+            // rate the layer must divide, or fps_limit is 30 and the real frame is held to the
+            // wrong slot.
+            if (display != null) {
+                float modeRate = display.getMode() != null ? display.getMode().getRefreshRate() : 0f;
+                if (modeRate > 1f) refreshRate = modeRate;
+                else if (display.getRefreshRate() > 1f) refreshRate = display.getRefreshRate();
+            }
         }
         catch (RuntimeException ignored) {}
         return Math.max(1, Math.round(refreshRate) / Math.min(4, multiplier));

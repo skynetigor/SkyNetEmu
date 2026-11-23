@@ -141,6 +141,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         xServer.setXServerView(this);
         xServer.windowManager.addOnWindowModificationListener(this);
         xServer.pointer.addOnPointerMotionListener(this);
+        com.winlator.cmod.lsfg.LsfgManager.setPresentCadenceListener(this::applyPresentCadence);
     }
 
     private Drawable createRootCursorDrawable() {
@@ -195,6 +196,10 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetSwapRB(long handle, boolean enabled);
     private native void nativeSetPresentMode(long handle, int mode);
     private native void nativeSetFrameCoordination(long handle, int cap);
+    private native void nativeSetDisplayRefreshHz(long handle, int hz);
+    private native void nativeSetPresentCadence(long handle, boolean enabled);
+    private int pendingRefreshHz = 120;
+    private boolean presentCadenceEnabled = true;
     private native int[] nativeGetSupportedPresentModes(long handle);
 
     private native void nativeInitRootWindow(long handle, long rootId, long contentId, int width, int height);
@@ -250,6 +255,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
                         nativeSetPresentMode(nativeHandle, pendingPresentMode);
                         nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
+                        nativeSetDisplayRefreshHz(nativeHandle, pendingRefreshHz);
+                        nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
                         nativeSetFilterMode(nativeHandle, pendingFilterMode);
                         nativeSetSwapRB(nativeHandle, pendingSwapRB);
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
@@ -278,6 +285,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     com.winlator.cmod.linux.FramePipelineDiagnostics.renderer(this::pipelineDiagnostics);
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
+                    nativeSetDisplayRefreshHz(nativeHandle, pendingRefreshHz);
+                    nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
@@ -354,6 +363,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             initExecutor = null;
         }
         compositeRedirectedWindows.clear();
+        com.winlator.cmod.lsfg.LsfgManager.setPresentCadenceListener(null);
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeDestroy(nativeHandle);
@@ -909,6 +919,19 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     public int getFpsLimit() {
         return fpsLimit;
     }
+    public void setDisplayRefreshHz(int hz) {
+        if (hz < 30 || hz > 240) return;
+        pendingRefreshHz = hz;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetDisplayRefreshHz(nativeHandle, hz); }
+    }
+
+    private void applyPresentCadence() {
+        presentCadenceEnabled = !com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames();
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
+        }
+    }
+
     public void setFpsLimit(int limit) {
         this.fpsLimit = Math.max(0, Math.min(1000, limit));
         updateDisplayFps(fpsLimit);
