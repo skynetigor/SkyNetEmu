@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "revision": 28,
+  "revision": 29,
   "id": "beamng-drive",
   "name": "BeamNG.drive",
   "steam": {
@@ -12,7 +12,13 @@
       "BeamNG.drive.exe",
       "Bin64/BeamNG.drive.x64.exe",
       "BinArm64/BeamNG.drive.arm64.exe"
-    ]
+    ],
+    "defaults": {
+      "noSteam": {
+        "default": true,
+        "arg": "-nosteam"
+      }
+    }
   },
   "linux": {
     "executables": [
@@ -58,18 +64,18 @@
         "beamng-040-linux-fex-bionic-960x544"
       ],
       "preferredContainer": "beamng-040-linux-fex-bionic-960x544",
+      "userData": {
+        "arg": "-userpath",
+        "links": {
+          "current/settings": "userdata/settings",
+          "current/mods": "userdata/mods"
+        }
+      },
+      "args": [
+        "-nogfxbindless"
+      ],
       "linux": {
-        "userData": {
-          "arg": "-userpath",
-          "links": {
-            "current/settings": "userdata/settings",
-            "current/mods": "userdata/mods"
-          }
-        },
         "resolution": "native",
-        "args": [
-          "-nogfxbindless"
-        ],
         "extras": {
           "linuxTouchMode": "touchpad",
           "simTouchScreen": "0",
@@ -110,14 +116,14 @@
         "beamng-039-linux-fex-bionic-960x544"
       ],
       "preferredContainer": "beamng-039-linux-fex-bionic-960x544",
+      "userData": {
+        "arg": "-userpath",
+        "links": {
+          "current/settings": "userdata/settings",
+          "current/mods": "userdata/mods"
+        }
+      },
       "linux": {
-        "userData": {
-          "arg": "-userpath",
-          "links": {
-            "current/settings": "userdata/settings",
-            "current/mods": "userdata/mods"
-          }
-        },
         "env": {
           "MESA_SHADER_CACHE_DISABLE": "false",
           "FEX_DISABLEL2CACHE": "1",
@@ -151,13 +157,11 @@
         "beamng-linux-box64-performance"
       ],
       "preferredContainer": "proton11-x64-box64-turnip-stable",
-      "linux": {
-        "userData": {
-          "arg": "-userpath",
-          "links": {
-            "0.34/settings": "userdata/settings",
-            "0.34/mods": "userdata/mods"
-          }
+      "userData": {
+        "arg": "-userpath",
+        "links": {
+          "0.34/settings": "userdata/settings",
+          "0.34/mods": "userdata/mods"
         }
       }
     },

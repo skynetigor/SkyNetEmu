@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class EnvVars implements Iterable<String> {
     private final LinkedHashMap<String, String> data = new LinkedHashMap<>();
@@ -31,6 +32,10 @@ public class EnvVars implements Iterable<String> {
 
     public void putAll(EnvVars envVars) {
         data.putAll(envVars.data);
+    }
+
+    public void putAll(Map<String, String> envVars) {
+        if (envVars != null) data.putAll(envVars);
     }
 
     public String get(String name) {

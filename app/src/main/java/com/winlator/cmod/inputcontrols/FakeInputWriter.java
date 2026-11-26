@@ -141,6 +141,17 @@ public class FakeInputWriter {
 
 
     /**
+     * Neutral state, disconnect the ring, and keep the discovery node. A game that already opened this slot
+     * cannot see a later node; the next {@link #open()} reactivates the same ring.
+     */
+    public synchronized void park() {
+        if (destroyed || !isOpen) return;
+        reset();
+        if (nativeTransport) NativeInputTransport.disconnect(slot);
+        isOpen = false;
+    }
+
+    /**
      * Full destroy - reset, close, and delete the file.
      */
     public synchronized void destroy() {

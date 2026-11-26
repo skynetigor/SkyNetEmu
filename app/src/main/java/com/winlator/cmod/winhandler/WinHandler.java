@@ -2,6 +2,7 @@ package com.winlator.cmod.winhandler;
 
 import android.content.SharedPreferences;
 import android.util.Log;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
@@ -95,7 +96,9 @@ public class WinHandler {
             @Override
             public void onInputDeviceRemoved(int deviceId) {
                 releaseSlot(deviceId);
-                // The on-screen pad had been part of that controller: it gets a pad of its own again.
+                // Pointer capture reconfigures the pad as a new id. The game already opened slot 0 and will not
+                // adopt the replacement, so the remaining controller has to publish there.
+                adoptPrimarySlot();
                 if (activity.getInputControlsView() != null) sendGamepadState();
             }
 
@@ -660,9 +663,11 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
 
         // A controller that appears while the on-screen pad holds a slot takes over that pad's place: the game sees one pad.
         boolean first = !deviceToSlot.containsKey(controller.getDeviceId());
+        releaseStaleDevices();
         writeControllerState(controller);
         if (first && deviceToSlot.containsKey(OSC_DEVICE_ID)) {
             releaseSlot(OSC_DEVICE_ID);
+            adoptPrimarySlot();
             sendGamepadState();
         }
     }
@@ -672,14 +677,20 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         if (existing != null)
             return existing;
 
+        releaseStaleDevices();
+        existing = deviceToSlot.get(deviceId);
+        if (existing != null)
+            return existing;
+
         for (int slot = 0; slot < MAX_CONTROLLERS; slot++) {
             if (!usedSlots.contains(slot)) {
                 usedSlots.add(slot);
                 deviceToSlot.put(deviceId, slot);
-                if (fakeInputBasePath != null && writers[slot] == null) {
-                    writers[slot] = new FakeInputWriter(fakeInputBasePath, slot);
+                if (fakeInputBasePath != null) {
+                    if (writers[slot] == null)
+                        writers[slot] = new FakeInputWriter(fakeInputBasePath, slot);
                     writers[slot].open();
-                    Log.d("WinHandler", "Assigned device " + deviceId + " to slot " + slot);
+                    Log.i("WinHandler", "Assigned device " + deviceId + " to slot " + slot);
                 }
                 return slot;
             }
@@ -688,18 +699,63 @@ public void setVibrationEnabledForSlot(int slot, boolean enabled) {
         return -1;
     }
 
+    /** Device ids Android has already dropped must not keep player 1 while the replacement becomes player 2. */
+    private void releaseStaleDevices() {
+        if (inputManager == null) return;
+        int[] live = InputDevice.getDeviceIds();
+        java.util.ArrayList<Integer> stale = new java.util.ArrayList<>();
+        for (Integer deviceId : deviceToSlot.keySet()) {
+            if (deviceId == OSC_DEVICE_ID) continue;
+            boolean present = false;
+            for (int id : live) if (id == deviceId) { present = true; break; }
+            if (!present) stale.add(deviceId);
+        }
+        for (Integer deviceId : stale) releaseSlot(deviceId);
+    }
+
+    /**
+     * BeamNG binds the first XInput device it opens and does not adopt a later slot. Slot 0 is that device.
+     * A replacement controller has to publish there; activating the parked ring resyncs the open reader.
+     */
+    private synchronized void adoptPrimarySlot() {
+        ExternalController controller = firstPhysicalController();
+        if (controller == null) return;
+        int deviceId = controller.getDeviceId();
+        Integer current = deviceToSlot.get(deviceId);
+        if (current != null && current == 0) return;
+        Integer occupant = null;
+        for (java.util.Map.Entry<Integer, Integer> entry : deviceToSlot.entrySet()) {
+            if (entry.getValue() == 0) occupant = entry.getKey();
+        }
+        if (occupant != null && occupant != OSC_DEVICE_ID) return;
+        if (occupant != null) releaseSlot(occupant);
+        if (current != null) unbindSlot(deviceId);
+        int slot = assignSlot(deviceId);
+        if (slot == 0 && writers[0] != null) {
+            writers[0].writeGamepadState(stateOf(controller));
+            Log.i("WinHandler", "Moved device " + deviceId + " back to player 1");
+        }
+    }
+
     private synchronized void releaseSlot(int deviceId) {
+        controllers.remove(deviceId);
+        unbindSlot(deviceId);
+    }
+
+    private void unbindSlot(int deviceId) {
         Integer slot = deviceToSlot.remove(deviceId);
-        if (slot != null) {
-            if (fallbackSlot == slot) fallbackSlot = -1;
-            if (writers[slot] != null) {
+        if (slot == null) return;
+        if (fallbackSlot == slot) fallbackSlot = -1;
+        if (writers[slot] != null) {
+            // Keep player 1's node. Deleting it and opening event1 leaves the game on a pad that no longer updates.
+            if (slot == 0) writers[slot].park();
+            else {
                 writers[slot].destroy();
                 writers[slot] = null;
             }
-            usedSlots.remove(slot);
-            controllers.remove(deviceId);
-            Log.d("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);
         }
+        usedSlots.remove(slot);
+        Log.i("WinHandler", "Device " + deviceId + " disconnected (or OSC disabled). Slot released: " + slot);
     }
 
     public void setXInputDisabled(boolean disabled) {

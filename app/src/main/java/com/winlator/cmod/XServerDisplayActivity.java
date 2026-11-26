@@ -90,6 +90,7 @@ import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WindowsLaunchPlan;
+import com.winlator.cmod.core.WindowsProfileLaunch;
 import com.winlator.cmod.core.WineRegistryEditor;
 import com.winlator.cmod.core.WineRequestHandler;
 import com.winlator.cmod.core.WineStartMenuCreator;
@@ -148,6 +149,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.concurrent.Executors;
@@ -1661,13 +1664,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
             guestProgramLauncherComponent.setWineInfo(this.wineInfo);
 
             if (windowsLaunchPlan.nativeArm64) {
-                guestProgramLauncherComponent.setNativeArm64Arguments(windowsLaunchPlan.wineArguments(xServer.screenInfo.toString(), shortcut));
+                List<String> arguments = new ArrayList<>(Arrays.asList(
+                        windowsLaunchPlan.wineArguments(xServer.screenInfo.toString(), shortcut)));
+                appendWindowsProfileArguments(arguments);
+                guestProgramLauncherComponent.setNativeArm64Arguments(arguments.toArray(new String[0]));
             } else {
                 guestProgramLauncherComponent.setGuestExecutable("wine explorer /desktop=shell," + xServer.screenInfo + " " + getWineStartCommand());
             }
 
             envVars.putAll(container.getEnvVars());
-
+            if (shortcut != null && container != null && !container.isLinux()) {
+                GameProfiles.Effective windowsProfile = GameProfiles.resolve(this, container, shortcut);
+                if (windowsProfile != null) envVars.putAll(windowsProfile.env);
+            }
             if (shortcut != null)
                 envVars.putAll(shortcut.getExtra("envVars"));
 
@@ -3883,6 +3892,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    /** Profile launch options, including userdata, for a Windows shortcut. The shortcut's own arguments win. */
+    private void appendWindowsProfileArguments(List<String> args) {
+        if (container == null || container.isLinux() || shortcut == null) return;
+        GameProfiles.Effective profile = GameProfiles.resolve(this, container, shortcut);
+        if (profile == null) return;
+        for (String arg : profile.programArgs()) if (!args.contains(arg)) args.add(arg);
+        if (profile.userData == null) return;
+        try {
+            args.addAll(WindowsProfileLaunch.userDataArguments(imageFs, container, args, profile.profile.id, profile.rootHost,
+                    profile.userData.arg, profile.userData.links));
+        } catch (IOException e) {
+            Log.w("WindowsProfileLaunch", "Profile user data was not applied; the game keeps its default user folder", e);
+        }
+    }
+
+    private String windowsProfileArgumentSuffix(String existing) {
+        List<String> args = WindowsLaunchPlan.parseArguments(existing);
+        int before = args.size();
+        appendWindowsProfileArguments(args);
+        if (args.size() == before) return "";
+        return " " + WindowsLaunchPlan.serializeArguments(args.subList(before, args.size()));
+    }
+
     private String getWineStartCommand() {
 
         EnvVars envVars = getOverrideEnvVars();
@@ -3893,6 +3925,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String execArgs = shortcut.getExtra("execArgs");
             execArgs = !execArgs.isEmpty() ? " " + execArgs : "";
 
+            if (container != null && !container.isLinux()) execArgs += windowsProfileArgumentSuffix(execArgs);
             if (shortcut.path.endsWith(".lnk")) {
                 args += "\"" + shortcut.path + "\"" + execArgs;
             } else {

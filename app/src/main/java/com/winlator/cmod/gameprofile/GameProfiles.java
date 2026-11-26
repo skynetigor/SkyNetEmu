@@ -4,13 +4,16 @@ import android.content.Context;
 
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.container.Shortcut;
+import com.winlator.cmod.core.GameFolder;
 import com.winlator.cmod.linux.LinuxSession;
 import com.winlator.cmod.linux.LinuxSteamGames;
+import com.winlator.cmod.xenvironment.ImageFs;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -102,7 +105,7 @@ public final class GameProfiles {
 
     /** The settings of a shortcut, or null when it has no profile (or the registry has none for it on hand). */
     public static Effective resolve(Context context, Container container, Shortcut shortcut) {
-        if (container == null || !container.isLinux()) return null;
+        if (container == null || shortcut == null) return null;
         String id = profileId(context, shortcut);
         if (id.isEmpty()) return null;
         GameProfile profile = GameProfileCatalog.game(context, id, false);
@@ -135,7 +138,16 @@ public final class GameProfiles {
             String root = rootExtra == null ? "" : rootExtra.trim();
             if (root.startsWith("/")) {
                 rootGuest = root.endsWith("/") && root.length() > 1 ? root.substring(0, root.length() - 1) : root;
-                rootHost = LinuxSession.hostFile(context, container, rootGuest);
+                rootHost = container.isLinux() ? LinuxSession.hostFile(context, container, rootGuest) : new File(rootGuest);
+            }
+            if (rootHost == null && !container.isLinux()) {
+                String unix = GameFolder.unixExePath(ImageFs.find(context), container, shortcut.path);
+                if (unix != null) {
+                    String normalized = unix.replace('\\', '/');
+                    rootHost = GameMatcher.folderOf(profile.executables(GameProfile.Platform.WINDOWS), normalized,
+                            normalized.toLowerCase(Locale.ROOT));
+                    if (rootHost != null) rootGuest = rootHost.getPath();
+                }
             }
         }
 
@@ -154,7 +166,8 @@ public final class GameProfiles {
             }
         }
 
-        GameProfile.Settings settings = profile.effective(version, GameProfile.Platform.LINUX);
+        GameProfile.Platform platform = container.isLinux() ? GameProfile.Platform.LINUX : GameProfile.Platform.WINDOWS;
+        GameProfile.Settings settings = profile.effective(version, platform);
         if (noSteamExtra == null) noSteamExtra = "";
         boolean noSteam = noSteamExtra.equals("1")
                 || (noSteamExtra.isEmpty() && settings.noSteam != null && settings.noSteam.enabled);

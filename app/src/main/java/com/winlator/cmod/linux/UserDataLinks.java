@@ -15,7 +15,7 @@ import java.util.Map;
  * folder is on shared storage, which cannot hold the symlinks some programs create (a browser's profile lock) but is followed
  * through when the link itself is elsewhere. No Android classes, so that it is tested on the host.
  */
-final class UserDataLinks {
+public final class UserDataLinks {
     private UserDataLinks() {}
 
     /**
@@ -25,7 +25,7 @@ final class UserDataLinks {
      * @param links      link name (relative to {@code userPath}) to target (relative to the game's folder)
      * @return what was left alone, one sentence each: a link name that is already a real folder or file is not touched
      */
-    static List<String> make(File userPath, File gameRoot, String targetBase, Map<String, String> links) throws IOException {
+    public static List<String> make(File userPath, File gameRoot, String targetBase, Map<String, String> links) throws IOException {
         List<String> notes = new ArrayList<>();
         Path base = userPath.toPath();
         Files.createDirectories(base);
