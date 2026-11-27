@@ -371,6 +371,13 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 			static bool deliver_sigtrap = false;
 
 		case SIGTRAP: {
+			/* EXITKILL is the kernel backstop for --kill-on-exit. atexit
+			 * and the fatal-signal handler never run when Android
+			 * SIGKILLs proot, and a zombie leader does not accept a
+			 * later userspace kill. Each traced thread, including
+			 * clones, inherits this option and is SIGKILLed by the
+			 * kernel when this tracer exits. Guest-emulated
+			 * PTRACE_SETOPTIONS does not overwrite these real options. */
 			const unsigned long default_ptrace_options = (
 				PTRACE_O_TRACESYSGOOD	|
 				PTRACE_O_TRACEFORK	|
@@ -378,7 +385,8 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 				PTRACE_O_TRACEVFORKDONE	|
 				PTRACE_O_TRACEEXEC	|
 				PTRACE_O_TRACECLONE	|
-				PTRACE_O_TRACEEXIT);
+				PTRACE_O_TRACEEXIT	|
+				(tracee->killall_on_exit ? PTRACE_O_EXITKILL : 0));
 
 			/* Distinguish some events from others and
 			 * automatically trace each new process with

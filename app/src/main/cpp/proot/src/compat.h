@@ -135,6 +135,9 @@
 #    ifndef PTRACE_O_TRACESECCOMP
 #        define PTRACE_O_TRACESECCOMP	0x00000080
 #    endif
+#    ifndef PTRACE_O_EXITKILL
+#        define PTRACE_O_EXITKILL	0x00100000
+#    endif
 #    ifndef PTRACE_EVENT_FORK
 #        define PTRACE_EVENT_FORK	1
 #    endif

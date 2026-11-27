@@ -7,12 +7,41 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef PTRACE_SEIZE
+#define PTRACE_SEIZE 0x4206
+#endif
+#ifndef PTRACE_O_EXITKILL
+#define PTRACE_O_EXITKILL 0x00100000
+#endif
+#ifndef PTRACE_O_TRACEFORK
+#define PTRACE_O_TRACEFORK 0x00000002
+#endif
+#ifndef PTRACE_O_TRACEVFORK
+#define PTRACE_O_TRACEVFORK 0x00000004
+#endif
+#ifndef PTRACE_O_TRACECLONE
+#define PTRACE_O_TRACECLONE 0x00000008
+#endif
+#ifndef PTRACE_EVENT_FORK
+#define PTRACE_EVENT_FORK 1
+#endif
+#ifndef PTRACE_EVENT_VFORK
+#define PTRACE_EVENT_VFORK 2
+#endif
+#ifndef PTRACE_EVENT_CLONE
+#define PTRACE_EVENT_CLONE 3
+#endif
+#ifndef PTRACE_EVENT_STOP
+#define PTRACE_EVENT_STOP 128
+#endif
 
 static volatile sig_atomic_t stopping;
 static volatile sig_atomic_t suspended;
@@ -68,6 +97,9 @@ static int read_entry(pid_t pid, struct entry *entry) {
     return 0;
 }
 
+static void signal_tasks(pid_t pid, int signal_number);
+static void release_task(pid_t pid);
+
 static void signal_entry(const struct entry *entry, int signal_number) {
     struct entry current;
     int fd = -1;
@@ -89,9 +121,33 @@ static void signal_entry(const struct entry *entry, int signal_number) {
     if (result && errno != ESRCH)
         fprintf(stderr, "ContainerSupervisor: signal %d to pid %d failed: %s\n",
                 signal_number, entry->pid, strerror(errno));
+    /* A zombie leader still has a thread group. Group-directed SIGKILL is not
+     * always delivered to the siblings that kept running after the leader exited. */
+    if (signal_number == SIGKILL || signal_number == SIGSTOP)
+        signal_tasks(entry->pid, signal_number);
 }
 
-static void signal_descendants(int signal_number) {
+static void signal_tasks(pid_t pid, int signal_number) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/task", pid);
+    DIR *tasks = opendir(path);
+    if (!tasks) {
+        syscall(SYS_tgkill, pid, pid, signal_number);
+        return;
+    }
+    struct dirent *task;
+    while ((task = readdir(tasks))) {
+        char *end = NULL;
+        long tid = strtol(task->d_name, &end, 10);
+        if (!end || *end || tid <= 0) continue;
+        if (syscall(SYS_tgkill, pid, (pid_t)tid, signal_number) && errno != ESRCH)
+            fprintf(stderr, "ContainerSupervisor: signal %d to tid %ld failed: %s\n",
+                    signal_number, tid, strerror(errno));
+    }
+    closedir(tasks);
+}
+
+static void signal_descendants(int signal_number, int release_ptrace) {
     DIR *proc = opendir("/proc");
     if (!proc) {
         perror("ContainerSupervisor /proc");
@@ -142,10 +198,67 @@ static void signal_descendants(int signal_number) {
     } while (changed);
     for (size_t i = 0; i < count; i++)
         if (entries[i].owned) {
-            signal_entry(&entries[i], signal_number);
-            if (signal_number == SIGTERM) signal_entry(&entries[i], SIGCONT);
+            if (!release_ptrace || signal_number) {
+                signal_entry(&entries[i], signal_number);
+                if (signal_number == SIGTERM) signal_entry(&entries[i], SIGCONT);
+            }
+            if (release_ptrace) release_task(entries[i].pid);
         }
     free(entries);
+}
+
+static int command_uses_proot(int argc, char **argv) {
+    for (int i = 2; i < argc; i++) {
+        const char *base = strrchr(argv[i], '/');
+        base = base ? base + 1 : argv[i];
+        if (!strcmp(base, "proot")) return 1;
+    }
+    return 0;
+}
+
+/* Proot is already the tracer of its guests. Seizing that tree would steal
+ * its children. Its own PTRACE_O_EXITKILL covers them once this direct child
+ * dies; PR_SET_PDEATHSIG makes that happen when the supervisor is SIGKILLed.
+ * Every other guest is seized here so a zombie leader's live threads are
+ * tracees and die with this process. */
+static void resume_tracee(pid_t pid, int status) {
+    int event = status >> 16;
+    int sig = WSTOPSIG(status);
+    if (event == PTRACE_EVENT_CLONE || event == PTRACE_EVENT_FORK || event == PTRACE_EVENT_VFORK
+            || event == PTRACE_EVENT_STOP) {
+        if (event != PTRACE_EVENT_STOP || (!suspended && !stopping))
+            ptrace(PTRACE_CONT, pid, NULL, 0);
+        return;
+    }
+    if ((sig == SIGSTOP || sig == SIGTSTP) && !suspended && !stopping) {
+        ptrace(PTRACE_CONT, pid, NULL, 0);
+        return;
+    }
+    if (sig == SIGCONT && suspended) {
+        ptrace(PTRACE_CONT, pid, NULL, 0);
+        return;
+    }
+    ptrace(PTRACE_CONT, pid, NULL, (void *)(long)sig);
+}
+
+/* A seized task sitting in ptrace-stop does not observe a later SIGCONT until
+ * its tracer restarts it. kill(SIGCONT) alone therefore cannot resume pause. */
+static void release_task(pid_t pid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/task", pid);
+    DIR *tasks = opendir(path);
+    if (!tasks) {
+        ptrace(PTRACE_CONT, pid, NULL, (void *)(long)SIGCONT);
+        return;
+    }
+    struct dirent *task;
+    while ((task = readdir(tasks))) {
+        char *end = NULL;
+        long tid = strtol(task->d_name, &end, 10);
+        if (!end || *end || tid <= 0) continue;
+        ptrace(PTRACE_CONT, (pid_t)tid, NULL, (void *)(long)SIGCONT);
+    }
+    closedir(tasks);
 }
 
 static void restore_loader_environment(void) {
@@ -198,6 +311,12 @@ int main(int argc, char **argv) {
     }
     /* The Android owner may disappear with its output pipe before cleanup finishes. */
     signal(SIGPIPE, SIG_IGN);
+    int uses_proot = command_uses_proot(argc, argv);
+    int wake[2];
+    if (pipe2(wake, O_CLOEXEC)) {
+        perror("ContainerSupervisor jail pipe");
+        return 125;
+    }
     pid_t root = fork();
     if (root < 0) {
         perror("ContainerSupervisor fork");
@@ -214,11 +333,31 @@ int main(int argc, char **argv) {
             perror("ContainerSupervisor guest signal mask");
             _exit(125);
         }
+        pid_t supervisor = getppid();
+        if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != supervisor) _exit(125);
+        if (!uses_proot) {
+            close(wake[1]);
+            char byte;
+            while (read(wake[0], &byte, 1) < 0 && errno == EINTR) ;
+            close(wake[0]);
+        } else {
+            close(wake[0]);
+            close(wake[1]);
+        }
         restore_loader_environment();
         execvp(argv[2], argv + 2);
         perror("ContainerSupervisor exec");
         _exit(127);
     }
+    close(wake[0]);
+    int jailed = 0;
+    if (!uses_proot) {
+        long options = PTRACE_O_EXITKILL | PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK;
+        if (ptrace(PTRACE_SEIZE, root, NULL, (void *)options) == 0) jailed = 1;
+        else fprintf(stderr, "ContainerSupervisor: ptrace jail unavailable: %s\n", strerror(errno));
+    }
+    close(wake[1]);
+    if (jailed) fprintf(stderr, "ContainerSupervisor: ptrace jail attached to %d\n", root);
     printf("\n%s:ready\n", argv[1]);
     fflush(stdout);
     long long deadline = 0;
@@ -229,7 +368,11 @@ int main(int argc, char **argv) {
         int status;
         pid_t reaped;
         while ((reaped = waitpid(-1, &status, WNOHANG)) > 0) {
-            if (reaped == root) {
+            if (WIFSTOPPED(status)) {
+                if (jailed) resume_tracee(reaped, status);
+                continue;
+            }
+            if (reaped == root && (WIFEXITED(status) || WIFSIGNALED(status))) {
                 int code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
                 printf("\n%s:%d\n", argv[1], code);
                 fflush(stdout);
@@ -245,19 +388,19 @@ int main(int argc, char **argv) {
             if (suspended) {
                 long long now = milliseconds();
                 if (!was_suspended || now >= next_suspend) {
-                    signal_descendants(SIGSTOP);
+                    signal_descendants(SIGSTOP, 0);
                     next_suspend = now + 200;
                 }
                 was_suspended = 1;
             } else if (was_suspended) {
-                signal_descendants(SIGCONT);
+                signal_descendants(SIGCONT, jailed);
                 was_suspended = 0;
             }
         }
         if (stopping) {
             long long now = milliseconds();
             if (!deadline) deadline = now + 1500;
-            signal_descendants(now < deadline ? SIGTERM : SIGKILL);
+            signal_descendants(now < deadline ? SIGTERM : SIGKILL, 0);
             if (!warned && now >= deadline + 3500) {
                 fprintf(stderr, "ContainerSupervisor: descendants remain after shutdown deadline\n");
                 warned = 1;

@@ -109,6 +109,7 @@ public final class ContainerProcess {
             android.os.Process.sendSignal(pid, suspended ? OsConstants.SIGUSR1 : OsConstants.SIGUSR2);
     }
 
+    /** SIGTERM to the supervisor. Android SIGKILL skips this; the native jail still reaps seized guests. */
     public void requestStop() {
         if (stopping.compareAndSet(false, true)) supervisor.destroy();
     }

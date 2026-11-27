@@ -28,8 +28,12 @@
 #include <stdbool.h>    /* bool, true, false, */
 #include <sys/queue.h>  /* LIST_*,  */
 #include <talloc.h>     /* talloc_*, */
+#include <dirent.h>     /* opendir(3), */
 #include <signal.h>     /* kill(2), SIGKILL, */
+#include <stdio.h>      /* snprintf(3), */
 #include <sys/ptrace.h> /* ptrace(2), PTRACE_*, */
+#include <sys/syscall.h> /* SYS_tgkill, */
+#include <unistd.h>     /* syscall(2), */
 #include <errno.h>      /* E*, */
 #include <inttypes.h>   /* PRI*, */
 #include <strings.h>
@@ -572,13 +576,38 @@ int new_child(Tracee *parent, word_t clone_flags)
 	return 0;
 }
 
+/* SIGKILL the whole thread group. kill(2) of a zombie leader does not
+ * stop sibling threads that are still scheduled. */
+static void kill_thread_group(pid_t pid)
+{
+	char path[64];
+	DIR *tasks;
+	struct dirent *entry;
+
+	snprintf(path, sizeof(path), "/proc/%d/task", pid);
+	tasks = opendir(path);
+	if (tasks == NULL) {
+		kill(pid, SIGKILL);
+		return;
+	}
+	while ((entry = readdir(tasks)) != NULL) {
+		char *end = NULL;
+		long tid = strtol(entry->d_name, &end, 10);
+		if (end == NULL || *end != '\0' || tid <= 0)
+			continue;
+		syscall(SYS_tgkill, pid, (pid_t)tid, SIGKILL);
+	}
+	closedir(tasks);
+	kill(pid, SIGKILL);
+}
+
 /* Send the KILL signal to all tracees.  */
 void kill_all_tracees()
 {
 	Tracee *tracee;
 
 	LIST_FOREACH(tracee, &tracees, link)
-		kill(tracee->pid, SIGKILL);
+		kill_thread_group(tracee->pid);
 }
 
 Tracees *get_tracees_list_head() {
