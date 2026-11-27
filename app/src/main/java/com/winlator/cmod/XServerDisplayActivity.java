@@ -587,12 +587,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String shortcutMultiplier = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_MULTIPLIER);
             String shortcutFlow = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_FLOW_SCALE);
             String shortcutLayer = shortcut.getExtra(LsfgManager.EXTRA_LAYER);
+            String shortcutPresent = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_PRESENT_MODE);
+            String shortcutPerformance = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_PERFORMANCE_MODE);
             Boolean layer = shortcutLayer.isEmpty() ? null : !"0".equals(shortcutLayer);
             Integer multiplier = null;
             Float flow = null;
+            Boolean performance = shortcutPerformance.isEmpty() ? null : "1".equals(shortcutPerformance) || "true".equalsIgnoreCase(shortcutPerformance);
             try { if (!shortcutMultiplier.isEmpty()) multiplier = Integer.valueOf(shortcutMultiplier); } catch (NumberFormatException ignored) {}
             try { if (!shortcutFlow.isEmpty()) flow = Float.valueOf(shortcutFlow); } catch (NumberFormatException ignored) {}
-            LsfgManager.beginSession(multiplier, flow, layer);
+            LsfgManager.beginSession(multiplier, flow, layer, shortcutPresent.isEmpty() ? null : shortcutPresent, performance);
         }
 
         taskAffinityMask = (short) ProcessHelper.getAffinityMask(container.getCPUList(true));

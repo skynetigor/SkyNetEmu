@@ -145,7 +145,8 @@ public final class LinuxLiftedBionicSession {
         // Copying through X (MESA_VK_WSI_DEBUG=sw) lets that pacer run, but on a GPU-bound map the copy parked
         // the GPU. A layer under the game sets a display timestamp and returns, which is the same spacing
         // without holding the game's buffer. A shortcut that is not generating leaves native present alone.
-        if (com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames()) armFramePaceLayer(context, env);
+        if (com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames())
+            com.winlator.cmod.lsfg.LsfgManager.armNativePresentPace(context, env);
         // Gamepads: the program is an aarch64 bionic executable, so the shim (built for bionic) is preloaded here; it hands the app's controller files out
         // as evdev devices and SDL, which lists pads only through SDL_JOYSTICK_DEVICE without udev, opens them.
         File shim = LinuxSession.stageAsset(context, "linux-bionic", "libskyshim_bionic.so");
@@ -182,42 +183,6 @@ public final class LinuxLiftedBionicSession {
         FileUtils.writeString(new File(Environment.getExternalStorageDirectory(), "Winlator/logs/linux-lifted-bionic-launch.txt"), dump.toString());
         active = true;
         return new LinuxSession.Launch(argv.toArray(new String[0]), env.toStringArray(), workingDir, "bionic");
-    }
-
-    /**
-     * Puts the present-pacing layer after the frame-generation layer. The loader calls implicit layers in path order,
-     * so the later path sees the generated present rather than the game's. The layer returns immediately.
-     */
-    private static void armFramePaceLayer(Context context, EnvVars env) {
-        String library = new File(context.getApplicationInfo().nativeLibraryDir, "liblsfg_pace.so").getPath();
-        if (!new File(library).isFile()) {
-            Log.w(TAG, "Frame-pace layer is not in this build");
-            return;
-        }
-        File dir = new File(context.getFilesDir(), "lsfg-pace");
-        if (!dir.isDirectory() && !dir.mkdirs()) return;
-        String manifest = "{\n"
-                + "  \"file_format_version\": \"1.0.0\",\n"
-                + "  \"layer\": {\n"
-                + "    \"name\": \"VK_LAYER_SKY_fg_pace\",\n"
-                + "    \"type\": \"GLOBAL\",\n"
-                + "    \"api_version\": \"1.3.0\",\n"
-                + "    \"library_path\": \"" + library + "\",\n"
-                + "    \"implementation_version\": \"1\",\n"
-                + "    \"description\": \"Space generated frames without blocking the game\",\n"
-                + "    \"functions\": {\n"
-                + "      \"vkGetInstanceProcAddr\": \"vkGetInstanceProcAddr\",\n"
-                + "      \"vkGetDeviceProcAddr\": \"vkGetDeviceProcAddr\"\n"
-                + "    },\n"
-                + "    \"disable_environment\": { \"DISABLE_SKY_FG_PACE\": \"1\" },\n"
-                + "    \"enable_environment\": { \"SKY_FG_PACE\": \"1\" }\n"
-                + "  }\n"
-                + "}\n";
-        if (!FileUtils.writeString(new File(dir, "VkLayer_SKY_fg_pace.json"), manifest)) return;
-        String path = env.get("VK_ADD_IMPLICIT_LAYER_PATH");
-        env.put("VK_ADD_IMPLICIT_LAYER_PATH", path == null || path.isEmpty() ? dir.getPath() : path + ":" + dir.getPath());
-        env.put("SKY_FG_PACE", "1");
-        Log.i(TAG, "Frame generation paces native presents");
     }
 
     /** BeamNG's Linux executable or its translated build: BinLinux/BeamNG.drive.x64 or BinLinuxArm64/BeamNG.drive.x64. */

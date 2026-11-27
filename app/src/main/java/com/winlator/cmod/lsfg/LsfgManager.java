@@ -55,7 +55,7 @@ public final class LsfgManager {
     public static final String PRESENT_MODE_FIFO = "fifo";
 
     /** Bump whenever the bundled layer binary changes so existing installs are refreshed. */
-    private static final String RUNTIME_VERSION = "lsfg-vk-android v1.0.4-android";
+    private static final String RUNTIME_VERSION = "lsfg-vk-android v1.0.4-android, display-clock present pacing";
 
     private static final String LAYER_LIBRARY = "liblsfg-vk-layer.so";
     private static final String LAYER_MANIFEST = "VkLayer_LS_frame_generation.json";
@@ -138,6 +138,8 @@ public final class LsfgManager {
     private static volatile Integer sessionMultiplier;
     private static volatile Float sessionFlowScale;
     private static volatile Boolean sessionLayer;
+    private static volatile String sessionPresentMode;
+    private static volatile Boolean sessionPerformance;
 
     /** @param multiplier the shortcut's multiplier, or null to follow the container; @param flowScale likewise */
     public static void beginSession(Integer multiplier, Float flowScale) {
@@ -146,9 +148,20 @@ public final class LsfgManager {
 
     /** @param layer whether the shortcut loads the layer at all, or null to follow the container */
     public static void beginSession(Integer multiplier, Float flowScale, Boolean layer) {
+        beginSession(multiplier, flowScale, layer, null, null);
+    }
+
+    /**
+     * @param presentMode the shortcut's present mode, or null to follow the container
+     * @param performance the shortcut's performance-model choice, or null to follow the container
+     */
+    public static void beginSession(Integer multiplier, Float flowScale, Boolean layer,
+            String presentMode, Boolean performance) {
         sessionMultiplier = multiplier;
         sessionFlowScale = flowScale == null ? null : clampFlowScale(flowScale);
         sessionLayer = layer;
+        sessionPresentMode = presentMode == null ? null : normalizePresentMode(presentMode);
+        sessionPerformance = performance;
         activeMultiplier = MULTIPLIER_OFF;
     }
 
@@ -156,6 +169,8 @@ public final class LsfgManager {
         sessionMultiplier = null;
         sessionFlowScale = null;
         sessionLayer = null;
+        sessionPresentMode = null;
+        sessionPerformance = null;
         activeMultiplier = MULTIPLIER_OFF;
         Runnable listener = presentCadenceListener;
         if (listener != null) listener.run();
@@ -245,6 +260,8 @@ public final class LsfgManager {
     }
 
     public static boolean isPerformanceMode(Context context, Container container) {
+        Boolean session = sessionPerformance;
+        if (session != null) return session;
         Boolean override = getPerformanceModeOverride(container);
         return override != null ? override : getDefaultPerformanceMode(context);
     }
@@ -261,6 +278,8 @@ public final class LsfgManager {
     }
 
     public static String getPresentMode(Context context, Container container) {
+        String session = sessionPresentMode;
+        if (session != null) return session;
         String override = getPresentModeOverride(container);
         return override != null ? override : getDefaultPresentMode(context);
     }
@@ -400,6 +419,44 @@ public final class LsfgManager {
                 getMultiplier(container), formatFlowScale(getFlowScale(context, container)),
                 isPerformanceMode(context, container), getPresentMode(context, container)));
         return true;
+    }
+
+    /**
+     * Puts the present-pacing layer after the frame-generation layer. Native WSI presents straight to the
+     * activity surface, so the X server never sees the pair. The loader calls implicit layers in path order;
+     * the later path sees the generated present. The layer returns immediately and submits one image per vsync.
+     * A shortcut that is not generating must not call this.
+     */
+    public static void armNativePresentPace(Context context, EnvVars env) {
+        String library = new File(context.getApplicationInfo().nativeLibraryDir, "liblsfg_pace.so").getPath();
+        if (!new File(library).isFile()) {
+            Log.w(TAG, "Frame-pace layer is not in this build");
+            return;
+        }
+        File dir = new File(context.getFilesDir(), "lsfg-pace");
+        if (!dir.isDirectory() && !dir.mkdirs()) return;
+        String manifest = "{\n"
+                + "  \"file_format_version\": \"1.0.0\",\n"
+                + "  \"layer\": {\n"
+                + "    \"name\": \"VK_LAYER_SKY_fg_pace\",\n"
+                + "    \"type\": \"GLOBAL\",\n"
+                + "    \"api_version\": \"1.3.0\",\n"
+                + "    \"library_path\": \"" + library + "\",\n"
+                + "    \"implementation_version\": \"2\",\n"
+                + "    \"description\": \"Present one generated frame per vsync without blocking the game\",\n"
+                + "    \"functions\": {\n"
+                + "      \"vkGetInstanceProcAddr\": \"vkGetInstanceProcAddr\",\n"
+                + "      \"vkGetDeviceProcAddr\": \"vkGetDeviceProcAddr\"\n"
+                + "    },\n"
+                + "    \"disable_environment\": { \"DISABLE_SKY_FG_PACE\": \"1\" },\n"
+                + "    \"enable_environment\": { \"SKY_FG_PACE\": \"1\" }\n"
+                + "  }\n"
+                + "}\n";
+        if (!FileUtils.writeString(new File(dir, "VkLayer_SKY_fg_pace.json"), manifest)) return;
+        String path = env.get("VK_ADD_IMPLICIT_LAYER_PATH");
+        env.put("VK_ADD_IMPLICIT_LAYER_PATH", path == null || path.isEmpty() ? dir.getPath() : path + ":" + dir.getPath());
+        env.put("SKY_FG_PACE", "1");
+        Log.i(TAG, "Frame generation paces native presents from the vsync thread");
     }
 
     /**
