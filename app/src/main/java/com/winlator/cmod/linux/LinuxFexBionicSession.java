@@ -28,12 +28,13 @@ public final class LinuxFexBionicSession {
             LinuxEmulator.Installed emulator, LinuxRootfs.Installed rootfs, File home,
             File directHome, File executable, List<String> arguments, Map<String, String> guestEnv,
             String libraries, List<String> preloads, JSONObject config, String appId) throws IOException, JSONException {
-        if (emulator == null || !"fex-2610".equals(emulator.id)
-                || !new File(emulator.dir, "share/fex-emu/GuestThunks/libvulkan-guest.so").isFile())
-            throw new IOException("Android FEX requires the installed matching FEX-2610 guest Vulkan thunk");
-        File fex = stage(context, "FEX");
-        stage(context, "FEXServer");
-        stage(context, "libvulkan-host.so");
+        // FEX 2611 uses the same guest Vulkan thunk as FEX 2610. The host binaries are selected separately.
+        File guestThunks = guestThunks(context, emulator);
+        if (emulator == null || !supportedBionicBuild(emulator.id) || guestThunks == null)
+            throw new IOException("Android FEX requires installed FEX 2610 or FEX 2611 with the guest Vulkan thunk");
+        File fex = stageHost(context, emulator, "FEX");
+        stageHost(context, emulator, "FEXServer");
+        stageHost(context, emulator, "libvulkan-host.so");
         File parent = LinuxSession.stageAsset(context, "linux-bionic", "bionic-launch-parent");
         if (parent == null) throw new IOException("Android FEX launch parent is unavailable");
         File directory = fex.getParentFile();
@@ -45,12 +46,14 @@ public final class LinuxFexBionicSession {
         Files.createDirectories(new File(directory, "data/fex-emu/Server").toPath());
         File configDirectory = new File(directory, "config/fex-emu");
         Files.createDirectories(configDirectory.toPath());
-        Files.copy(new File(emulator.dir, "share/fex-emu/ThunksDB.json").toPath(),
+        File thunksDb = new File(guestThunks.getParentFile(), "ThunksDB.json");
+        if (!thunksDb.isFile()) throw new IOException("Android FEX ThunksDB is unavailable");
+        Files.copy(thunksDb.toPath(),
                 new File(configDirectory, "ThunksDB.json").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         JSONObject settings = config.getJSONObject("Config");
         settings.put("RootFS", rootfs.dir.getPath());
         settings.put("ThunkHostLibs", directory.getPath());
-        settings.put("ThunkGuestLibs", new File(emulator.dir, "share/fex-emu/GuestThunks").getPath());
+        settings.put("ThunkGuestLibs", guestThunks.getPath());
         EnvVars nativeEnv = LinuxBionicSession.nativeEnvironment(context, imageFs, container, directHome);
         // Frame generation (lsfg-vk): the game's Vulkan calls go through FEX's thunk to the host's loader, so the layer is
         // an Android layer in the host process's environment, not the glibc one the guest session gets.
@@ -239,7 +242,8 @@ public final class LinuxFexBionicSession {
     public static com.winlator.cmod.core.ContainerProcess startServer(
             com.winlator.cmod.xenvironment.XEnvironment environment, LinuxSession.Launch launch,
             com.winlator.cmod.core.Callback<String> output) throws IOException, InterruptedException {
-        File executable = stage(environment.getContext(), "FEXServer");
+        File executable = serverMatching(launch);
+        if (executable == null) executable = stage(environment.getContext(), "FEXServer");
         java.util.concurrent.atomic.AtomicInteger exit = new java.util.concurrent.atomic.AtomicInteger(-1);
         com.winlator.cmod.core.ContainerProcess server = environment.startProcess(
                 new String[]{executable.getPath(), "--foreground", "--persistent", "15"},
@@ -278,6 +282,59 @@ public final class LinuxFexBionicSession {
         // Guest ALSA cannot load Android plugins or use its conditional Pulse daemon probe.
         guest.putIfAbsent("ALSA_CONFIG_PATH", audioConfig.getPath());
         guest.putIfAbsent("ALSA_PLUGIN_DIR", "/usr/lib/x86_64-linux-gnu/alsa-lib");
+    }
+
+    static boolean supportedBionicBuild(String id) {
+        return "fex-2610".equals(id) || "fex-2611".equals(id);
+    }
+
+    /** Guest thunks from the selected package, or FEX 2610 when 2611 shares that thunk. */
+    static File guestThunks(Context context, LinuxEmulator.Installed emulator) {
+        if (emulator == null) return null;
+        File own = new File(emulator.dir, "share/fex-emu/GuestThunks");
+        if (new File(own, "libvulkan-guest.so").isFile()) return own;
+        LinuxEmulator.Installed shared = LinuxEmulator.find(context, "fex-2610");
+        if (shared == null || shared == emulator) return null;
+        File fallback = new File(shared.dir, "share/fex-emu/GuestThunks");
+        return new File(fallback, "libvulkan-guest.so").isFile() ? fallback : null;
+    }
+
+    /** FEXServer that belongs to the FEX binary in the launch command, including a debug override name. */
+    static File serverMatching(LinuxSession.Launch launch) {
+        if (launch == null || launch.argv == null) return null;
+        for (String arg : launch.argv) {
+            if (arg == null || !(arg.endsWith("/FEX") || arg.endsWith("/FEX-override"))) continue;
+            File fex = new File(arg);
+            File server = new File(fex.getParentFile(), fex.getName().replace("FEX", "FEXServer"));
+            if (server.isFile()) return server;
+        }
+        return null;
+    }
+
+    private static File stageHost(Context context, LinuxEmulator.Installed emulator, String name) throws IOException {
+        if (emulator != null && "fex-2611".equals(emulator.id)) return stage2611(context, emulator, name);
+        return stage(context, name);
+    }
+
+    /** FEX 2611 host binaries come from the installed package, not the single shipped FEX 2610 asset. */
+    private static File stage2611(Context context, LinuxEmulator.Installed emulator, String name) throws IOException {
+        File dir = new File(context.getFilesDir(), "linux-fex-bionic/fex-2611");
+        Files.createDirectories(dir.toPath());
+        File dest = new File(dir, name);
+        File source = "libvulkan-host.so".equals(name)
+                ? LinuxSession.stageAsset(context, "linux-fex-bionic", name, "linux-fex-bionic/" + name)
+                : new File(emulator.dir, "bin/" + name);
+        if (source == null || !source.isFile())
+            throw new IOException("Android FEX 2611 is missing " + name);
+        File stamp = new File(dest.getPath() + ".stamp");
+        String id = source.length() + ":" + source.lastModified();
+        if (!dest.isFile() || !stamp.isFile() || !id.equals(com.winlator.cmod.core.FileUtils.readString(stamp))) {
+            if (!com.winlator.cmod.core.FileUtils.copy(source, dest))
+                throw new IOException("Cannot stage Android FEX 2611 " + name);
+            com.winlator.cmod.core.FileUtils.chmod(dest, 0755);
+            com.winlator.cmod.core.FileUtils.writeString(stamp, id);
+        }
+        return dest;
     }
 
     private static File stage(Context context, String name) throws IOException {
