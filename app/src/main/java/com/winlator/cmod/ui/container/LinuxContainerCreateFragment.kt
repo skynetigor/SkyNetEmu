@@ -190,7 +190,7 @@ private class RuntimeInstallUi {
 }
 
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
-private val HUD_LABELS = linkedMapOf("0" to "Off", "2" to "Modern", "3" to "Advanced")
+private val HUD_LABELS = linkedMapOf("0" to "Off", "2" to "Modern")
 
 /** What the Steam settings screen adds to the container editor. */
 private class SteamScreen(
@@ -445,7 +445,7 @@ private fun LinuxContainerEditorBody(
     var fpsIndex by remember { mutableStateOf(editing?.getExtra("graphicsFpsPreset")?.toIntOrNull()?.coerceIn(0, 4) ?: 0) }
     var hudMode by remember {
         mutableStateOf(
-            editing?.getExtra("hudMode")?.toIntOrNull()?.let { if (it == 1) 2 else it.coerceIn(0, 3) }
+            editing?.getExtra("hudMode")?.toIntOrNull()?.let { if (it == 0) 0 else 2 }
                 ?: if (editing?.isShowFPS == true) 2 else 0
         )
     }

@@ -136,16 +136,15 @@ public class IngameSidebarThemeLayout extends FrameLayout {
         insertSectionLabelBefore(savePreset, "PRESETS");
         compactActionRow(savePreset);
 
-        View hudStyle = findViewById(R.id.LLHudStyleRow);
-        if (hudStyle != null && hudStyle.getParent() instanceof LinearLayout) {
-            LinearLayout hudParent = (LinearLayout) hudStyle.getParent();
-            int styleIndex = hudParent.indexOfChild(hudStyle);
-            View enableHud = previousContentChild(hudParent, styleIndex);
+        View hudOptions = findViewById(R.id.LLModernHudOptions);
+        View enableHud = findViewById(R.id.SWHudMaster);
+        if (hudOptions != null && hudOptions.getParent() instanceof LinearLayout) {
+            LinearLayout hudParent = (LinearLayout) hudOptions.getParent();
             insertSectionLabelBefore(enableHud, "GENERAL");
-            insertSectionLabelBefore(hudStyle, "APPEARANCE");
+            insertSectionLabelBefore(hudOptions, "APPEARANCE");
 
             flattenSection(enableHud);
-            flattenSection(hudStyle);
+            flattenSection(hudOptions);
 
             TextView resetText = findTextView(this, "Reset HUD");
             View resetRow = directChildUnder(hudParent, resetText);
@@ -162,14 +161,6 @@ public class IngameSidebarThemeLayout extends FrameLayout {
             group.setPadding(0, group.getPaddingTop() > 0 ? dp(2) : 0,
                     0, group.getPaddingBottom() > 0 ? dp(2) : 0);
         }
-    }
-
-    private View previousContentChild(LinearLayout parent, int beforeIndex) {
-        for (int i = beforeIndex - 1; i >= 0; i--) {
-            View child = parent.getChildAt(i);
-            if (child.getVisibility() != GONE) return child;
-        }
-        return null;
     }
 
     private void insertSectionLabelBefore(View target, String label) {

@@ -512,7 +512,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
         Spinner sHudMode = view.findViewById(R.id.SHudMode);
         ArrayAdapter<String> hudAdapter = new ArrayAdapter<>(context,
                 android.R.layout.simple_spinner_item,
-                new String[]{"Off", "Modern", "Advanced"});
+                new String[]{"Off", "Modern"});
         hudAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         sHudMode.setAdapter(hudAdapter);
 
@@ -524,9 +524,8 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
             } else if (container.isShowFPS()) {
                 savedHudMode = 2;
             }
-            if (savedHudMode == 1) savedHudMode = 2;   // the removed classic style shows as Modern
         }
-        sHudMode.setSelection(savedHudMode == 3 ? 2 : (savedHudMode == 2 ? 1 : 0));
+        sHudMode.setSelection(savedHudMode == 0 ? 0 : 1);
 
         final CheckBox cbFullscreenStretched = view.findViewById(R.id.CBFullscreenStretched);
         cbFullscreenStretched.setChecked(isEditMode() && container.isFullscreenStretched());
@@ -736,7 +735,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
                 String wincomponents = getWinComponents(view);
                 String drives = getDrives(view);
                 int hudPosition = sHudMode.getSelectedItemPosition();
-                int hudMode = hudPosition == 2 ? 3 : (hudPosition == 1 ? 2 : 0);   // Off, Modern, Advanced
+                int hudMode = hudPosition == 0 ? 0 : 2;
                 boolean showFPS = hudMode != 0;
                 boolean fullscreenStretched = cbFullscreenStretched.isChecked();
                 boolean exclusiveXInput = cbExclusiveXInput.isChecked();

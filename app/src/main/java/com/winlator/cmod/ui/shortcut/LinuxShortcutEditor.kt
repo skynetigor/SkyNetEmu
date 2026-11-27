@@ -98,7 +98,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     val gpuSystem = remember { com.winlator.cmod.core.GpuDriverType.forDevice(context) == com.winlator.cmod.core.GpuDriverType.SYSTEM }
     var prootEnabled by remember { mutableStateOf(!gpuSystem && LinuxSession.prootEnabled(shortcut.getExtra(LinuxSession.EXTRA_NO_PROOT))) }
     var fps by remember { mutableStateOf(shortcut.getExtra("graphicsFpsPreset", "0")) }
-    var hud by remember { mutableStateOf(shortcut.getExtra("hudMode", "0")) }
+    var hud by remember { mutableStateOf(if (shortcut.getExtra("hudMode", "0") == "0") "0" else "2") }
     val cpuSelected = remember {
         val selected = shortcut.getExtra("cpuList").split(",").mapNotNull { it.toIntOrNull() }.toSet()
         mutableStateListOf<Boolean>().apply {
@@ -241,7 +241,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             for (i in cpuSelected.indices) cpuSelected[i] = chosen.isEmpty() || i in chosen
         }
         values["graphicsFpsPreset"]?.let { fps = it }
-        values["hudMode"]?.let { hud = it }
+        values["hudMode"]?.let { hud = if (it == "0") "0" else "2" }
         values[SIZE]?.let { size = it }
         values[FIT]?.let { fit = it }
         values[UPSCALER]?.let { upscaler = it }
@@ -690,7 +690,7 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
                 SettingsDivider()
                 SettingMappedChoice("FPS limit", fps, linkedMapOf("0" to "Off", "1" to "30 FPS", "2" to "60 FPS", "3" to "90 FPS", "4" to "120 FPS")) { fps = it }
                 SettingsDivider()
-                SettingMappedChoice("HUD", if (hud == "1") "2" else hud, linkedMapOf("0" to "Off", "2" to "Modern", "3" to "Advanced")) { hud = it }
+                SettingMappedChoice("HUD", if (hud == "0") "0" else "2", linkedMapOf("0" to "Off", "2" to "Modern")) { hud = it }
             }
         },
         EditorCategory(

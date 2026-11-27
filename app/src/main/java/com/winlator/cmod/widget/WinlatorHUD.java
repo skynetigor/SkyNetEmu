@@ -121,6 +121,8 @@ public class WinlatorHUD extends View {
 
     private float wLabelGpu, wLabelCpu, wLabelRam, wLabelPwr, wLabelTmp, wLabelFps, wSep;
     private float wVal100pct, wValCpuTemp, wValFps, wValWatt, wValTemp, wChg, wChgStandalone;
+    private float fpsWidthPad;
+    private boolean fpsShowsFrameGen;
     private float wInnerSpace;
 
     private volatile String strGpu = "N/A", strCpuUsage = "N/A", strCpuTemp = "";
@@ -180,9 +182,9 @@ public class WinlatorHUD extends View {
     private final GpuLoad gpuLoad = new GpuLoad();
     private boolean battFailed = false;
 
-    // ---- Advanced style (hudMode 3): the modern strip plus a telemetry block below it with the
-    // per-core load and clock, the GPU clock, memory in gigabytes and the 1% low of the FPS. ----
-    private volatile boolean advanced = false;
+    // The only HUD: the strip plus a telemetry block with per-core load and clock, the GPU clock,
+    // memory in gigabytes and the 1% low of the FPS. The old strip-only style is gone.
+    private volatile boolean advanced = true;
     private final CpuCoreStats coreStats = new CpuCoreStats();
     private final GpuClock gpuClock = new GpuClock();
     private volatile int[] snapCoreBusy = new int[0];
@@ -262,7 +264,8 @@ public class WinlatorHUD extends View {
 
         wVal100pct = pVal.measureText("100%");
         wValCpuTemp = pVal.measureText("150°C");
-        wValFps = pVal.measureText("9999") + 2f * density;
+        fpsWidthPad = 2f * density;
+        wValFps = reservedFpsWidth();
         wValWatt = pVal.measureText("99.9W");
         wValTemp = pVal.measureText("150°C");
         wChg = pChg.measureText(" CHG");
@@ -388,10 +391,10 @@ public class WinlatorHUD extends View {
         }
     }
 
-    /** The advanced style: the modern strip plus the per-core/GPU-clock/memory/1%-low block below it. */
+    /** Kept for callers. The strip-only style is gone, so this cannot turn the telemetry block off. */
     public void setAdvanced(boolean value) {
-        if (advanced == value) return;
-        advanced = value;
+        if (!value || advanced) return;
+        advanced = true;
         synchronized (ftRing) { ftHead = 0; ftSize = 0; lastFrameNs = 0; strLow1 = "--"; }
         uiHandler.post(this::requestRelayout);
     }
@@ -624,6 +627,12 @@ public class WinlatorHUD extends View {
         }
     }
 
+    private float reservedFpsWidth() {
+        String sample = com.winlator.cmod.lsfg.LsfgManager.activeFrameMultiplier() >= 2
+                ? "9999 -> 9999" : "9999";
+        return pVal.measureText(sample) + fpsWidthPad;
+    }
+
     private void snapshot() {
         long now = System.nanoTime();
         if (lastFpsNs == 0) lastFpsNs = now;
@@ -634,7 +643,17 @@ public class WinlatorHUD extends View {
         snapFps = frames * 1_000_000_000f / dt;
         lastFpsNs = now;
 
-        String value = String.format(Locale.US, "%.0f", snapFps);
+        int multiplier = com.winlator.cmod.lsfg.LsfgManager.activeFrameMultiplier();
+        boolean frameGen = multiplier >= 2;
+        if (frameGen != fpsShowsFrameGen) {
+            fpsShowsFrameGen = frameGen;
+            wValFps = reservedFpsWidth();
+            requestRelayout();
+        }
+        // Presented frames already include generated ones, so the left number is that rate divided back.
+        String value = frameGen
+                ? Math.round(snapFps / multiplier) + " -> " + Math.round(snapFps)
+                : String.format(Locale.US, "%.0f", snapFps);
         if (!value.equals(strFps)) {
             strFps = value;
             wDynFps = pVal.measureText(strFps);

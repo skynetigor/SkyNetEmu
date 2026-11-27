@@ -169,6 +169,11 @@ public final class LsfgManager {
         return activeMultiplier >= 2;
     }
 
+    /** Multiplier last handed to the running layer. Below 2, the layer is not generating frames. */
+    public static int activeFrameMultiplier() {
+        return activeMultiplier;
+    }
+
     /** Whether the layer is loaded into the game (when Lossless.dll is imported): the session's choice, else the container's. */
     public static boolean isLayerEnabled(Container container) {
         Boolean session = sessionLayer;

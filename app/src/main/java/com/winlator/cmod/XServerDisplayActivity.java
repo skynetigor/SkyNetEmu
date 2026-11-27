@@ -2117,9 +2117,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     : (container.isShowFPS() ? 2 : 0);
 
             if (hudMode != 0) {
-                // 1 was the removed classic style: legacy containers and shortcuts that carry it get the modern strip
+                // Any stored on-mode, including the removed classic and strip styles, uses the one Modern HUD.
                 modernHud = new WinlatorHUD(this);
-                modernHud.setAdvanced(hudMode == 3);
                 modernHud.setVisibility(View.GONE);
                 rootView.addView(modernHud);
                 modernHud.enableByUser();
@@ -2548,8 +2547,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void setupSidebarHudControls() {
         Switch       swHudMaster     = findViewById(R.id.SWHudMaster);
-        Spinner      spHudStyle      = findViewById(R.id.SPHudStyle);
-        LinearLayout llHudStyleRow   = findViewById(R.id.LLHudStyleRow);
         LinearLayout llModernOptions = findViewById(R.id.LLModernHudOptions);
         CheckBox     cbFps           = findViewById(R.id.CBHudFps);
         CheckBox     cbGpu           = findViewById(R.id.CBHudGpu);
@@ -2563,23 +2560,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         View         btResetHud      = findViewById(R.id.BTResetHud);
 
         int currentMode = 0;
-        if      (modernHud  != null) currentMode = modernHud.isAdvanced() ? 3 : 2;
-        else if (container  != null) {
+        if (modernHud != null) currentMode = 2;
+        else if (container != null) {
             String extra = linuxSession ? linuxSetting("hudMode") : container.getExtra("hudMode");
             if (!extra.isEmpty())           currentMode = Integer.parseInt(extra);
             else if (container.isShowFPS()) currentMode = 2;
-            if (currentMode == 1) currentMode = 2;   // the removed classic style
         }
 
         boolean hudOn = currentMode != 0;
 
-        if (spHudStyle != null) {
-            ArrayAdapter<String> styleAdapter = createSidebarSpinnerAdapter(new String[]{"Modern", "Advanced"});
-            styleAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-            spHudStyle.setAdapter(styleAdapter);
-            spHudStyle.setSelection(currentMode == 3 ? 1 : 0, false);
-        }
-        if (llHudStyleRow  != null) llHudStyleRow.setVisibility(hudOn ? View.VISIBLE : View.GONE);
         if (llModernOptions != null) llModernOptions.setVisibility(hudOn ? View.VISIBLE : View.GONE);
 
         if (modernHud != null) {
@@ -2604,43 +2593,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (swHudMaster != null) {
             swHudMaster.setChecked(hudOn);
             swHudMaster.setOnCheckedChangeListener((btn, checked) -> {
-                int style = resolveSelectedStyle(spHudStyle);
                 if (checked) {
-                    enableHudLazily(style);
-                    if (llHudStyleRow  != null) llHudStyleRow.setVisibility(View.VISIBLE);
+                    enableHudLazily();
                     if (llModernOptions != null) llModernOptions.setVisibility(View.VISIBLE);
                     if (modernHud != null) {
                         syncModernHudSidebarUI(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbGraph, cbRenderer, sbScale, sbAlpha);
                         bindModernHudCheckboxes(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbRenderer);
                     }
-                    saveHudModeToContainer(style);
+                    saveHudModeToContainer(2);
                 } else {
                     if (modernHud  != null) modernHud.disableByUser();
-                    if (llHudStyleRow  != null) llHudStyleRow.setVisibility(View.GONE);
                     if (llModernOptions != null) llModernOptions.setVisibility(View.GONE);
                     saveHudModeToContainer(0);
                 }
             });
-        }
-
-        if (spHudStyle != null) {
-            spHudStyle.post(() -> spHudStyle.setOnItemSelectedListener(
-                new AdapterView.OnItemSelectedListener() {
-                    @Override
-                    public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                        if (swHudMaster == null || !swHudMaster.isChecked()) return;
-                        int newStyle = (pos == 1) ? 3 : 2;
-                        enableHudLazily(newStyle);
-                        if (llModernOptions != null) llModernOptions.setVisibility(View.VISIBLE);
-                        if (modernHud != null) {
-                            syncModernHudSidebarUI(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbGraph, cbRenderer, sbScale, sbAlpha);
-                            bindModernHudCheckboxes(cbFps, cbGpu, cbCpuRam, cbRam, cbBattTemp, cbRenderer);
-                        }
-                        saveHudModeToContainer(newStyle);
-                    }
-                    @Override public void onNothingSelected(AdapterView<?> p) {}
-                }
-            ));
         }
     }
 
@@ -2653,7 +2619,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (sbAlpha != null) sbAlpha.setValue(modernHud.getHudAlpha() * 100f);
     }
 
-    private void enableHudLazily(int style) {
+    private void enableHudLazily() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         if (rootView == null || xServerView == null) return;
         final XServerRendererView renderer = xServerView;
@@ -2674,7 +2640,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 modernHud.onRendererDetected(name);
             }
         }
-        modernHud.setAdvanced(style == 3);
         modernHud.enableByUser();
     }
 
@@ -2687,11 +2652,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (cbRam      != null) cbRam.setOnCheckedChangeListener((b, v) -> modernHud.toggleElement(7, v));
         if (cbBattTemp != null) cbBattTemp.setOnCheckedChangeListener((b, v) -> modernHud.toggleElement(4, v));
         if (cbRenderer != null) cbRenderer.setOnCheckedChangeListener((b, v) -> modernHud.toggleElement(6, v));
-    }
-
-    private int resolveSelectedStyle(Spinner spHudStyle) {
-        if (spHudStyle == null) return 2;
-        return spHudStyle.getSelectedItemPosition() == 1 ? 3 : 2;
     }
 
     private void saveHudModeToContainer(int mode) {

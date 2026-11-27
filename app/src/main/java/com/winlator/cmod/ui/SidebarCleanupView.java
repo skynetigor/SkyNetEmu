@@ -78,44 +78,8 @@ public class SidebarCleanupView extends View implements SharedPreferences.OnShar
         View savePreset = root.findViewById(R.id.BTSaveGraphicsPreset);
         if (savePreset != null) savePreset.setVisibility(GONE);
 
-        compactHudStyle(root);
         compactControlsSelector(root);
         tuneNeutralRail(root);
-    }
-
-    private void compactHudStyle(View root) {
-        Spinner spinner = root.findViewById(R.id.SPHudStyle);
-        if (spinner == null || !(spinner.getParent() instanceof LinearLayout)) return;
-
-        LinearLayout row = (LinearLayout) spinner.getParent();
-        row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-
-        for (int i = 0; i < row.getChildCount(); i++) {
-            View child = row.getChildAt(i);
-            if (child instanceof TextView && child != spinner) {
-                ViewGroup.LayoutParams raw = child.getLayoutParams();
-                if (raw instanceof LinearLayout.LayoutParams) {
-                    LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
-                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-                    lp.weight = 0f;
-                    child.setLayoutParams(lp);
-                }
-                break;
-            }
-        }
-
-        ViewGroup.LayoutParams raw = spinner.getLayoutParams();
-        if (raw instanceof LinearLayout.LayoutParams) {
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
-            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-            lp.height = dp(40);
-            lp.weight = 0f;
-            lp.setMarginStart(dp(12));
-            spinner.setLayoutParams(lp);
-        }
-        spinner.setMinimumWidth(0);
-        spinner.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        spinner.setPadding(dp(9), 0, dp(9), 0);
     }
 
     private void bindHudExtras() {
@@ -124,11 +88,9 @@ public class SidebarCleanupView extends View implements SharedPreferences.OnShar
         XServerDisplayActivity activity = findActivity();
         Container container = activity != null ? activity.getContainer() : null;
         View root = getRootView();
-        Spinner style = root.findViewById(R.id.SPHudStyle);
         LinearLayout modernOptions = root.findViewById(R.id.LLModernHudOptions);
 
-        if (activity == null || container == null || style == null || style.getAdapter() == null
-                || modernOptions == null) {
+        if (activity == null || container == null || modernOptions == null) {
             if (hudBindAttempts++ < 40) postDelayed(this::bindHudExtras, 100);
             return;
         }
@@ -137,10 +99,6 @@ public class SidebarCleanupView extends View implements SharedPreferences.OnShar
         if (storedMode == null || storedMode.isEmpty()) {
             container.putExtra("hudMode", "2");
             container.saveData();
-            // position 0 of the style spinner is Modern (mode 2); Advanced (mode 3) is position 1
-            if (style.getCount() > 0 && style.getSelectedItemPosition() != 0) {
-                style.setSelection(0);
-            }
         }
 
         if (modernOptions.findViewWithTag(TAG_HUD_OPTIONS) == null) {

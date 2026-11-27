@@ -151,7 +151,7 @@ private class ContainerEditorStateV2(
     var oboeAdaptive by mutableStateOf((editing?.getExtra("oboeAdaptive", "1") ?: "1") != "0")
     var oboeExclusive by mutableStateOf((editing?.getExtra("oboeExclusive", "0") ?: "0") == "1")
     var hudMode by mutableIntStateOf(
-        editing?.getExtra("hudMode", if (editing.isShowFPS) "2" else "0")?.toIntOrNull() ?: 0
+        (editing?.getExtra("hudMode", if (editing.isShowFPS) "2" else "0")?.toIntOrNull() ?: 0).let { if (it == 0) 0 else 2 }
     )
     var locale by mutableStateOf(
         editing?.getLC_ALL().orEmpty().ifBlank {
@@ -795,10 +795,10 @@ private fun ContainerCategoryV2(
                     }
                 }
                 SettingsDivider()
-                val hudEntries = listOf("Off", "Modern", "Advanced")
-                val hudLabel = when (s.hudMode) { 3 -> "Advanced"; 0 -> "Off"; else -> "Modern" }
+                val hudEntries = listOf("Off", "Modern")
+                val hudLabel = if (s.hudMode == 0) "Off" else "Modern"
                 SettingChoice("Winlator HUD", hudLabel, hudEntries) {
-                    s.hudMode = when (it) { "Advanced" -> 3; "Modern" -> 2; else -> 0 }
+                    s.hudMode = if (it == "Modern") 2 else 0
                 }
             }
             SettingsCard {

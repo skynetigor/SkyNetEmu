@@ -266,7 +266,7 @@ private class ShortcutEditorStateV2(val shortcut: Shortcut) {
     )
     var envVars by mutableStateOf(shortcut.getExtra("envVars", container.getEnvVars()))
     var winlatorHudMode by mutableIntStateOf(
-        shortcut.getExtra("hudMode", container.getExtra("hudMode", if (container.isShowFPS) "2" else "0")).toIntOrNull() ?: 0
+        (shortcut.getExtra("hudMode", container.getExtra("hudMode", if (container.isShowFPS) "2" else "0")).toIntOrNull() ?: 0).let { if (it == 0) 0 else 2 }
     )
     var dxvkHud by mutableStateOf(!envValue(envVars, "DXVK_HUD").isNullOrBlank())
     var renderingMode by mutableStateOf(
@@ -928,10 +928,10 @@ private fun ShortcutCategoryV2(
                 }
             }
             SettingsCard {
-                val hudEntries = listOf("Off", "Modern", "Advanced")
-                val hudLabel = when (s.winlatorHudMode) { 3 -> "Advanced"; 0 -> "Off"; else -> "Modern" }
+                val hudEntries = listOf("Off", "Modern")
+                val hudLabel = if (s.winlatorHudMode == 0) "Off" else "Modern"
                 SettingChoice("Winlator HUD", hudLabel, hudEntries) {
-                    s.winlatorHudMode = when (it) { "Advanced" -> 3; "Modern" -> 2; else -> 0 }
+                    s.winlatorHudMode = if (it == "Modern") 2 else 0
                     s.extra("hudMode", s.winlatorHudMode.toString())
                 }
                 if (!s.nativeArm64) {
