@@ -87,9 +87,8 @@ public final class LinuxBionicSession {
         EnvVars env = nativeEnvironment(context, imageFs, container, home);
         // Frame generation (lsfg-vk): Box64 hands the game's Vulkan calls to the Android loader, so the layer is the Android build in
         // this environment, as in the FEX + bionic session. The glibc session's layer settings are not carried over below.
+        com.winlator.cmod.lsfg.LsfgManager.useHostRenderer(true);
         com.winlator.cmod.lsfg.LsfgManager.prepareLaunch(context, imageFs, container, env);
-        if (com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames())
-            com.winlator.cmod.lsfg.LsfgManager.armNativePresentPace(context, env);
         // The imagefs's OpenSSL 3 would shadow the platform's libcrypto/libssl for the host Vulkan loader's vendor libraries (no GPU found).
         try {
             File linuxBionic = new File(context.getFilesDir(), "linux-bionic");

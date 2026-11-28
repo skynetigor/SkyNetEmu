@@ -172,12 +172,32 @@ public final class LsfgManager {
         sessionPresentMode = null;
         sessionPerformance = null;
         activeMultiplier = MULTIPLIER_OFF;
+        hostRenderer = false;
         Runnable listener = presentCadenceListener;
         if (listener != null) listener.run();
     }
 
     /** The multiplier last handed to the running game's layer: 0 or 1 when it generates no frames. */
     private static volatile int activeMultiplier = MULTIPLIER_OFF;
+    private static volatile float activeFlow = 0.80f;
+    private static volatile boolean hostRenderer = false;
+
+    /** Linux frame generation runs in the host compositor. Windows keeps the guest layer. */
+    public static void useHostRenderer(boolean enabled) {
+        hostRenderer = enabled;
+    }
+
+    public static boolean isHostRenderer() {
+        return hostRenderer;
+    }
+
+    public static float activeFlowScale() {
+        return activeFlow;
+    }
+
+    public static File hostCacheFile(Context context) {
+        return new File(context.getFilesDir(), "lsfg-native/shaders.cache");
+    }
 
     /** Whether the running game's layer generates frames, so the X server should space out the presents (see PresentExtension). */
     public static boolean isGeneratingFrames() {
@@ -398,7 +418,23 @@ public final class LsfgManager {
      *
      * @return true if the layer will be loaded
      */
+    private static boolean armHostRenderer(Context context, Container container) {
+        if (!isArmed(context, container)) {
+            logNotArmed(context, container);
+            activeMultiplier = MULTIPLIER_OFF;
+            Runnable listener = presentCadenceListener;
+            if (listener != null) listener.run();
+            return false;
+        }
+        activeFlow = getFlowScale(context, container);
+        Log.i(TAG, String.format(Locale.US,
+            "LSFG host compositor: multiplier=%d flowScale=%s",
+            getMultiplier(container), formatFlowScale(activeFlow)));
+        return writeConfig(context, container, getMultiplier(container));
+    }
+
     public static boolean prepareLaunch(Context context, ImageFs imageFs, Container container, EnvVars envVars) {
+        if (hostRenderer) return armHostRenderer(context, container);
         if (!isArmed(context, container)) {
             logNotArmed(context, container);
             return false;
@@ -473,6 +509,7 @@ public final class LsfgManager {
      * @return true if the layer will be loaded
      */
     public static boolean prepareLinuxLaunch(Context context, Container container, Map<String, String> env) {
+        if (hostRenderer) return armHostRenderer(context, container);
         if (!isArmed(context, container)) {
             logNotArmed(context, container);
             return false;
@@ -613,6 +650,7 @@ public final class LsfgManager {
         // Left by earlier versions; the layer would read its stale phase.
         vsyncFile(container).delete();
         if (!writeAtomic(configFile(container), toml.toString())) return false;
+        activeFlow = getFlowScale(context, container);
         activeMultiplier = multiplier;
         Runnable listener = presentCadenceListener;
         if (listener != null) listener.run();

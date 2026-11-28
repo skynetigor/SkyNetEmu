@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <vulkan/vulkan_android.h>
 
+#include <string>
+
 #include "view_transformation.hpp"
 #include "xform.hpp"
 #include "RendererTiming.h"
@@ -122,6 +124,7 @@ struct VkTable {
 #include <condition_variable>
 
 static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr uint32_t HOST_LSFG_MAX_GENERATIONS = 3;
 
 struct WindowPushConstants      { float ndcX0, ndcY0, ndcX1, ndcY1; int useTexAlpha;
                                   float _pad[7];
@@ -157,6 +160,8 @@ static_assert(offsetof(WindowPushConstantsFSR1,   cosR) == 48, "cosR offset must
 static_assert(sizeof(WindowPushConstantsFSR1) == sizeof(WindowPushConstantsSGSR), "FSR1 push constants must fit the shared pipeline layout range");
 static_assert(offsetof(WindowPushConstantsPostFX, cosR) == 48, "cosR offset must match window_vert.txt layout(offset=48)");
 
+struct VkrLsfg;
+
 class VulkanRendererContext {
 public:
     VulkanRendererContext(ANativeWindow* window, int cWidth, int cHeight,
@@ -173,6 +178,7 @@ public:
     bool updateWindowContentDmaBuf(int64_t id, int64_t key, int fd, int w, int h, int stride, int offset);
     void releaseDmaBuf(int64_t key);
     std::string rendererDiagnostics();
+    uint64_t presentedFrameCount() const { return rendererPresents.load(std::memory_order_relaxed); }
     std::string pipelineDiagnostics();
     void setPipelineTarget(int64_t id);
     bool supportsDmaBufImport() const { return hasDmaBufImport && vk_.GetMemoryFdPropertiesKHR; }
@@ -219,6 +225,8 @@ public:
     void setPresentCadence(bool enabled);
     /** 0 disables. While frame generation is on, each Android present is stamped this far apart. */
     void setGeneratedPresentPeriodNs(int64_t periodNs);
+    void configureHostFrameGeneration(bool enabled, uint32_t multiplier, float flow, float refreshHz,
+        const std::string& dllPath, const std::string& cachePath);
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
@@ -583,4 +591,44 @@ public:
                                VkAccessFlags srcA, VkAccessFlags dstA,
                                VkPipelineStageFlags srcS, VkPipelineStageFlags dstS);
     VkShaderModule  makeShader(const uint32_t* code, size_t sz);
+
+    void noteHostSourceFrame();
+    void destroyHostFrameGenerationResources();
+    bool ensureHostFrameGeneration();
+    bool createHostLsfgImage(VkImage& image, VkDeviceMemory& memory, VkImageView& view);
+    void recordHostFrameGeneration(VkCommandBuffer cb, uint32_t imgIdx);
+    void copyHostFrameToSwapchain(VkCommandBuffer cb, VkImage source, uint32_t imgIdx);
+    void presentHostGeneratedFrames();
+
+    bool hostLsfgRequested = false;
+    bool hostLsfgDeviceReady = false;
+    bool hostLsfgQueueCompute = false;
+    bool hostLsfgFloat16 = false;
+    bool hostLsfgDispatchReady = false;
+    bool hostLsfgFrameReady = false;
+    uint32_t hostLsfgMultiplier = 2;
+    float hostLsfgFlow = 0.80f;
+    float hostLsfgRefresh = 120.f;
+    std::string hostLsfgDll;
+    std::string hostLsfgCache;
+    std::atomic<uint64_t> hostLsfgSourceFrames{0};
+    uint32_t hostLsfgGenerations = 0;
+    uint32_t hostLsfgExtraCount = 0;
+    VkrLsfg* hostLsfg = nullptr;
+    VkRenderPass hostLsfgRenderPass = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> hostLsfgFramebuffer;
+    VkImage hostLsfgSourceImage[MAX_FRAMES_IN_FLIGHT] = {};
+    VkDeviceMemory hostLsfgSourceMemory[MAX_FRAMES_IN_FLIGHT] = {};
+    VkImageView hostLsfgSourceView[MAX_FRAMES_IN_FLIGHT] = {};
+    VkImage hostLsfgGenImage[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkDeviceMemory hostLsfgGenMemory[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkImageView hostLsfgGenView[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkImage hostLsfgExtraImage[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkCommandBuffer hostLsfgGenCmd[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkSemaphore hostLsfgGenAvail[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkSemaphore hostLsfgGenDone[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkSemaphore hostLsfgChain[HOST_LSFG_MAX_GENERATIONS] = {};
+    VkFence hostLsfgGenFence[HOST_LSFG_MAX_GENERATIONS] = {};
+    uint32_t hostLsfgExtentW = 0;
+    uint32_t hostLsfgExtentH = 0;
 };

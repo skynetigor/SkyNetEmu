@@ -986,6 +986,7 @@ public final class LinuxSession {
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");
 
         // Frame generation (Lossless Scaling through lsfg-vk): a Vulkan layer the guest's loader picks up.
+        com.winlator.cmod.lsfg.LsfgManager.useHostRenderer(true);
         com.winlator.cmod.lsfg.LsfgManager.prepareLinuxLaunch(context, container, env);
 
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);

@@ -57,9 +57,8 @@ public final class LinuxFexBionicSession {
         EnvVars nativeEnv = LinuxBionicSession.nativeEnvironment(context, imageFs, container, directHome);
         // Frame generation (lsfg-vk): the game's Vulkan calls go through FEX's thunk to the host's loader, so the layer is
         // an Android layer in the host process's environment, not the glibc one the guest session gets.
+        com.winlator.cmod.lsfg.LsfgManager.useHostRenderer(true);
         com.winlator.cmod.lsfg.LsfgManager.prepareLaunch(context, imageFs, container, nativeEnv);
-        if (com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames())
-            com.winlator.cmod.lsfg.LsfgManager.armNativePresentPace(context, nativeEnv);
         Map<String, String> guest = new LinkedHashMap<>(guestEnv);
         guest.put("HOME", directHome.getPath());
         guest.put("XDG_DATA_HOME", new File(home, ".local/share").getPath());

@@ -592,7 +592,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
 
         // The bundled LSFG injection DLL is x64; native Vulkan needs no PE graphics wrapper.
-        if (nativeArm64Arguments == null) LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
+        if (nativeArm64Arguments == null) {
+            LsfgManager.useHostRenderer(false);
+            LsfgManager.prepareLaunch(context, imageFs, container, execEnvVars);
+        }
 
         String emulator = container.getEmulator();
         if (shortcut != null)

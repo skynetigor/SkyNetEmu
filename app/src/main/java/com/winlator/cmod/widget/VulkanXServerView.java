@@ -168,6 +168,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @FastNative private native boolean nativeUpdateWindowContentDmaBuf(long handle, long id, long key, int fd,
         int w, int h, int stride, int offset);
     private native String nativeRendererDiagnostics(long handle);
+    private native long nativePresentedFrameCount(long handle);
     private native boolean nativeRendererFailed(long handle);
     private native String nativePipelineDiagnostics(long handle);
     private native void nativeSetPipelineTarget(long handle, long id);
@@ -199,7 +200,15 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetDisplayRefreshHz(long handle, int hz);
     private native void nativeSetPresentCadence(long handle, boolean enabled);
     private native void nativeSetGeneratedPresentPeriod(long handle, long periodNs);
+    private native void nativeSetHostFrameGeneration(long handle, boolean enabled, int multiplier,
+        float flow, float refreshHz, String dllPath, String cachePath);
     private long pendingGeneratedPeriodNs = 0;
+    private boolean pendingHostFrameGeneration = false;
+    private int pendingHostMultiplier = 2;
+    private float pendingHostFlow = 0.80f;
+    private float pendingHostRefresh = 120f;
+    private String pendingHostDll = "";
+    private String pendingHostCache = "";
     private int pendingRefreshHz = 120;
     private boolean presentCadenceEnabled = true;
     private native int[] nativeGetSupportedPresentModes(long handle);
@@ -260,6 +269,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetDisplayRefreshHz(nativeHandle, pendingRefreshHz);
                         nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
                         nativeSetGeneratedPresentPeriod(nativeHandle, pendingGeneratedPeriodNs);
+                        nativeSetHostFrameGeneration(nativeHandle, pendingHostFrameGeneration,
+                            pendingHostMultiplier, pendingHostFlow, pendingHostRefresh,
+                            pendingHostDll, pendingHostCache);
                         nativeSetFilterMode(nativeHandle, pendingFilterMode);
                         nativeSetSwapRB(nativeHandle, pendingSwapRB);
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
@@ -291,6 +303,9 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetDisplayRefreshHz(nativeHandle, pendingRefreshHz);
                     nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
                     nativeSetGeneratedPresentPeriod(nativeHandle, pendingGeneratedPeriodNs);
+                    nativeSetHostFrameGeneration(nativeHandle, pendingHostFrameGeneration,
+                        pendingHostMultiplier, pendingHostFlow, pendingHostRefresh,
+                        pendingHostDll, pendingHostCache);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
@@ -918,7 +933,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     @Override
     public void setSessionWindowId(int id) { sessionWindowId = id; com.winlator.cmod.linux.FramePipelineDiagnostics.targetWindow(id); }
     public void setFrameRating(Object fr) {
-        if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
+        if (fr instanceof WinlatorHUD) {
+            hudRef = (WinlatorHUD) fr;
+            hudRef.setPresentedFrameSource(this::presentedFrameCount);
+        }
+    }
+
+    private long presentedFrameCount() {
+        synchronized (lock) {
+            return nativeHandle != 0 ? nativePresentedFrameCount(nativeHandle) : 0L;
+        }
     }
     public int getFpsLimit() {
         return fpsLimit;
@@ -945,22 +969,41 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     private void applyPresentCadence() {
         boolean generating = com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames();
+        boolean hostGeneration = generating && com.winlator.cmod.lsfg.LsfgManager.isHostRenderer();
+        // Host generation is paced by FIFO acquire, not by holding damage or stamping a future present.
         presentCadenceEnabled = !generating;
         int refresh = displayRefreshCap();
+        if (refresh <= 0) refresh = pendingRefreshHz;
         int multiplier = Math.max(2, com.winlator.cmod.lsfg.LsfgManager.activeFrameMultiplier());
-        int output = generating && refresh > 0 ? Math.max(1, refresh / multiplier) : 0;
+        int output = generating && !hostGeneration && refresh > 0 ? Math.max(1, refresh / multiplier) : 0;
         pendingGeneratedPeriodNs = output > 0 ? 1_000_000_000L / output : 0L;
+        pendingHostFrameGeneration = hostGeneration;
+        pendingHostMultiplier = multiplier;
+        pendingHostFlow = com.winlator.cmod.lsfg.LsfgManager.activeFlowScale();
+        pendingHostRefresh = refresh > 0 ? refresh : 120f;
+        if (getContext() != null) {
+            pendingHostDll = com.winlator.cmod.lsfg.LsfgManager.getDllFile(getContext()).getAbsolutePath();
+            java.io.File cache = com.winlator.cmod.lsfg.LsfgManager.hostCacheFile(getContext());
+            java.io.File parent = cache.getParentFile();
+            if (parent != null) parent.mkdirs();
+            pendingHostCache = cache.getAbsolutePath();
+        }
         synchronized (lock) {
             if (nativeHandle != 0) {
                 nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
                 nativeSetGeneratedPresentPeriod(nativeHandle, pendingGeneratedPeriodNs);
+                nativeSetHostFrameGeneration(nativeHandle, pendingHostFrameGeneration,
+                    pendingHostMultiplier, pendingHostFlow, pendingHostRefresh,
+                    pendingHostDll, pendingHostCache);
             }
         }
         /* DEFAULT at the panel rate shows each buffer on the next refresh, so a
            60 Hz present whose phase crosses the deadline is displayed for 1 then
            3 refreshes. FIXED_SOURCE at refresh/multiplier holds every frame for
            the same number of refreshes and leaves the panel rate alone. */
-        if (generating) {
+        if (hostGeneration) {
+            updateGeneratedFps(refresh);
+        } else if (generating) {
             updateGeneratedFps(output);
         } else {
             updateGeneratedFps(0);

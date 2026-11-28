@@ -33,6 +33,7 @@ import java.io.FileReader;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 
 public class WinlatorHUD extends View {
     public static final String PREFS = "winlator_hud";
@@ -155,6 +156,8 @@ public class WinlatorHUD extends View {
     private final AtomicInteger frameAccum = new AtomicInteger(0);
     private long lastFpsNs = 0;
     private float snapFps = 0;
+    private volatile LongSupplier presentedFrameSource;
+    private long lastPresentedFrames = -1;
 
     private int snapGpu = -1, snapCpu = -1, snapCpuTemp = -1, snapMw = -1;
     private int snapTmp = -1, snapPct = -1, snapRam = -1;
@@ -369,6 +372,12 @@ public class WinlatorHUD extends View {
         strRend = rendererLabel;
         wDynRend = pRend.measureText(strRend);
         if (relayout) requestRelayout();
+    }
+
+    /** Swapchain presents, including host-generated frames that never re-enter the game window. */
+    public void setPresentedFrameSource(LongSupplier source) {
+        presentedFrameSource = source;
+        lastPresentedFrames = -1;
     }
 
     public void onFrame() {
@@ -645,15 +654,29 @@ public class WinlatorHUD extends View {
 
         int multiplier = com.winlator.cmod.lsfg.LsfgManager.activeFrameMultiplier();
         boolean frameGen = multiplier >= 2;
+        boolean hostGeneration = frameGen && com.winlator.cmod.lsfg.LsfgManager.isHostRenderer();
         if (frameGen != fpsShowsFrameGen) {
             fpsShowsFrameGen = frameGen;
             wValFps = reservedFpsWidth();
             requestRelayout();
         }
-        // Presented frames already include generated ones, so the left number is that rate divided back.
-        String value = frameGen
-                ? Math.round(snapFps / multiplier) + " -> " + Math.round(snapFps)
-                : String.format(Locale.US, "%.0f", snapFps);
+        String value;
+        if (hostGeneration) {
+            // Game-window updates are the base. Host presents do not come back through onFrame().
+            long presented = presentedFrameSource != null ? presentedFrameSource.getAsLong() : 0L;
+            float outputFps = 0f;
+            if (lastPresentedFrames >= 0 && presented >= lastPresentedFrames)
+                outputFps = (presented - lastPresentedFrames) * 1_000_000_000f / dt;
+            // A recreated renderer starts its counter again; do not keep the old baseline.
+            lastPresentedFrames = presented;
+            value = Math.round(snapFps) + " -> " + Math.round(outputFps);
+        } else {
+            lastPresentedFrames = -1;
+            // Guest presents already include generated frames, so divide back for the base.
+            value = frameGen
+                    ? Math.round(snapFps / multiplier) + " -> " + Math.round(snapFps)
+                    : String.format(Locale.US, "%.0f", snapFps);
+        }
         if (!value.equals(strFps)) {
             strFps = value;
             wDynFps = pVal.measureText(strFps);

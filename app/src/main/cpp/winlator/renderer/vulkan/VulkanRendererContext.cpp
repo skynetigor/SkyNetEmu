@@ -1,6 +1,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #include "VulkanRendererContext.h"
+#include "lsfg/vkr_lsfg.h"
 #include <stdexcept>
 #include <cstdlib>
 #include <cstring>
@@ -59,6 +60,10 @@ VulkanRendererContext::~VulkanRendererContext() {
     vk_.DeviceWaitIdle(device);
     for (auto& [id, wt] : texMap) destroyWinTex(wt);
     texMap.clear();
+    if (hostLsfg) {
+        vkr_lsfg_destroy(hostLsfg);
+        hostLsfg = nullptr;
+    }
 
     for (auto& retired : deleteQueue) destroyTexNow(retired);
     deleteQueue.clear();
@@ -297,19 +302,31 @@ void VulkanRendererContext::pickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devs(n); vk_.EnumeratePhysicalDevices(instance,&n,devs.data());
     physicalDevice = VK_NULL_HANDLE;
     graphicsQueueFamilyIndex = 0;
+    hostLsfgQueueCompute = false;
     for (auto d : devs) {
         uint32_t qCount = 0;
         vk_.GetPhysicalDeviceQueueFamilyProperties(d, &qCount, nullptr);
         std::vector<VkQueueFamilyProperties> qProps(qCount);
         vk_.GetPhysicalDeviceQueueFamilyProperties(d, &qCount, qProps.data());
+        int fallback = -1;
         for (uint32_t i = 0; i < qCount; i++) {
             VkBool32 present = VK_FALSE;
             vk_.GetPhysicalDeviceSurfaceSupportKHR(d, i, surface, &present);
             if ((qProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && present) {
-                physicalDevice = d;
-                graphicsQueueFamilyIndex = i;
-                return;
+                bool compute = (qProps[i].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+                if (compute) {
+                    physicalDevice = d;
+                    graphicsQueueFamilyIndex = i;
+                    hostLsfgQueueCompute = true;
+                    return;
+                }
+                if (fallback < 0) fallback = (int)i;
             }
+        }
+        if (fallback >= 0) {
+            physicalDevice = d;
+            graphicsQueueFamilyIndex = (uint32_t)fallback;
+            return;
         }
     }
     if (n > 0) physicalDevice = devs[0];
@@ -365,9 +382,65 @@ void VulkanRendererContext::createLogicalDevice() {
     for (const char* ext : extList)
         RLOG("Enabled Vulkan device extension: %s", ext);
     if (hasDisplayTiming) extList.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
+
+    VkPhysicalDeviceProperties deviceProps{};
+    vk_.GetPhysicalDeviceProperties(physicalDevice, &deviceProps);
+    VkPhysicalDeviceShaderFloat16Int8Features float16Probe{};
+    float16Probe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelProbe{};
+    memoryModelProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+    memoryModelProbe.pNext = &float16Probe;
+    VkPhysicalDeviceFeatures2 featureProbe{};
+    featureProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    featureProbe.pNext = deviceProps.apiVersion >= VK_API_VERSION_1_3 ? &memoryModelProbe : nullptr;
+    auto getFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(gipa(instance, "vkGetPhysicalDeviceFeatures2"));
+    if (!getFeatures2)
+        getFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(gipa(instance, "vkGetPhysicalDeviceFeatures2KHR"));
+    if (getFeatures2) getFeatures2(physicalDevice, &featureProbe);
+    auto getFormatProps = reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties>(
+        gipa(instance, "vkGetPhysicalDeviceFormatProperties"));
+    const VkFormat requiredFormats[] = {
+        VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT
+    };
+    bool formatsSupported = getFormatProps != nullptr;
+    for (VkFormat format : requiredFormats) {
+        VkFormatProperties formatProps{};
+        if (getFormatProps) getFormatProps(physicalDevice, format, &formatProps);
+        const VkFormatFeatureFlags required =
+            VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        if ((formatProps.optimalTilingFeatures & required) != required) formatsSupported = false;
+    }
+    hostLsfgFloat16 = float16Probe.shaderFloat16 == VK_TRUE;
+    hostLsfgDeviceReady = deviceProps.apiVersion >= VK_API_VERSION_1_3 && hostLsfgQueueCompute &&
+        formatsSupported && memoryModelProbe.vulkanMemoryModel == VK_TRUE &&
+        featureProbe.features.shaderStorageImageWriteWithoutFormat == VK_TRUE &&
+        featureProbe.features.shaderStorageImageExtendedFormats == VK_TRUE;
+
+    VkPhysicalDeviceFeatures enabledFeatures{};
+    VkPhysicalDeviceVulkanMemoryModelFeatures memoryModelEnable{};
+    memoryModelEnable.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+    VkPhysicalDeviceShaderFloat16Int8Features float16Enable{};
+    float16Enable.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    void* featureChain = nullptr;
+    if (hostLsfgDeviceReady) {
+        enabledFeatures.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+        enabledFeatures.shaderStorageImageExtendedFormats = VK_TRUE;
+        memoryModelEnable.vulkanMemoryModel = VK_TRUE;
+        featureChain = &memoryModelEnable;
+        if (hostLsfgFloat16) {
+            float16Enable.shaderFloat16 = VK_TRUE;
+            float16Enable.pNext = featureChain;
+            featureChain = &float16Enable;
+        }
+    }
+
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
+    if (hostLsfgDeviceReady) {
+        ci.pEnabledFeatures = &enabledFeatures;
+        ci.pNext = featureChain;
+    }
     if (vk_.CreateDevice(physicalDevice,&ci,nullptr,&device)!=VK_SUCCESS) throw std::runtime_error("device");
     vk_.GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)gipa(instance, "vkGetDeviceProcAddr");
     loadDeviceDispatch();
@@ -745,6 +818,7 @@ void VulkanRendererContext::createSyncObjects() {
 }
 
 void VulkanRendererContext::cleanupSwapchain() {
+    destroyHostFrameGenerationResources();
     for (auto fb:swapchainFBs) vk_.DestroyFramebuffer(device,fb,nullptr); swapchainFBs.clear();
     for (auto iv:swapchainViews) vk_.DestroyImageView(device,iv,nullptr); swapchainViews.clear();
     for (auto sem:renderDoneSems) if (sem!=VK_NULL_HANDLE) vk_.DestroySemaphore(device,sem,nullptr);
@@ -1393,7 +1467,8 @@ void VulkanRendererContext::renderLoop() {
                     if (surfaceDetached.load() || version != pacingVersion) continue;
                 }
                 resize = fbResized.load() || swapchainRetryPending.load();
-                if (!resize && needsRender.load() && presentCadenceEnabled.load(std::memory_order_relaxed)) {
+                if (!resize && needsRender.load() && !hostLsfgFrameReady
+                        && presentCadenceEnabled.load(std::memory_order_relaxed)) {
                     // Hold the first damage of a burst for two refreshes so the 8 ms duplicate
                     // (cursor or a second damage) is included in the same present. A learned
                     // full-frame slot chased GPU hitch noise and that chase was the stutter.
@@ -1644,6 +1719,7 @@ void VulkanRendererContext::noteContentArrival(int64_t nowNs) {
 }
 
 void VulkanRendererContext::noteProducerFrame() {
+    noteHostSourceFrame();
     int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     std::lock_guard<std::mutex> lk(producerMutex);
@@ -1911,18 +1987,22 @@ void VulkanRendererContext::renderFrame() {
         curW=cursorTexW; curH=cursorTexH;
     }
 
+    ensureHostFrameGeneration();
     recordCmdBuf(cmdBufs[currentFrame],imgIdx,frameDraws,
         frameAhbTransitions,framePreUpload,framePostUpload,
         curUpload,hasCurUpload,
         ox,oy,sx,sy,cw,ch,ptrX,ptrY,curHotX,curHotY,curW,curH,curVis,
         effectiveScissor);
 
-    VkSemaphore wSem[]={imgAvailSems[currentFrame]}, sSem[]={renderDoneSems[imgIdx]};
+    VkSemaphore wSem[]={imgAvailSems[currentFrame]};
+    VkSemaphore sSemStorage[2]={renderDoneSems[imgIdx], hostLsfgChain[0]};
+    VkSemaphore* sSem=sSemStorage;
     VkPipelineStageFlags wStage[]={VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.waitSemaphoreCount=1; si.pWaitSemaphores=wSem; si.pWaitDstStageMask=wStage;
     si.commandBufferCount=1; si.pCommandBuffers=&cmdBufs[currentFrame];
-    si.signalSemaphoreCount=1; si.pSignalSemaphores=sSem;
+    si.signalSemaphoreCount=hostLsfgFrameReady && hostLsfgExtraCount>0 ? 2u : 1u;
+    si.pSignalSemaphores=sSem;
 
     VkResult resetResult=vk_.ResetFences(device,1,&inFlightFences[currentFrame]);
     if (resetResult!=VK_SUCCESS) { rendererError(resetResult,"reset_fence"); return; }
@@ -1971,11 +2051,12 @@ void VulkanRendererContext::renderFrame() {
     // The Android WSI writes VkPresentTimesInfoGOOGLE into the buffer timestamp and otherwise
     // replaces ANativeWindow_setBuffersTimestamp with zero. Zero means "as soon as ready", which
     // is the 8.3/24.9 latch when the cheap generated frame finishes beside the real one.
-    bool generatedGrid = generatedPresentPeriodNs.load(std::memory_order_relaxed) >= 8000000LL;
+    bool generatedGrid = !hostLsfgFrameReady &&
+        generatedPresentPeriodNs.load(std::memory_order_relaxed) >= 8000000LL;
     int64_t desiredPresent = generatedGrid ? generatedPresentTimeNs() : 0;
     int64_t stampLead = 0;
     fgDisplayDelayNs.store(0, std::memory_order_relaxed);
-    if (!generatedGrid && displayTimingEnabled && presentCadenceEnabled.load(std::memory_order_relaxed) && cadencePhaseNs != 0) {
+    if (!hostLsfgFrameReady && !generatedGrid && displayTimingEnabled && presentCadenceEnabled.load(std::memory_order_relaxed) && cadencePhaseNs != 0) {
         timespec mono{};
         clock_gettime(CLOCK_MONOTONIC, &mono);
         int64_t nowMono = mono.tv_sec * 1000000000LL + mono.tv_nsec;
@@ -1994,7 +2075,7 @@ void VulkanRendererContext::renderFrame() {
     VkPresentTimeGOOGLE displayTime{nextDisplayId++, (uint64_t)desiredPresent};
     VkPresentTimesInfoGOOGLE displayTimes{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
     displayTimes.swapchainCount=1; displayTimes.pTimes=&displayTime;
-    if (displayTimingEnabled && (generatedGrid ? desiredPresent > 0
+    if (!hostLsfgFrameReady && displayTimingEnabled && (generatedGrid ? desiredPresent > 0
             : presentCadenceEnabled.load(std::memory_order_relaxed)))
         pi.pNext=&displayTimes;
     auto presentStart = std::chrono::steady_clock::now();
@@ -2022,6 +2103,7 @@ void VulkanRendererContext::renderFrame() {
         }
     }
 
+    if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) presentHostGeneratedFrames();
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR||res==VK_SUBOPTIMAL_KHR) fbResized.store(true);
     else if (res!=VK_SUCCESS) rendererError(res,"present");
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;

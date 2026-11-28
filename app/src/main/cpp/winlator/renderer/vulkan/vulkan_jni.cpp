@@ -194,6 +194,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererDiagnostics(
 
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativePresentedFrameCount(
+    JNIEnv*, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return r ? static_cast<jlong>(r->presentedFrameCount()) : 0;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeRendererFailed(
     JNIEnv*, jobject, jlong handle) {
@@ -444,6 +452,21 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetGeneratedPresentPeriod(
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r) r->setGeneratedPresentPeriodNs(periodNs);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetHostFrameGeneration(
+    JNIEnv* env, jobject, jlong handle, jboolean enabled, jint multiplier, jfloat flow, jfloat refreshHz,
+    jstring dllPath, jstring cachePath)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r) return;
+    const char* dll = dllPath ? env->GetStringUTFChars(dllPath, nullptr) : "";
+    const char* cache = cachePath ? env->GetStringUTFChars(cachePath, nullptr) : "";
+    r->configureHostFrameGeneration(enabled == JNI_TRUE, (uint32_t)std::max(0, (int)multiplier),
+        flow, refreshHz, dll ? dll : "", cache ? cache : "");
+    if (dllPath && dll) env->ReleaseStringUTFChars(dllPath, dll);
+    if (cachePath && cache) env->ReleaseStringUTFChars(cachePath, cache);
 }
 
 extern "C" JNIEXPORT jintArray JNICALL

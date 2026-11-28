@@ -140,13 +140,8 @@ public final class LinuxLiftedBionicSession {
         }
         // The glibc session arms the glibc layer, which this process cannot map. The game's Vulkan calls go through
         // Android's loader, so frame generation is the same Android layer the Box64 and FEX bionic sessions load.
+        com.winlator.cmod.lsfg.LsfgManager.useHostRenderer(true);
         com.winlator.cmod.lsfg.LsfgManager.prepareLaunch(context, imageFs, container, env);
-        // Native WSI presents straight to the activity SurfaceView, so PresentExtension never sees the pair.
-        // Copying through X (MESA_VK_WSI_DEBUG=sw) lets that pacer run, but on a GPU-bound map the copy parked
-        // the GPU. A layer under the game sets a display timestamp and returns, which is the same spacing
-        // without holding the game's buffer. A shortcut that is not generating leaves native present alone.
-        if (com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames())
-            com.winlator.cmod.lsfg.LsfgManager.armNativePresentPace(context, env);
         // Gamepads: the program is an aarch64 bionic executable, so the shim (built for bionic) is preloaded here; it hands the app's controller files out
         // as evdev devices and SDL, which lists pads only through SDL_JOYSTICK_DEVICE without udev, opens them.
         File shim = LinuxSession.stageAsset(context, "linux-bionic", "libskyshim_bionic.so");

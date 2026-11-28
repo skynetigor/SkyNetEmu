@@ -264,11 +264,28 @@ include_directories(
         ${VULKAN_RENDERER_DIR}
 )
 
+add_subdirectory(lsfg-import)
+
 add_library(vulkan_renderer SHARED
         winlator/renderer/vulkan/vulkan_jni.cpp
         ${VULKAN_CONTEXT_LEGACY}
         winlator/renderer/vulkan/VulkanRendererFilters.cpp
+        winlator/renderer/vulkan/VulkanRendererLsfg.cpp
         winlator/renderer/vulkan/VulkanRendererPipelineOpt.cpp
+        winlator/renderer/vulkan/vk_dispatch.c
+        winlator/renderer/vulkan/lsfg/lsfg_alpha.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_beta.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_chain.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_common.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_delta.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_dll.c
+        winlator/renderer/vulkan/lsfg/lsfg_gamma.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_generate.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_jni.c
+        winlator/renderer/vulkan/lsfg/lsfg_mipmaps.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_pacer.cpp
+        winlator/renderer/vulkan/lsfg/lsfg_shaders.cpp
+        winlator/renderer/vulkan/lsfg/vkr_lsfg.cpp
 
         winlator/renderer/vulkan/view_transformation.cpp
         winlator/renderer/vulkan/xform.cpp
@@ -292,6 +309,7 @@ set_target_properties(vulkan_renderer PROPERTIES
 target_compile_options(vulkan_renderer PRIVATE
         -Wall -Wextra -fvisibility=hidden
 )
+target_compile_definitions(vulkan_renderer PRIVATE LSFG_DXBC_TRANSLATION=1)
 
 target_link_libraries(vulkan_renderer
         log
@@ -300,4 +318,5 @@ target_link_libraries(vulkan_renderer
         adrenotools
         dl
         atomic
+        lsfg_dxbc
 )
