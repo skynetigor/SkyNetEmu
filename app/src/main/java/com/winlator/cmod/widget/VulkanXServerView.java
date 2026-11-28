@@ -198,6 +198,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
     private native void nativeSetFrameCoordination(long handle, int cap);
     private native void nativeSetDisplayRefreshHz(long handle, int hz);
     private native void nativeSetPresentCadence(long handle, boolean enabled);
+    private native void nativeSetGeneratedPresentPeriod(long handle, long periodNs);
+    private long pendingGeneratedPeriodNs = 0;
     private int pendingRefreshHz = 120;
     private boolean presentCadenceEnabled = true;
     private native int[] nativeGetSupportedPresentModes(long handle);
@@ -257,6 +259,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                         nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
                         nativeSetDisplayRefreshHz(nativeHandle, pendingRefreshHz);
                         nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
+                        nativeSetGeneratedPresentPeriod(nativeHandle, pendingGeneratedPeriodNs);
                         nativeSetFilterMode(nativeHandle, pendingFilterMode);
                         nativeSetSwapRB(nativeHandle, pendingSwapRB);
                         nativeSetStretchMode(nativeHandle, pendingStretchMode);
@@ -287,6 +290,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
                     nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);
                     nativeSetDisplayRefreshHz(nativeHandle, pendingRefreshHz);
                     nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
+                    nativeSetGeneratedPresentPeriod(nativeHandle, pendingGeneratedPeriodNs);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     nativeSetPostFXMode(nativeHandle, pendingPostFXMode);
@@ -925,16 +929,48 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         synchronized (lock) { if (nativeHandle != 0) nativeSetDisplayRefreshHz(nativeHandle, hz); }
     }
 
+    private int displayRefreshCap() {
+        android.view.Display display = getDisplay();
+        if (display == null && getContext() != null) {
+            android.hardware.display.DisplayManager manager =
+                    getContext().getSystemService(android.hardware.display.DisplayManager.class);
+            if (manager != null) display = manager.getDisplay(android.view.Display.DEFAULT_DISPLAY);
+        }
+        if (display == null) return 0;
+        float modeRate = display.getMode() != null ? display.getMode().getRefreshRate() : 0f;
+        float rate = modeRate > 1f ? modeRate : display.getRefreshRate();
+        int hz = Math.round(rate);
+        return hz >= 30 && hz <= 240 ? hz : 0;
+    }
+
     private void applyPresentCadence() {
-        presentCadenceEnabled = !com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames();
+        boolean generating = com.winlator.cmod.lsfg.LsfgManager.isGeneratingFrames();
+        presentCadenceEnabled = !generating;
+        int refresh = displayRefreshCap();
+        int multiplier = Math.max(2, com.winlator.cmod.lsfg.LsfgManager.activeFrameMultiplier());
+        int output = generating && refresh > 0 ? Math.max(1, refresh / multiplier) : 0;
+        pendingGeneratedPeriodNs = output > 0 ? 1_000_000_000L / output : 0L;
         synchronized (lock) {
-            if (nativeHandle != 0) nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
+            if (nativeHandle != 0) {
+                nativeSetPresentCadence(nativeHandle, presentCadenceEnabled);
+                nativeSetGeneratedPresentPeriod(nativeHandle, pendingGeneratedPeriodNs);
+            }
+        }
+        /* DEFAULT at the panel rate shows each buffer on the next refresh, so a
+           60 Hz present whose phase crosses the deadline is displayed for 1 then
+           3 refreshes. FIXED_SOURCE at refresh/multiplier holds every frame for
+           the same number of refreshes and leaves the panel rate alone. */
+        if (generating) {
+            updateGeneratedFps(output);
+        } else {
+            updateGeneratedFps(0);
+            updateDisplayFps(fpsLimit);
         }
     }
 
     public void setFpsLimit(int limit) {
         this.fpsLimit = Math.max(0, Math.min(1000, limit));
-        updateDisplayFps(fpsLimit);
+        applyPresentCadence();
         synchronized (lock) {
             if (nativeHandle != 0)
                 nativeSetFrameCoordination(nativeHandle, isFrameCoordinationEnabled() ? fpsLimit : 0);

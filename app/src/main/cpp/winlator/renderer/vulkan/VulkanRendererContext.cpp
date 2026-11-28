@@ -10,6 +10,7 @@
 #include <chrono>
 #include <ctime>
 #include <inttypes.h>
+#include <android/native_window.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -1392,9 +1393,6 @@ void VulkanRendererContext::renderLoop() {
                     if (surfaceDetached.load() || version != pacingVersion) continue;
                 }
                 resize = fbResized.load() || swapchainRetryPending.load();
-                // Frame generation is already spaced by PresentExtension before this damage
-                // exists. Holding or timestamping here keeps the game buffer outstanding, or
-                // re-pairs a present the X server already spaced. Show generated frames now.
                 if (!resize && needsRender.load() && presentCadenceEnabled.load(std::memory_order_relaxed)) {
                     // Hold the first damage of a burst for two refreshes so the 8 ms duplicate
                     // (cursor or a second damage) is included in the same present. A learned
@@ -1408,6 +1406,7 @@ void VulkanRendererContext::renderLoop() {
             }
         }
         uint64_t presentsBefore = rendererPresents.load(std::memory_order_relaxed);
+        auto renderStart = std::chrono::steady_clock::now();
         try { renderFrame(); }
         catch (const std::exception& e) {
             if (!swapchainRetryPending.exchange(true)) RLOG_E("renderFrame failed: %s",e.what());
@@ -1420,8 +1419,27 @@ void VulkanRendererContext::renderLoop() {
             fbResized.store(true);
         }
         if (rendererPresents.load(std::memory_order_relaxed) != presentsBefore) {
+            auto presentedAt = std::chrono::steady_clock::now();
             lastPresentSteadyNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
+                presentedAt.time_since_epoch()).count();
+            lastRenderNs = std::chrono::duration_cast<std::chrono::nanoseconds>(presentedAt - renderStart).count();
+            static int64_t previousPresentNs = 0;
+            static int64_t minGapNs = 0, maxGapNs = 0;
+            static int gapCount = 0;
+            if (previousPresentNs != 0) {
+                int64_t gap = lastPresentSteadyNs - previousPresentNs;
+                if (gapCount == 0 || gap < minGapNs) minGapNs = gap;
+                if (gap > maxGapNs) maxGapNs = gap;
+                if (++gapCount >= 30) {
+                    __android_log_print(ANDROID_LOG_INFO, "Winlator_Renderer",
+                        "FG interval min %lld us max %lld us render %lld us",
+                        (long long)(minGapNs / 1000), (long long)(maxGapNs / 1000),
+                        (long long)(lastRenderNs / 1000));
+                    gapCount = 0;
+                    minGapNs = maxGapNs = 0;
+                }
+            }
+            previousPresentNs = lastPresentSteadyNs;
             // A frame that arrived during the hold was shown but not sampled. Measure the next
             // interval from this present, or a short duplicate looks like a 60 ms frame.
             if (lastContentArrivalNs < lastPresentSteadyNs) lastContentArrivalNs = lastPresentSteadyNs;
@@ -1448,6 +1466,48 @@ void VulkanRendererContext::setFrameCoordination(int cap) {
 void VulkanRendererContext::setDisplayRefreshHz(int hz) {
     if (hz < 30 || hz > 240) return;
     displayRefreshHz.store(hz, std::memory_order_relaxed);
+}
+
+void VulkanRendererContext::setGeneratedPresentPeriodNs(int64_t periodNs) {
+    if (periodNs < 0) periodNs = 0;
+    if (periodNs > 50000000LL) periodNs = 50000000LL;
+    generatedPresentPeriodNs.store(periodNs, std::memory_order_relaxed);
+    nextPresentSlotSteadyNs = 0;
+}
+
+int64_t VulkanRendererContext::generatedPresentTimeNs() {
+    int64_t period = generatedPresentPeriodNs.load(std::memory_order_relaxed);
+    if (period < 8000000LL) return 0;
+    // Snap to a whole number of refreshes. A free-running 16.67 ms clock walks across the
+    // 8.33 ms panel grid, and SurfaceFlinger then latches the pair on adjacent refreshes.
+    int64_t vsync = vsyncPeriodNs();
+    int64_t steps = (period + vsync / 2) / vsync;
+    if (steps < 2) steps = 2;
+    int64_t grid = steps * vsync;
+    timespec mono{};
+    clock_gettime(CLOCK_MONOTONIC, &mono);
+    int64_t now = mono.tv_sec * 1000000000LL + mono.tv_nsec;
+    int64_t phase = cadencePhaseNs > 0 ? cadencePhaseNs % grid : 0;
+    auto nextSlot = [&](int64_t earliest) {
+        int64_t slot = earliest - ((earliest - phase) % grid);
+        if (slot < earliest) slot += grid;
+        return slot;
+    };
+    // Stay one output interval ahead. The generated blit finishes with the real frame, so a
+    // stamp of "now" lets both become visible on consecutive 120 Hz refreshes.
+    int64_t earliest = now + grid;
+    if (nextGeneratedPresentNs < earliest) nextGeneratedPresentNs = nextSlot(earliest);
+    int64_t due = nextGeneratedPresentNs;
+    nextGeneratedPresentNs += grid;
+    using Stamp = int32_t (*)(ANativeWindow *, int64_t);
+    static Stamp stamp = nullptr;
+    static int looked = 0;
+    if (!looked) {
+        looked = 1;
+        stamp = reinterpret_cast<Stamp>(dlsym(RTLD_DEFAULT, "ANativeWindow_setBuffersTimestamp"));
+    }
+    if (window && stamp) stamp(window, due);
+    return due;
 }
 
 void VulkanRendererContext::setPresentCadence(bool enabled) {
@@ -1908,9 +1968,14 @@ void VulkanRendererContext::renderFrame() {
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
 
-    int64_t desiredPresent = 0;
+    // The Android WSI writes VkPresentTimesInfoGOOGLE into the buffer timestamp and otherwise
+    // replaces ANativeWindow_setBuffersTimestamp with zero. Zero means "as soon as ready", which
+    // is the 8.3/24.9 latch when the cheap generated frame finishes beside the real one.
+    bool generatedGrid = generatedPresentPeriodNs.load(std::memory_order_relaxed) >= 8000000LL;
+    int64_t desiredPresent = generatedGrid ? generatedPresentTimeNs() : 0;
+    int64_t stampLead = 0;
     fgDisplayDelayNs.store(0, std::memory_order_relaxed);
-    if (displayTimingEnabled && presentCadenceEnabled.load(std::memory_order_relaxed) && cadencePhaseNs != 0) {
+    if (!generatedGrid && displayTimingEnabled && presentCadenceEnabled.load(std::memory_order_relaxed) && cadencePhaseNs != 0) {
         timespec mono{};
         clock_gettime(CLOCK_MONOTONIC, &mono);
         int64_t nowMono = mono.tv_sec * 1000000000LL + mono.tv_nsec;
@@ -1921,13 +1986,28 @@ void VulkanRendererContext::renderFrame() {
         // The render loop already waited out the slot. Snap to the next refresh, not a second slot ahead.
         if (next <= nowMono + vsync + 1000000LL) desiredPresent = next;
     }
+    if (generatedGrid && desiredPresent > 0) {
+        timespec mono{};
+        clock_gettime(CLOCK_MONOTONIC, &mono);
+        stampLead = desiredPresent - (mono.tv_sec * 1000000000LL + mono.tv_nsec);
+    }
     VkPresentTimeGOOGLE displayTime{nextDisplayId++, (uint64_t)desiredPresent};
     VkPresentTimesInfoGOOGLE displayTimes{VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE};
     displayTimes.swapchainCount=1; displayTimes.pTimes=&displayTime;
-    if (displayTimingEnabled) pi.pNext=&displayTimes;
+    if (displayTimingEnabled && (generatedGrid ? desiredPresent > 0
+            : presentCadenceEnabled.load(std::memory_order_relaxed)))
+        pi.pNext=&displayTimes;
+    auto presentStart = std::chrono::steady_clock::now();
     {
         ScopedRendererTiming timing(presentTiming, performanceDiagnostics.load(std::memory_order_relaxed));
         res = vk_.QueuePresentKHR(graphicsQueue, &pi);
+    }
+    if (generatedGrid && (rendererPresents % 30) == 0) {
+        int64_t presentUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - presentStart).count();
+        __android_log_print(ANDROID_LOG_INFO, "Winlator_Renderer",
+            "FG display grid lead %lld us present %lld us",
+            (long long)(stampLead / 1000), (long long)presentUs);
     }
     rendererPresentResult.store(res);
     if (res==VK_SUCCESS || res==VK_SUBOPTIMAL_KHR) {

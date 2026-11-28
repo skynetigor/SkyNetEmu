@@ -217,6 +217,8 @@ public:
      * Frame generation turns this off; it spaces its own presents.
      */
     void setPresentCadence(bool enabled);
+    /** 0 disables. While frame generation is on, each Android present is stamped this far apart. */
+    void setGeneratedPresentPeriodNs(int64_t periodNs);
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
@@ -415,10 +417,14 @@ public:
     std::atomic<int> coordinatedCap{0};
     std::atomic<int> displayRefreshHz{120};
     std::atomic<bool> presentCadenceEnabled{true};
+    std::atomic<int64_t> generatedPresentPeriodNs{0};
+    int64_t nextGeneratedPresentNs = 0;
     unsigned pacingVersion = 0;
     int64_t contentIntervalNs = 0;
     int64_t lastContentArrivalNs = 0;
     int64_t lastPresentSteadyNs = 0;
+    int64_t nextPresentSlotSteadyNs = 0;
+    int64_t lastRenderNs = 0;
     int64_t loggedSlotNs = 0;
     int64_t committedSlotNs = 0;
     int64_t lastSlotChangeNs = 0;
@@ -436,6 +442,7 @@ public:
     int64_t lastProducerArrivalNs = 0;
     std::mutex producerMutex;
     int64_t vsyncPeriodNs() const;
+    int64_t generatedPresentTimeNs();
     int64_t presentSlotNs();
     void noteContentArrival(int64_t nowNs);
     void noteProducerFrame();

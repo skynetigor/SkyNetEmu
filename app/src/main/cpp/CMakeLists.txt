@@ -97,9 +97,9 @@ target_link_options(wine_pe_cache PRIVATE "-Wl,--exclude-libs,ALL")
 target_link_libraries(wine_pe_cache log dl)
 
 # Spaces Lossless Scaling's native presents. Loaded only while frame generation is on.
-add_library(lsfg_pace SHARED winlator/lsfg_pace_layer.c)
+add_library(lsfg_pace SHARED winlator/lsfg_pace_layer.c winlator/lsfg_host_scanout.c)
 target_compile_options(lsfg_pace PRIVATE -Wall -Wextra -fvisibility=hidden)
-target_link_options(lsfg_pace PRIVATE "-Wl,--exclude-libs,ALL")
+target_link_options(lsfg_pace PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-z,defs")
 target_link_libraries(lsfg_pace log android)
 
 # Keep the Pypetto DisplayX/EGL target above untouched.  The optional Vulkan

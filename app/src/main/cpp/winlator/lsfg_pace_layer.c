@@ -1,14 +1,10 @@
-/* Queues each present and returns at once. A Choreographer callback then submits
-   at most one image per vsync. A spare graphics queue is used when the driver
-   has one. Turnip advertises one, so the fallback presents that queue only from
-   the vsync thread; game submits take the same lock and never wait on it.
-   The game's wait semaphores are consumed on its own thread before the call
-   returns, so the next frame can signal them. The ready fence is created here:
-   the frame-gen layer reuses its own fence on the next frame. Turnip ignores
-   display timing. This layer never sleeps. A 0.6-vsync delay on this thread
-   made desired times uneven and left the 16.2/27.0 scanout; do not put it back.
+/* The game returns from vkQueuePresentKHR immediately. A second VkDevice owns
+   the window and presents one already-ready image per output slot. Presenting
+   Turnip's single game queue from this thread SIGSEGV'd in FEXMemJIT.
    Link with -landroid -llog -Wl,-z,defs or the loader cannot resolve Choreographer. */
 #define VK_NO_PROTOTYPES
+#include "lsfg_host_scanout.h"
+#include <vulkan/vulkan_android.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <android/choreographer.h>
@@ -19,7 +15,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
+#include <sys/timerfd.h>
 #include <time.h>
+#include <unistd.h>
 
 #define EXPORT __attribute__((visibility("default")))
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "FgPace", __VA_ARGS__)
@@ -37,10 +36,15 @@ typedef struct { void *key; VkInstance instance; PFN_vkGetInstanceProcAddr gipa;
 typedef struct {
     void *key;
     VkDevice device;
+    VkPhysicalDevice physical;
+    VkInstance instance;
+    PFN_vkGetInstanceProcAddr gipa;
     PFN_vkGetDeviceProcAddr gdpa;
+    PFN_vkCreateDevice next_create;
     VkQueue host;
     uint32_t host_family;
     uint32_t host_index;
+    uint32_t game_family;
 } Device;
 typedef struct {
     VkSwapchainKHR swap;
@@ -60,20 +64,7 @@ static Instance instances[LIMIT];
 static Device devices[LIMIT];
 static QueueLink queues[LIMIT];
 static Swap swaps[LIMIT];
-static VkSwapchainKHR paced_swaps[LIMIT];
-static int paced_count;
 static int logged_mode;
-
-static int swap_is_paced(VkSwapchainKHR swap) {
-    for (int i = 0; i < paced_count; i++) if (paced_swaps[i] == swap) return 1;
-    return 0;
-}
-
-static void mark_paced(VkSwapchainKHR swap) {
-    if (!swap || swap_is_paced(swap) || paced_count >= LIMIT) return;
-    paced_swaps[paced_count++] = swap;
-    LOG("pacing framegen swapchain");
-}
 
 static void remember_queue(VkQueue queue, VkDevice device) {
     if (!queue || !device) return;
@@ -207,6 +198,70 @@ static int claim_host_queue(Instance inst, VkPhysicalDevice physical, const VkDe
     return *family != UINT32_MAX;
 }
 
+static int device_has_ext(Instance inst, VkPhysicalDevice physical, const char *name) {
+    PFN_vkEnumerateDeviceExtensionProperties enumerate = inst.gipa
+            ? (void *)inst.gipa(inst.instance, "vkEnumerateDeviceExtensionProperties") : NULL;
+    if (!enumerate || !name) return 0;
+    uint32_t count = 0;
+    if (enumerate(physical, NULL, &count, NULL) != VK_SUCCESS || !count || count > 512) return 0;
+    VkExtensionProperties *props = calloc(count, sizeof(*props));
+    if (!props) return 0;
+    int found = 0;
+    if (enumerate(physical, NULL, &count, props) == VK_SUCCESS) {
+        for (uint32_t i = 0; i < count; i++) if (!strcmp(props[i].extensionName, name)) found = 1;
+    }
+    free(props);
+    return found;
+}
+
+/* The game device must import the same AHB images the host device blits. Only
+   extensions the physical device enumerates are added, and the loader chain stays
+   on pNext. */
+static const VkDeviceCreateInfo *inject_export(Instance inst, VkPhysicalDevice physical,
+        const VkDeviceCreateInfo *ci, VkDeviceCreateInfo *out, const char **names,
+        VkPhysicalDeviceSamplerYcbcrConversionFeatures *ycbcr) {
+    static const char *required[] = {
+        "VK_ANDROID_external_memory_android_hardware_buffer",
+        "VK_KHR_external_memory",
+        "VK_KHR_dedicated_allocation",
+        "VK_KHR_get_memory_requirements2",
+        "VK_KHR_bind_memory2",
+        "VK_KHR_sampler_ycbcr_conversion",
+        "VK_KHR_external_semaphore",
+        "VK_KHR_external_semaphore_fd",
+    };
+    uint32_t count = ci->enabledExtensionCount;
+    if (!ci->ppEnabledExtensionNames) count = 0;
+    if (count > 48) return ci;
+    for (uint32_t i = 0; i < count; i++) names[i] = ci->ppEnabledExtensionNames[i];
+    int added = 0;
+    for (uint32_t r = 0; r < sizeof(required) / sizeof(required[0]) && count < 56; r++) {
+        int present = 0;
+        for (uint32_t i = 0; i < count; i++) if (names[i] && !strcmp(names[i], required[r])) present = 1;
+        if (present || !device_has_ext(inst, physical, required[r])) continue;
+        names[count++] = required[r];
+        added = 1;
+    }
+    int has_ycbcr = 0;
+    for (const VkBaseInStructure *next = (const VkBaseInStructure *)ci->pNext; next; next = next->pNext) {
+        if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES) has_ycbcr = 1;
+    }
+    if (!added && has_ycbcr) return ci;
+    *out = *ci;
+    out->enabledExtensionCount = count;
+    out->ppEnabledExtensionNames = names;
+    if (!has_ycbcr) {
+        *ycbcr = (VkPhysicalDeviceSamplerYcbcrConversionFeatures){
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+            .pNext = (void *)ci->pNext,
+            .samplerYcbcrConversion = VK_TRUE,
+        };
+        out->pNext = ycbcr;
+    }
+    if (added) LOG("game device gained AHB export extensions");
+    return out;
+}
+
 static VkResult VKAPI_CALL create_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *ci,
         const VkAllocationCallbacks *alloc, VkDevice *out) {
     Instance inst = instance_for(physical);
@@ -217,15 +272,22 @@ static VkResult VKAPI_CALL create_device(VkPhysicalDevice physical, const VkDevi
     PFN_vkGetDeviceProcAddr gdpa = chain->u.pLayerInfo->pfnNextGetDeviceProcAddr;
     PFN_vkCreateDevice fn = (void *)chain->u.pLayerInfo->pfnNextGetInstanceProcAddr(inst.instance, "vkCreateDevice");
     chain->u.pLayerInfo = chain->u.pLayerInfo->pNext;
+    /* The loader chain is only valid until this call returns. Copy the already
+       advanced link so a second device can be created before we return. */
+    void *next_link = chain->u.pLayerInfo;
     if (!fn) return VK_ERROR_INITIALIZATION_FAILED;
     VkDeviceCreateInfo rewritten;
     VkDeviceQueueCreateInfo qcis[8];
     float priors[8][4];
     uint32_t family = UINT32_MAX, index = 0;
     int extra = claim_host_queue(inst, physical, ci, &rewritten, qcis, priors, &family, &index);
-    VkResult result = fn(physical, extra ? &rewritten : ci, alloc, out);
-    if (result != VK_SUCCESS && extra) {
-        LOG("spare queue rejected (%d); presenting on the game queue is disabled", result);
+    const char *export_names[56];
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr;
+    const VkDeviceCreateInfo *requested = extra ? &rewritten : ci;
+    requested = inject_export(inst, physical, requested, &rewritten, export_names, &ycbcr);
+    VkResult result = fn(physical, requested, alloc, out);
+    if (result != VK_SUCCESS && requested != ci) {
+        LOG("device create with export extensions failed (%d); retrying the app create info", result);
         result = fn(physical, ci, alloc, out);
         extra = 0;
     }
@@ -237,11 +299,40 @@ static VkResult VKAPI_CALL create_device(VkPhysicalDevice physical, const VkDevi
             if (host) remember_queue(host, *out);
             LOG("host present queue family %u index %u %s", family, index, host ? "ready" : "missing");
         } else {
-            LOG("no spare graphics queue; vsync thread paces the game queue");
+            LOG("no spare graphics queue; host scanout uses a second device");
+            int wants_present = 0;
+            for (uint32_t i = 0; ci->ppEnabledExtensionNames && i < ci->enabledExtensionCount; i++) {
+                if (ci->ppEnabledExtensionNames[i] && !strcmp(ci->ppEnabledExtensionNames[i], "VK_KHR_swapchain"))
+                    wants_present = 1;
+            }
+            if (wants_present) {
+                HostGameInfo game = {
+                    .instance = inst.instance,
+                    .physical = physical,
+                    .device = *out,
+                    .gipa = inst.gipa,
+                    .gdpa = gdpa,
+                    .next_create = fn,
+                    .queue_family = ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0,
+                };
+                host_create_device(&game, next_link);
+            }
         }
         pthread_mutex_lock(&mutex);
         for (int i = 0; i < LIMIT; i++) if (!devices[i].key) {
-            devices[i] = (Device){key_of(*out), *out, gdpa, host, family, index};
+            devices[i] = (Device){
+                .key = key_of(*out),
+                .device = *out,
+                .physical = physical,
+                .instance = inst.instance,
+                .gipa = inst.gipa,
+                .gdpa = gdpa,
+                .next_create = fn,
+                .host = host,
+                .host_family = family,
+                .host_index = index,
+                .game_family = ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0,
+            };
             break;
         }
         pthread_mutex_unlock(&mutex);
@@ -264,6 +355,19 @@ static void VKAPI_CALL destroy_device(VkDevice handle, const VkAllocationCallbac
 static VkResult VKAPI_CALL create_swap(VkDevice handle, const VkSwapchainCreateInfoKHR *ci,
         const VkAllocationCallbacks *alloc, VkSwapchainKHR *out) {
     Device dev = device_for(handle);
+    if (dev.device && dev.gipa && ci && ci->surface) {
+        HostGameInfo game = {
+            .instance = dev.instance,
+            .physical = dev.physical,
+            .device = dev.device,
+            .gipa = dev.gipa,
+            .gdpa = dev.gdpa,
+            .next_create = dev.next_create,
+            .queue_family = dev.game_family,
+        };
+        if (host_virtualize(&game, ci, out)) return VK_SUCCESS;
+        LOG("host scanout unavailable; presenting on the calling thread");
+    }
     PFN_vkCreateSwapchainKHR fn = (void *)dev.gdpa(handle, "vkCreateSwapchainKHR");
     if (!fn) return VK_ERROR_INITIALIZATION_FAILED;
     VkSwapchainCreateInfoKHR info = *ci;
@@ -291,6 +395,10 @@ static VkResult VKAPI_CALL create_swap(VkDevice handle, const VkSwapchainCreateI
 }
 
 static void VKAPI_CALL destroy_swap(VkDevice handle, VkSwapchainKHR swap, const VkAllocationCallbacks *alloc) {
+    if (host_owns(swap)) {
+        host_destroy(swap);
+        return;
+    }
     flush_swap(swap);
     Device dev = device_for(handle);
     PFN_vkDestroySwapchainKHR fn = dev.gdpa ? (PFN_vkDestroySwapchainKHR)dev.gdpa(handle, "vkDestroySwapchainKHR") : NULL;
@@ -340,19 +448,20 @@ static int pacer_started;
 static uint64_t vsync_ns = 5405405ull;
 static int vsync_index;
 static int last_present_vsync = -1000;
+static int64_t last_frame_time;
+static int timer_fd = -1;
+static int kick_fd = -1;
+static int wake_armed;
+static int scheduling;
+static int target_vsync;
+static uint64_t target_vsync_ns;
+static int64_t present_phase_ns;
 static uint32_t presented;
-static uint32_t catchups;
 static uint64_t pace_logged;
 
-static int queued_jobs(void) {
-    int count = 0;
-    for (int i = 0; i < JOBS; i++) if (jobs[i].live) count++;
-    return count;
-}
-
-/* Half the measured source period, in vsyncs. Four 5.405 ms ticks is 21.6 ms,
-   the 25 -> 50 slot, until a real period has been seen. Never one tick: that
-   is the 5.4 ms pair. */
+/* Half the measured source period, in display vsyncs. Until a source period is
+   seen, hold one extra image for two display ticks: 16.7 ms on 120 Hz, 10.8 ms
+   on 185 Hz. One tick is the adjacent-refresh pair. */
 static int slots_needed(void) {
     uint64_t half = 0;
     uint64_t vsync;
@@ -363,8 +472,8 @@ static int slots_needed(void) {
     }
     vsync = vsync_ns;
     pthread_mutex_unlock(&mutex);
-    if (half == 0) half = 21621620ull;
-    if (vsync < 2000000ull) vsync = 5405405ull;
+    if (vsync < 4000000ull || vsync > 17000000ull) vsync = 8333333ull;
+    if (half == 0) half = vsync * 2;
     int slots = (int)((half + vsync / 2) / vsync);
     if (slots < 2) slots = 2;
     if (slots > 8) slots = 8;
@@ -487,93 +596,175 @@ static void present_job(Job job) {
         LOG("deferred present failed %d", result);
 }
 
-static int fence_signaled(VkQueue queue, VkFence fence) {
-    if (!fence) return 1;
-    Device dev = device_for(queue);
-    PFN_vkGetFenceStatus fn = dev.gdpa ? (PFN_vkGetFenceStatus)dev.gdpa(dev.device, "vkGetFenceStatus") : NULL;
-    if (!fn) return 1;
-    return fn(dev.device, fence) == VK_SUCCESS;
+static void arm_timer(uint64_t when) {
+    if (timer_fd < 0) return;
+    struct itimerspec spec;
+    memset(&spec, 0, sizeof(spec));
+    if (when) {
+        spec.it_value.tv_sec = (time_t)(when / 1000000000ull);
+        spec.it_value.tv_nsec = (long)(when % 1000000000ull);
+    }
+    timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &spec, NULL);
+    wake_armed = when != 0;
 }
 
-/* One image per callback, and only after its copy fence has signaled. A full
-   queue presents anyway so acquire cannot stall for a whole frame; that
-   catch-up is logged because it can re-pair. */
-static void present_one(int force) {
+static void kick_pacer(void) {
+    if (kick_fd < 0) return;
+    uint64_t one = 1;
+    ssize_t wrote = write(kick_fd, &one, sizeof(one));
+    (void)wrote;
+}
+
+/* Present one already-ready host image. Never touches the game queue.
+   A second ready image stays queued until another display slot elapses. */
+static void present_one(int from_timer) {
+    (void)from_timer;
     int slots = slots_needed();
-    Job job;
-    int have = 0;
-    int peek = 0;
-    VkQueue peek_queue = VK_NULL_HANDLE;
-    VkFence peek_fence = VK_NULL_HANDLE;
     pthread_mutex_lock(&mutex);
-    int depth = queued_jobs();
-    int due = last_present_vsync < 0 || vsync_index >= last_present_vsync + slots;
-    if (depth > 0 && (due || force || depth >= 6)) {
-        for (int n = 0; n < JOBS; n++) {
-            int i = (job_head + n) % JOBS;
-            if (!jobs[i].live) continue;
-            peek = 1;
-            peek_queue = jobs[i].queue;
-            peek_fence = jobs[i].ready;
-            jobs[i].wait_vsyncs++;
-            if (jobs[i].wait_vsyncs > slots * 2) force = 1;
-            break;
-        }
-    }
+    int elapsed = vsync_index - last_present_vsync;
+    int due = last_present_vsync < 0 || elapsed >= slots;
+    uint64_t vsync = vsync_ns;
     pthread_mutex_unlock(&mutex);
-    int ready = !peek || force || fence_signaled(peek_queue, peek_fence);
-    pthread_mutex_lock(&mutex);
-    if (peek && ready && (due || force || depth >= 6)) {
-        for (int n = 0; n < JOBS; n++) {
-            int i = (job_head + n) % JOBS;
-            if (!jobs[i].live) continue;
-            job = jobs[i];
-            jobs[i].live = 0;
-            job_head = (i + 1) % JOBS;
-            job_count--;
-            have = 1;
-            if (!due) catchups++;
-            last_present_vsync = vsync_index;
-            presented++;
-            break;
-        }
+    int depth = host_queued();
+    if (due && host_present_one()) {
+        pthread_mutex_lock(&mutex);
+        last_present_vsync = vsync_index;
+        present_phase_ns = (int64_t)now_ns() - (int64_t)last_frame_time;
+        presented++;
+        pthread_mutex_unlock(&mutex);
     }
+    pthread_mutex_lock(&mutex);
     uint64_t now = now_ns();
     if (now - pace_logged > 1000000000ull) {
         pace_logged = now;
-        LOG("presented %u queued %d slots %d vsync %llu us catchup %u",
-                presented, depth, slots, (unsigned long long)(vsync_ns / 1000ull), catchups);
+        LOG("host presented %u queued %d slots %d vsync %llu us phase %lld us",
+                presented, depth, slots, (unsigned long long)(vsync / 1000ull),
+                (long long)(present_phase_ns / 1000));
         presented = 0;
-        catchups = 0;
     }
     pthread_mutex_unlock(&mutex);
-    if (have) present_job(job);
+    host_prepare();
+}
+
+static void schedule_wake(void) {
+    if (scheduling || timer_fd < 0) return;
+    scheduling = 1;
+    int depth;
+    int last;
+    int index;
+    uint64_t period;
+    int64_t frame;
+    pthread_mutex_lock(&mutex);
+    depth = host_queued();
+    last = last_present_vsync;
+    index = vsync_index;
+    period = vsync_ns;
+    frame = last_frame_time;
+    pthread_mutex_unlock(&mutex);
+    if (period < 4000000ull || period > 17000000ull) period = 8333333ull;
+    if ((depth == 0 && !host_blit_pending()) || frame == 0) {
+        arm_timer(0);
+        scheduling = 0;
+        return;
+    }
+    int slots = slots_needed();
+    int elapsed = last < 0 ? slots : index - last;
+    if (elapsed >= slots) present_one(1);
+    pthread_mutex_lock(&mutex);
+    last = last_present_vsync;
+    index = vsync_index;
+    frame = last_frame_time;
+    depth = host_queued();
+    pthread_mutex_unlock(&mutex);
+    if ((depth == 0 && !host_blit_pending()) || frame == 0) {
+        arm_timer(0);
+        scheduling = 0;
+        return;
+    }
+    elapsed = last < 0 ? 0 : index - last;
+    int wait_slots = slots - elapsed;
+    if (wait_slots < 1) wait_slots = 1;
+    uint64_t target_time = (uint64_t)frame + (uint64_t)wait_slots * period;
+    target_vsync = index + wait_slots;
+    target_vsync_ns = target_time;
+    /* The display callback presents. The timer only covers a missed callback. */
+    uint64_t wake = target_time + period / 2;
+    uint64_t now = now_ns();
+    arm_timer(wake > now ? wake : now + period);
+    scheduling = 0;
+}
+
+static int on_timer(int fd, int events, void *data) {
+    (void)data;
+    if (events & ALOOPER_EVENT_INPUT) {
+        uint64_t expirations = 0;
+        ssize_t n = read(fd, &expirations, sizeof(expirations));
+        (void)n;
+    }
+    wake_armed = 0;
+    schedule_wake();
+    return 1;
+}
+
+static int on_kick(int fd, int events, void *data) {
+    (void)data;
+    if (events & ALOOPER_EVENT_INPUT) {
+        uint64_t pending = 0;
+        ssize_t n = read(fd, &pending, sizeof(pending));
+        (void)n;
+    }
+    schedule_wake();
+    return 1;
 }
 
 static void on_frame(long frameTimeNanos, void *data) {
     (void)data;
-    static long last_frame;
-    if (last_frame) {
-        long delta = frameTimeNanos - last_frame;
-        if (delta > 2000000L && delta < 20000000L) {
-            pthread_mutex_lock(&mutex);
-            vsync_ns = (vsync_ns * 7 + (uint64_t)delta) / 8;
-            pthread_mutex_unlock(&mutex);
+    int extra = 0;
+    if (last_frame_time) {
+        int64_t delta = frameTimeNanos - last_frame_time;
+        pthread_mutex_lock(&mutex);
+        if (delta >= 4000000LL && delta <= 17000000LL) {
+            /* Snap off the 185 Hz default. A 120 Hz callback is 8.33 ms. */
+            if (vsync_ns < 4000000ull || vsync_ns > 17000000ull
+                    || delta > (int64_t)vsync_ns * 6 / 5
+                    || delta < (int64_t)vsync_ns * 4 / 5)
+                vsync_ns = (uint64_t)delta;
+            else
+                vsync_ns = (vsync_ns * 7 + (uint64_t)delta) / 8;
+        } else if (delta > 17000000LL && vsync_ns >= 4000000ull && vsync_ns <= 17000000ull) {
+            extra = (int)(delta / (int64_t)vsync_ns) - 1;
+            if (extra < 0) extra = 0;
+            if (extra > 8) extra = 8;
         }
+        pthread_mutex_unlock(&mutex);
     }
-    last_frame = frameTimeNanos;
+    last_frame_time = frameTimeNanos;
     pthread_mutex_lock(&mutex);
-    vsync_index++;
+    vsync_index += 1 + extra;
+    for (int n = 0; n < JOBS; n++) {
+        int i = (job_head + n) % JOBS;
+        if (!jobs[i].live) continue;
+        jobs[i].wait_vsyncs++;
+        break;
+    }
     pthread_mutex_unlock(&mutex);
+    /* arm64 long is 64-bit. minSdk 28 cannot call the API 29 64-bit entry. */
     AChoreographer_postFrameCallback(AChoreographer_getInstance(), on_frame, NULL);
-    present_one(0);
+    host_prepare();
+    schedule_wake();
 }
 
 static void *pacer_main(void *arg) {
     (void)arg;
     ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
+    ALooper *looper = ALooper_forThread();
+    if (timer_fd >= 0)
+        ALooper_addFd(looper, timer_fd, ALOOPER_POLL_CALLBACK, ALOOPER_EVENT_INPUT, on_timer, NULL);
+    if (kick_fd >= 0)
+        ALooper_addFd(looper, kick_fd, ALOOPER_POLL_CALLBACK, ALOOPER_EVENT_INPUT, on_kick, NULL);
     AChoreographer_postFrameCallback(AChoreographer_getInstance(), on_frame, NULL);
-    LOG("choreographer pacer started");
+    LOG("host scanout pacer started");
+    schedule_wake();
     for (;;) ALooper_pollOnce(-1, NULL, NULL, NULL);
     return NULL;
 }
@@ -581,107 +772,19 @@ static void *pacer_main(void *arg) {
 static void start_pacer(void) {
     pthread_mutex_lock(&mutex);
     if (!pacer_started) {
+        if (timer_fd < 0)
+            timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        if (kick_fd < 0)
+            kick_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
         pacer_started = 1;
-        if (pthread_create(&pacer_thread, NULL, pacer_main, NULL) != 0) {
+        if (timer_fd < 0 || kick_fd < 0 || pthread_create(&pacer_thread, NULL, pacer_main, NULL) != 0) {
             pacer_started = 0;
-            LOG("choreographer pacer failed to start");
+            LOG("host scanout pacer failed to start");
         } else {
             pthread_detach(pacer_thread);
         }
     }
     pthread_mutex_unlock(&mutex);
-}
-
-static int enqueue_present(VkQueue queue, const VkPresentInfoKHR *ci, VkSemaphore release, VkFence ready) {
-    if (!ci || ci->swapchainCount == 0 || ci->swapchainCount > MAX_CHAIN
-            || ci->waitSemaphoreCount > MAX_WAITS || !ci->pSwapchains || !ci->pImageIndices)
-        return 0;
-    Job job;
-    memset(&job, 0, sizeof(job));
-    job.live = 1;
-    job.queue = queue;
-    job.release = release;
-    job.ready = ready;
-    job.waitCount = ci->waitSemaphoreCount;
-    if (job.waitCount && ci->pWaitSemaphores)
-        memcpy(job.waits, ci->pWaitSemaphores, job.waitCount * sizeof(VkSemaphore));
-    job.swapCount = ci->swapchainCount;
-    memcpy(job.swaps, ci->pSwapchains, job.swapCount * sizeof(VkSwapchainKHR));
-    memcpy(job.images, ci->pImageIndices, job.swapCount * sizeof(uint32_t));
-    for (const VkBaseInStructure *next = ci->pNext; next; next = next->pNext) {
-        if (next->sType == VK_STRUCTURE_TYPE_PRESENT_ID_KHR) {
-            const VkPresentIdKHR *id = (const VkPresentIdKHR *)next;
-            if (id->swapchainCount > 0 && id->pPresentIds) {
-                job.hasId = 1;
-                job.presentId = id->pPresentIds[0];
-            }
-        } else if (next->sType == SKY_FG_READY_STYPE) {
-            const SkyFgReadyInfo *info = (const SkyFgReadyInfo *)next;
-            job.generated = info->generated ? 1 : 0;
-        }
-    }
-    pthread_mutex_lock(&mutex);
-    if (job_count >= JOBS) {
-        pthread_mutex_unlock(&mutex);
-        LOG("present queue full");
-        return 0;
-    }
-    int stored = 0;
-    for (int n = 0; n < JOBS; n++) {
-        int i = (job_head + n) % JOBS;
-        if (jobs[i].live) continue;
-        jobs[i] = job;
-        job_count++;
-        stored = 1;
-        break;
-    }
-    pthread_mutex_unlock(&mutex);
-    if (!stored) {
-        LOG("present queue full");
-        return 0;
-    }
-    note_arrival(job.swaps[0], now_ns());
-    return 1;
-}
-
-typedef struct { VkSemaphore release; VkFence ready; } Handoff;
-
-/* Consume the game's present waits on its own queue, then a later present waits
-   only on the semaphore this submit signals. The fence is ours: the frame-gen
-   layer destroys its fence when the next frame reuses that slot. */
-static Handoff handoff(Device dev, VkQueue game, const VkPresentInfoKHR *ci) {
-    Handoff held = {0};
-    if (!dev.gdpa) return held;
-    PFN_vkCreateSemaphore create = (void *)dev.gdpa(dev.device, "vkCreateSemaphore");
-    PFN_vkCreateFence create_fence = (void *)dev.gdpa(dev.device, "vkCreateFence");
-    PFN_vkQueueSubmit submit = (void *)dev.gdpa(dev.device, "vkQueueSubmit");
-    if (!create || !submit) return held;
-    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-    if (create(dev.device, &sci, NULL, &held.release) != VK_SUCCESS) return held;
-    if (create_fence) {
-        VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        if (create_fence(dev.device, &fci, NULL, &held.ready) != VK_SUCCESS) held.ready = VK_NULL_HANDLE;
-    }
-    VkPipelineStageFlags stages[MAX_WAITS];
-    uint32_t waits = ci->waitSemaphoreCount;
-    if (waits > MAX_WAITS) waits = MAX_WAITS;
-    for (uint32_t i = 0; i < waits; i++) stages[i] = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    VkSubmitInfo submit_info = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .waitSemaphoreCount = waits,
-        .pWaitSemaphores = waits ? ci->pWaitSemaphores : NULL,
-        .pWaitDstStageMask = waits ? stages : NULL,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &held.release,
-    };
-    /* Do not take host_mutex here. A present on the other thread must not wait
-       for this submit, and this submit must not wait for that present. */
-    VkResult submitted = submit(game, 1, &submit_info, held.ready);
-    if (submitted != VK_SUCCESS) {
-        destroy_sync(game, held.release, held.ready);
-        return (Handoff){0};
-    }
-    return held;
 }
 
 static void VKAPI_CALL get_device_queue(VkDevice device, uint32_t family, uint32_t index, VkQueue *out) {
@@ -692,45 +795,64 @@ static void VKAPI_CALL get_device_queue(VkDevice device, uint32_t family, uint32
     if (*out) remember_queue(*out, device);
 }
 
-static int present_should_pace(const VkPresentInfoKHR *ci) {
-    int tagged = 0;
-    for (const VkBaseInStructure *next = ci->pNext; next; next = next->pNext)
-        if (next->sType == SKY_FG_READY_STYPE) tagged = 1;
-    pthread_mutex_lock(&mutex);
-    if (tagged) for (uint32_t i = 0; i < ci->swapchainCount; i++) mark_paced(ci->pSwapchains[i]);
-    int pace = 0;
-    for (uint32_t i = 0; i < ci->swapchainCount && !pace; i++) pace = swap_is_paced(ci->pSwapchains[i]);
-    pthread_mutex_unlock(&mutex);
-    return pace;
+static VkResult VKAPI_CALL acquire_next(VkDevice device, VkSwapchainKHR swap, uint64_t timeout,
+        VkSemaphore semaphore, VkFence fence, uint32_t *index) {
+    if (host_owns(swap)) {
+        Device dev = device_for(device);
+        VkQueue queue = VK_NULL_HANDLE;
+        PFN_vkGetDeviceQueue get_queue = dev.gdpa ? (void *)dev.gdpa(device, "vkGetDeviceQueue") : NULL;
+        if (get_queue) get_queue(device, dev.game_family, 0, &queue);
+        return host_acquire(swap, timeout, semaphore, fence, index, queue);
+    }
+    Device dev = device_for(device);
+    PFN_vkAcquireNextImageKHR fn = dev.gdpa ? (void *)dev.gdpa(device, "vkAcquireNextImageKHR") : NULL;
+    return fn ? fn(device, swap, timeout, semaphore, fence, index) : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+static VkResult VKAPI_CALL acquire_next2(VkDevice device, const VkAcquireNextImageInfoKHR *info, uint32_t *index) {
+    if (info && host_owns(info->swapchain))
+        return acquire_next(device, info->swapchain, info->timeout, info->semaphore, info->fence, index);
+    Device dev = device_for(device);
+    PFN_vkAcquireNextImage2KHR fn = dev.gdpa ? (void *)dev.gdpa(device, "vkAcquireNextImage2KHR") : NULL;
+    return fn ? fn(device, info, index) : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+static VkResult VKAPI_CALL get_swap_images(VkDevice device, VkSwapchainKHR swap, uint32_t *count, VkImage *images) {
+    if (host_owns(swap)) return host_images(swap, count, images);
+    Device dev = device_for(device);
+    PFN_vkGetSwapchainImagesKHR fn = dev.gdpa ? (void *)dev.gdpa(device, "vkGetSwapchainImagesKHR") : NULL;
+    return fn ? fn(device, swap, count, images) : VK_ERROR_INITIALIZATION_FAILED;
 }
 
 static VkResult VKAPI_CALL present(VkQueue queue, const VkPresentInfoKHR *ci) {
     Device dev = device_for(queue);
     PFN_vkQueuePresentKHR fn = dev.gdpa ? (PFN_vkQueuePresentKHR)dev.gdpa(dev.device, "vkQueuePresentKHR") : NULL;
-    if (!fn || !ci || ci->swapchainCount == 0) return fn ? fn(queue, ci) : VK_ERROR_INITIALIZATION_FAILED;
-    /* CEF and the splash present on other swapchains. Delaying those acquires
-       stalls the UI and drops the GPU to idle. */
-    if (!present_should_pace(ci)) return fn(queue, ci);
-    if (dev.device) remember_queue(queue, dev.device);
-    VkQueue paced = dev.host ? dev.host : queue;
-    Handoff held = handoff(dev, queue, ci);
-    if (!held.release) return fn(queue, ci);
-    start_pacer();
-    if (!enqueue_present(paced, ci, held.release, held.ready)) {
-        Job now;
-        memset(&now, 0, sizeof(now));
-        now.queue = paced;
-        now.release = held.release;
-        now.ready = held.ready;
-        now.swapCount = ci->swapchainCount < MAX_CHAIN ? ci->swapchainCount : MAX_CHAIN;
-        memcpy(now.swaps, ci->pSwapchains, now.swapCount * sizeof(VkSwapchainKHR));
-        memcpy(now.images, ci->pImageIndices, now.swapCount * sizeof(uint32_t));
-        present_job(now);
+    if (!ci || ci->swapchainCount == 0) return fn ? fn(queue, ci) : VK_ERROR_INITIALIZATION_FAILED;
+    if (ci->pSwapchains && host_owns(ci->pSwapchains[0])) {
+        if (!host_accept_present(ci->pSwapchains[0], queue, ci)) return VK_ERROR_OUT_OF_DATE_KHR;
+        note_arrival(ci->pSwapchains[0], now_ns());
+        start_pacer();
+        kick_pacer();
+        if (ci->pResults) {
+            for (uint32_t i = 0; i < ci->swapchainCount; i++) ci->pResults[i] = VK_SUCCESS;
+        }
+        return VK_SUCCESS;
     }
-    if (ci->pResults) {
-        for (uint32_t i = 0; i < ci->swapchainCount; i++) ci->pResults[i] = VK_SUCCESS;
-    }
-    return VK_SUCCESS;
+    if (!fn) return VK_ERROR_INITIALIZATION_FAILED;
+    /* A virtual swapchain is the only paced path. Presenting this queue from
+       the vsync thread SIGSEGV'd in FEXMemJIT. */
+    return fn(queue, ci);
+}
+
+static VkResult VKAPI_CALL create_android_surface(VkInstance instance, const VkAndroidSurfaceCreateInfoKHR *ci,
+        const VkAllocationCallbacks *alloc, VkSurfaceKHR *surface) {
+    Instance inst = instance_for(instance);
+    PFN_vkCreateAndroidSurfaceKHR fn = inst.gipa
+            ? (PFN_vkCreateAndroidSurfaceKHR)inst.gipa(instance, "vkCreateAndroidSurfaceKHR") : NULL;
+    if (!fn) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult result = fn(instance, ci, alloc, surface);
+    if (result == VK_SUCCESS && ci && surface) host_remember_window(*surface, ci->window);
+    return result;
 }
 
 EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance handle, const char *name);
@@ -747,6 +869,9 @@ EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice han
     HOOK("vkDestroySwapchainKHR", destroy_swap);
     HOOK("vkQueuePresentKHR", present);
     HOOK("vkGetDeviceQueue", get_device_queue);
+    HOOK("vkGetSwapchainImagesKHR", get_swap_images);
+    HOOK("vkAcquireNextImageKHR", acquire_next);
+    HOOK("vkAcquireNextImage2KHR", acquire_next2);
     return fn;
 }
 
@@ -755,6 +880,7 @@ EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance
     HOOK("vkGetInstanceProcAddr", vkGetInstanceProcAddr);
     HOOK("vkGetDeviceProcAddr", vkGetDeviceProcAddr);
     HOOK("vkCreateInstance", create_instance);
+    HOOK("vkCreateAndroidSurfaceKHR", create_android_surface);
     if (!handle) return NULL;
     Instance inst = instance_for(handle);
     if (!inst.gipa) return NULL;
@@ -767,6 +893,9 @@ EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance
     HOOK("vkDestroySwapchainKHR", destroy_swap);
     HOOK("vkQueuePresentKHR", present);
     HOOK("vkGetDeviceQueue", get_device_queue);
+    HOOK("vkGetSwapchainImagesKHR", get_swap_images);
+    HOOK("vkAcquireNextImageKHR", acquire_next);
+    HOOK("vkAcquireNextImage2KHR", acquire_next2);
     return fn;
 #undef HOOK
 }

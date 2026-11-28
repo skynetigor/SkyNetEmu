@@ -438,6 +438,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPresentCadence(
     if (r) r->setPresentCadence(enabled == JNI_TRUE);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetGeneratedPresentPeriod(
+    JNIEnv*, jobject, jlong handle, jlong periodNs)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setGeneratedPresentPeriodNs(periodNs);
+}
+
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeGetSupportedPresentModes(
     JNIEnv* env, jobject, jlong handle)

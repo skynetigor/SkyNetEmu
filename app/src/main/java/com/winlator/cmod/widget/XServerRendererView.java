@@ -61,6 +61,10 @@ public abstract class XServerRendererView extends SurfaceView {
         if (displayFrameRate != null) displayFrameRate.setCap(cap);
     }
 
+    protected final void updateGeneratedFps(int rate) {
+        if (displayFrameRate != null) displayFrameRate.setFixedSourceRate(rate);
+    }
+
     public final void setDisplayRateActive(boolean active) {
         if (displayFrameRate != null) displayFrameRate.setActive(active);
     }

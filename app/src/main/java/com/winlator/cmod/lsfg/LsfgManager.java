@@ -456,6 +456,9 @@ public final class LsfgManager {
         String path = env.get("VK_ADD_IMPLICIT_LAYER_PATH");
         env.put("VK_ADD_IMPLICIT_LAYER_PATH", path == null || path.isEmpty() ? dir.getPath() : path + ":" + dir.getPath());
         env.put("SKY_FG_PACE", "1");
+        /* The framegen layer tags its swapchain only when this is set. Without the tag the
+           pacer must ignore the present, or CEF and the splash are delayed too. */
+        env.put("SKY_FG_READY_FENCE", "1");
         Log.i(TAG, "Frame generation paces native presents from the vsync thread");
     }
 
